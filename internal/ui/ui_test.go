@@ -1,1 +1,70 @@
-cGFja2FnZSB1aQoKaW1wb3J0ICgKCSJuZXQvaHR0cC9odHRwdGVzdCIKCSJyZWdleHAiCgkic3RyaW5ncyIKCSJ0ZXN0aW5nIgopCgpmdW5jIFRlc3REYXNoYm9hcmRTZXJ2ZXNSb3V0aW5nRWRpdG9yU2NyaXB0KHQgKnRlc3RpbmcuVCkgewoJciA6PSBodHRwdGVzdC5OZXdSZXF1ZXN0KCJHRVQiLCAiL2FwcC5qcyIsIG5pbCkKCXcgOj0gaHR0cHRlc3QuTmV3UmVjb3JkZXIoKQoJSGFuZGxlcigpLlNlcnZlSFRUUCh3LCByKQoJaWYgdy5Db2RlICE9IDIwMCB7CgkJdC5GYXRhbGYoIkdFVCAvYXBwLmpzIHN0YXR1cz0lZCIsIHcuQ29kZSkKCX0KCWlmIGdvdCA6PSB3LkhlYWRlcigpLkdldCgiQ29udGVudC1UeXBlIik7ICFzdHJpbmdzLkNvbnRhaW5zKGdvdCwgImphdmFzY3JpcHQiKSB7CgkJdC5GYXRhbGYoImFwcC5qcyBjb250ZW50IHR5cGU9JXEiLCBnb3QpCgl9CglpZiAhc3RyaW5ncy5Db250YWlucyh3LkJvZHkuU3RyaW5nKCksICJmdW5jdGlvbiBzYXZlUm91dGluZygpIikgewoJCXQuRmF0YWwoInNlcnZlZCBhcHAuanMgZG9lcyBub3QgY29udGFpbiByb3V0aW5nIGVkaXRvciIpCgl9CglpZiB3LkhlYWRlcigpLkdldCgiQ29udGVudC1TZWN1cml0eS1Qb2xpY3kiKSA9PSAiIiB8fCB3LkhlYWRlcigpLkdldCgiWC1GcmFtZS1PcHRpb25zIikgIT0gIkRFTlkiIHsKCQl0LkZhdGFsZigibWlzc2luZyBkYXNoYm9hcmQgc2VjdXJpdHkgaGVhZGVyczogJXYiLCB3LkhlYWRlcigpKQoJfQp9CgpmdW5jIFRlc3REYXNoYm9hcmRJbmNsdWRlc1BlclByb2ZpbGVTZXJ2ZXJQaWNrZXJXb3JrZmxvdyh0ICp0ZXN0aW5nLlQpIHsKCXNjcmlwdCA6PSBzdHJpbmcobXVzdFJlYWRTdGF0aWModCwgImFwcC5qcyIpKQoJZm9yIF8sIHJlcXVpcmVkIDo9IHJhbmdlIFtdc3RyaW5newoJCWBkYXRhLXByZXZpZXctc2VydmVycz1gLAoJCWAvdjEvcHJvZmlsZXMvcHJldmlld2AsCgkJYC92MS9zZWxlY3Rpb25zYCwKCQlgbWlzc2luZ19waWNrZWRgLAoJCWBtaXNzaW5nX2V4Y2x1ZGVkYCwKCQlgcGlja19tb2RlYCwKCQlgY2xhc3M9InBpY2stbm9kZSJgLAoJCWBjbGFzcz0iZXhjbHVkZS1ub2RlImAsCgl9IHsKCQlpZiAhc3RyaW5ncy5Db250YWlucyhzY3JpcHQsIHJlcXVpcmVkKSB7CgkJCXQuRXJyb3JmKCJkYXNoYm9hcmQgc2VydmVyIHBpY2tlciBpcyBtaXNzaW5nICVxIiwgcmVxdWlyZWQpCgkJfQoJfQp9CgpmdW5jIFRlc3RSb3V0aW5nRWRpdG9yU3BsaXRzTXVsdGlsaW5lVmFsdWVzQ29ycmVjdGx5KHQgKnRlc3RpbmcuVCkgewoJc2NyaXB0IDo9IHN0cmluZyhtdXN0UmVhZFN0YXRpYyh0LCAiYXBwLmpzIikpCgljb25zdCBwYXJzZXIgPSBgU3RyaW5nKGYuZ2V0KCJ2YWx1ZXMiKSkuc3BsaXQoL1tcclxuLF0rLylgCgljb25zdCBtYWxmb3JtZWQgPSBgU3RyaW5nKGYuZ2V0KCJ2YWx1ZXMiKSkuc3BsaXQoL1tcXHJcXG4sXSsvKWAKCWlmICFzdHJpbmdzLkNvbnRhaW5zKHNjcmlwdCwgcGFyc2VyKSB7CgkJdC5GYXRhbGYoInJvdXRpbmcgZWRpdG9yIG11c3Qgc3BsaXQgb24gQ1IvTEYgYW5kIGNvbW1hcyB1c2luZyAlcSIsIHBhcnNlcikKCX0KCWlmIHN0cmluZ3MuQ29udGFpbnMoc2NyaXB0LCBtYWxmb3JtZWQpIHsKCQl0LkZhdGFsZigicm91dGluZyBlZGl0b3Igc3RpbGwgY29udGFpbnMgb3Zlci1lc2NhcGVkIHBhcnNlciAlcSIsIG1hbGZvcm1lZCkKCX0KCS8vIE1pcnJvciB0aGUgSmF2YVNjcmlwdCBjaGFyYWN0ZXItY2xhc3Mgc2VtYW50aWNzIHRvIGd1YXJkIHRoZSBtdWx0aWxpbmUKCS8vIGNvbnRyYWN0IGV2ZW4gb24gYnVpbGQgaG9zdHMgd2l0aG91dCBhbiBpbnN0YWxsZWQgSmF2YVNjcmlwdCBydW50aW1lLgoJcmUsIGVyciA6PSByZWdleHAuQ29tcGlsZShgW1xyXG4sXStgKQoJaWYgZXJyICE9IG5pbCB7CgkJdC5GYXRhbChlcnIpCgl9Cglnb3QgOj0gcmUuU3BsaXQoImRvbWFpbjpvbmUuZXhhbXBsZVxyXG5kb21haW46dHdvLmV4YW1wbGUsZG9tYWluOnRocmVlLmV4YW1wbGUiLCAtMSkKCXdhbnQgOj0gW11zdHJpbmd7ImRvbWFpbjpvbmUuZXhhbXBsZSIsICJkb21haW46dHdvLmV4YW1wbGUiLCAiZG9tYWluOnRocmVlLmV4YW1wbGUifQoJaWYgbGVuKGdvdCkgIT0gbGVuKHdhbnQpIHsKCQl0LkZhdGFsZigic3BsaXQgcmVzdWx0PSVxLCB3YW50ICVxIiwgZ290LCB3YW50KQoJfQoJZm9yIGkgOj0gcmFuZ2Ugd2FudCB7CgkJaWYgZ290W2ldICE9IHdhbnRbaV0gewoJCQl0LkZhdGFsZigic3BsaXQgcmVzdWx0PSVxLCB3YW50ICVxIiwgZ290LCB3YW50KQoJCX0KCX0KfQo=
+package ui
+
+import (
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+func TestDashboardServesRoutingEditorScript(t *testing.T) {
+	r := httptest.NewRequest("GET", "/app.js", nil)
+	w := httptest.NewRecorder()
+	Handler().ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("GET /app.js status=%d", w.Code)
+	}
+	if got := w.Header().Get("Content-Type"); !strings.Contains(got, "javascript") {
+		t.Fatalf("app.js content type=%q", got)
+	}
+	if !strings.Contains(w.Body.String(), "function saveRouting()") {
+		t.Fatal("served app.js does not contain routing editor")
+	}
+	if w.Header().Get("Content-Security-Policy") == "" || w.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("missing dashboard security headers: %v", w.Header())
+	}
+}
+
+func TestDashboardIncludesPerProfileServerPickerWorkflow(t *testing.T) {
+	script := string(mustReadStatic(t, "app.js"))
+	for _, required := range []string{
+		`data-preview-servers=`,
+		`/v1/profiles/preview`,
+		`/v1/selections`,
+		`missing_picked`,
+		`missing_excluded`,
+		`pick_mode`,
+		`class="pick-node"`,
+		`class="exclude-node"`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("dashboard server picker is missing %q", required)
+		}
+	}
+}
+
+func TestRoutingEditorSplitsMultilineValuesCorrectly(t *testing.T) {
+	script := string(mustReadStatic(t, "app.js"))
+	const parser = `String(f.get("values")).split(/[\r\n,]+/)`
+	const malformed = `String(f.get("values")).split(/[\\r\\n,]+/)`
+	if !strings.Contains(script, parser) {
+		t.Fatalf("routing editor must split on CR/LF and commas using %q", parser)
+	}
+	if strings.Contains(script, malformed) {
+		t.Fatalf("routing editor still contains over-escaped parser %q", malformed)
+	}
+	re, err := regexp.Compile(`[\r\n,]+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := re.Split("domain:one.example\r\ndomain:two.example,domain:three.example", -1)
+	want := []string{"domain:one.example", "domain:two.example", "domain:three.example"}
+	if len(got) != len(want) {
+		t.Fatalf("split result=%q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("split result=%q, want %q", got, want)
+		}
+	}
+}
