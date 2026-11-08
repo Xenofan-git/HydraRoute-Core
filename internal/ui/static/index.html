@@ -11,7 +11,7 @@
 <body>
 <div class="app-shell">
   <header class="topbar">
-    <a class="brand" href="#" data-page="connect">
+    <a class="brand" href="#" data-page="hydra">
       <span class="brand-mark">H</span>
       <span><strong>HYDRAROUTE</strong><small>CORE CONTROL</small></span>
     </a>
@@ -25,12 +25,13 @@
     <aside class="sidebar" id="sidebar">
       <div class="side-caption">УПРАВЛЕНИЕ</div>
       <nav class="nav-list">
-        <button class="nav-item active" data-page="connect"><span class="nav-icon">◈</span>Connect</button>
-        <button class="nav-item" data-page="tunnel"><span class="nav-icon">⌁</span>Tunnel</button>
-        <button class="nav-item" data-page="deploy"><span class="nav-icon">⇧</span>Deploy</button>
-        <button class="nav-item" data-page="exclude"><span class="nav-icon">⊘</span>Exclude</button>
-        <button class="nav-item" data-page="logs"><span class="nav-icon">≋</span>Logs</button>
-        <button class="nav-item" data-page="info"><span class="nav-icon">ⓘ</span>Info</button>
+        <button class="nav-item active" data-page="rules"><span class="nav-icon">▦</span>Правила</button>
+        <button class="nav-item" data-page="network"><span class="nav-icon">♧</span>Сеть</button>
+        <button class="nav-item" data-page="dns"><span class="nav-icon">◎</span>DNS</button>
+        <button class="nav-item" data-page="hydra"><span class="nav-icon">☷</span>Hydra</button>
+        <button class="nav-item" data-page="info"><span class="nav-icon">ⓘ</span>Инфо</button>
+        <button class="nav-item" data-page="settings"><span class="nav-icon">⚙</span>Настройки</button>
+        <button class="nav-item" id="logoutButton" type="button"><span class="nav-icon">⇥</span>Выход</button>
       </nav>
       <div class="sidebar-bottom">
         <div class="mini-status"><span class="status-dot" id="runtimeDot"></span><div><b id="runtimeLabel">Runtime неизвестен</b><small id="runtimeSub">Ожидание статуса</small></div></div>
@@ -39,7 +40,7 @@
     </aside>
     <main class="main-content">
       <div class="page-heading">
-        <div><div class="eyebrow" id="pageEyebrow">CONNECT</div><h1 id="pageTitle">Подключения</h1><p id="pageDescription">Профили, индивидуальные SOCKS5 и общий вход</p></div>
+        <div><div class="eyebrow" id="pageEyebrow">ПРАВИЛА</div><h1 id="pageTitle">Правила</h1><p id="pageDescription">Порядок обработки трафика · первое совпадение сверху вниз</p></div>
         <button class="button secondary" id="refreshButton">↻ Обновить</button>
       </div>
       <section id="pageContent" aria-live="polite">
