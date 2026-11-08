@@ -27,6 +27,7 @@ type Profile struct {
 	Listen          string   `json:"listen,omitempty"`
 	Port            uint16   `json:"port"`
 	Strategy        string   `json:"strategy,omitempty"`
+	OutboundInterface string `json:"outbound_interface,omitempty"`
 	Links           []string `json:"links,omitempty"`
 	Subscription    string   `json:"subscription,omitempty"`
 	SubscriptionURL string   `json:"subscription_url,omitempty"`
@@ -39,6 +40,7 @@ type Metadata struct {
 	Listen   string `json:"listen,omitempty"`
 	Port     uint16 `json:"port"`
 	Strategy string `json:"strategy,omitempty"`
+	OutboundInterface string `json:"outbound_interface,omitempty"`
 	Input    string `json:"input"`
 }
 
@@ -283,7 +285,7 @@ func (s *Store) List() ([]Metadata, error) {
 		if p.SubscriptionURL != "" {
 			input = "url"
 		}
-		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, Input: input})
+		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, Input: input})
 	}
 	return out, nil
 }
