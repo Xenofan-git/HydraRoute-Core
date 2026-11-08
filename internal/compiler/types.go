@@ -25,6 +25,12 @@ type Node struct {
 // RoutingConfig optionally adds a dedicated shared SOCKS5 inbound. Its traffic
 // is routed only by Rules and the explicit default action. Profile inbounds
 // remain independently bound to their own balancers.
+type DPIBypass struct {
+	NoiseTraffic          bool `json:"noise_traffic,omitempty"`
+	TLSFragmentation      bool `json:"tls_fragmentation,omitempty"`
+	RandomTLSFingerprint  bool `json:"random_tls_fingerprint,omitempty"`
+}
+
 type RoutingConfig struct {
 	Enabled          bool          `json:"enabled"`
 	Listen           string        `json:"listen,omitempty"`
@@ -32,6 +38,7 @@ type RoutingConfig struct {
 	DefaultAction    string        `json:"default_action"`
 	DefaultProfileID string        `json:"default_profile_id,omitempty"`
 	Rules            []RoutingRule `json:"rules,omitempty"`
+	DPIBypass        DPIBypass     `json:"dpi_bypass,omitempty"`
 }
 
 // RoutingRule is evaluated in slice order; the first matching rule wins.
