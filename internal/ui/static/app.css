@@ -18,3 +18,29 @@
 /* DPI bypass dropdown: opens on hover/focus and can be pinned by tapping. */
 .dpi-card{padding:0;overflow:visible}.dpi-panel{position:relative}.dpi-trigger{width:100%;display:flex;align-items:center;gap:12px;padding:15px 18px;border:0;border-radius:14px;background:transparent;color:var(--text);text-align:left;cursor:pointer}.dpi-trigger-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:11px;background:var(--surface3);color:var(--accent);font-size:23px}.dpi-trigger-copy{display:grid;gap:3px;flex:1}.dpi-trigger-copy b{font-size:13px}.dpi-trigger-copy small{font-size:10px;color:var(--muted)}.dpi-chevron{color:var(--muted);transition:transform .18s}.dpi-panel:hover .dpi-chevron,.dpi-panel:focus-within .dpi-chevron,.dpi-panel.expanded .dpi-chevron{transform:rotate(180deg)}.dpi-options{display:none;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 18px 16px}.dpi-panel:hover .dpi-options,.dpi-panel:focus-within .dpi-options,.dpi-panel.expanded .dpi-options{display:grid}.dpi-option{display:flex;align-items:flex-start;gap:9px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:11px;background:var(--surface2);cursor:pointer}.dpi-option input{margin:2px 0 0;flex:none;accent-color:var(--accent);width:15px;height:15px}.dpi-option span{display:grid;gap:4px}.dpi-option b{font-size:11px;color:var(--text)}.dpi-option small{font-size:10px;line-height:1.45;color:var(--muted)}.dpi-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px}.dpi-note{font-size:10px;color:var(--muted)}.dpi-actions .button{padding:8px 14px}
 @media(max-width:760px){.dpi-options{grid-template-columns:1fr}.dpi-actions{align-items:stretch;flex-direction:column}.dpi-actions .button{width:100%}}
+
+
+/* HRweb-style DPI side popover, aligned to the reference screenshot. */
+.dpi-card{position:relative;padding:0;overflow:visible;min-height:72px}
+.dpi-panel{position:relative;min-height:72px}
+.dpi-trigger{width:58%;min-height:72px;display:flex;align-items:center;gap:12px;padding:14px 20px;border:0;border-radius:14px;background:transparent;color:var(--text);text-align:left;cursor:pointer}
+.dpi-trigger-icon{width:28px;height:28px;display:grid;place-items:center;flex:none;border-radius:50%;background:transparent;color:var(--accent);font-size:22px}
+.dpi-trigger-copy{display:block;flex:1}
+.dpi-trigger-copy b{font-size:14px}
+.dpi-count{font-size:12px;color:var(--muted);white-space:nowrap}
+.dpi-chevron{font-size:20px;color:var(--accent);transition:transform .18s}
+.dpi-panel:hover .dpi-chevron,.dpi-panel:focus-within .dpi-chevron,.dpi-panel.expanded .dpi-chevron{transform:rotate(90deg)}
+.dpi-options{display:none;position:absolute;z-index:30;left:59%;top:50%;transform:translateY(-50%);width:min(440px,calc(100vw - 40px));grid-template-columns:1fr;gap:0;padding:8px 12px;border:1px solid var(--line);border-radius:15px;background:var(--surface);box-shadow:var(--shadow)}
+.dpi-panel:hover .dpi-options,.dpi-panel:focus-within .dpi-options,.dpi-panel.expanded .dpi-options{display:grid}
+.dpi-option{display:flex;align-items:center;gap:13px;min-height:43px;padding:7px 8px;border:0;border-radius:8px;background:transparent;cursor:pointer}
+.dpi-option:hover{background:var(--surface2)}
+.dpi-option input{appearance:none;width:19px;height:19px;flex:none;margin:0;border:1.5px solid var(--accent);border-radius:2px;background:transparent;cursor:pointer}
+.dpi-option input:checked{background:var(--accent);box-shadow:inset 0 0 0 3px var(--surface)}
+.dpi-option span{display:block;font-size:13px;font-weight:650;color:var(--text)}
+.dpi-option input:disabled{opacity:.55}
+@media(max-width:760px){
+ .dpi-trigger{width:100%;min-height:62px;padding:12px 14px}
+ .dpi-options{position:static;transform:none;width:100%;margin:0;padding:6px 12px 10px;box-shadow:none}
+ .dpi-panel.expanded .dpi-options{display:grid}
+ .dpi-panel:not(.expanded):hover .dpi-options{display:none}
+}
