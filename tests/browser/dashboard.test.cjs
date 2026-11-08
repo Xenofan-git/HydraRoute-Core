@@ -113,7 +113,7 @@ test('Russian menu opens on Rules and rules can be reordered by dragging', async
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
-    assert.equal(await page.locator('.nav-item').allTextContents(), ['▦Правила','♧Сеть','◎DNS','☷Hydra','ⓘИнфо','⚙Настройки','⇥Выход']);
+    assert.deepEqual(await page.locator('.nav-item').allTextContents(), ['▦Правила','♧Сеть','◎DNS','☷Hydra','ⓘИнфо','⚙Настройки','⇥Выход']);
     assert.equal(await page.locator('#pageTitle').textContent(), 'Правила');
     assert.equal(await page.locator('.rule-card[data-rule]').count(), 1);
     assert.equal(await page.locator('.rule-drag-handle').count(), 1);
@@ -177,7 +177,7 @@ test('HRNeo navigation order and draggable routing rules are preserved', async (
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
     const nav = await page.locator('.nav-list .nav-item').allTextContents();
-    assert.deepEqual(nav.map(x => x.trim()), ['Правила', 'Сеть', 'DNS', 'Hydra', 'Инфо', 'Настройки', 'Выход']);
+    assert.deepEqual(nav.map(x => x.trim()), ['▦Правила', '♧Сеть', '◎DNS', '☷Hydra', 'ⓘИнфо', '⚙Настройки', '⇥Выход']);
     assert.equal(await page.locator('.nav-item[data-page="rules"]').getAttribute('class').then(v => v.includes('active')), true);
     assert.equal(await page.locator('.rule-card').count(), 2);
     await page.locator('[data-drag-rule="0"]').dragTo(page.locator('.rule-card').nth(1));
