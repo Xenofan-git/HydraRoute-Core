@@ -21,27 +21,27 @@ var sourceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 
 // Profile contains subscription source material. It is encrypted at rest by Store.
 type Profile struct {
-	ID              string   `json:"id"`
-	SourceID        string   `json:"source_id"`
-	Enabled         bool     `json:"enabled"`
-	Listen          string   `json:"listen,omitempty"`
-	Port            uint16   `json:"port"`
-	Strategy        string   `json:"strategy,omitempty"`
-	OutboundInterface string `json:"outbound_interface,omitempty"`
-	Links           []string `json:"links,omitempty"`
-	Subscription    string   `json:"subscription,omitempty"`
-	SubscriptionURL string   `json:"subscription_url,omitempty"`
+	ID                string   `json:"id"`
+	SourceID          string   `json:"source_id"`
+	Enabled           bool     `json:"enabled"`
+	Listen            string   `json:"listen,omitempty"`
+	Port              uint16   `json:"port"`
+	Strategy          string   `json:"strategy,omitempty"`
+	OutboundInterface string   `json:"outbound_interface,omitempty"`
+	Links             []string `json:"links,omitempty"`
+	Subscription      string   `json:"subscription,omitempty"`
+	SubscriptionURL   string   `json:"subscription_url,omitempty"`
 }
 
 type Metadata struct {
-	ID       string `json:"id"`
-	SourceID string `json:"source_id"`
-	Enabled  bool   `json:"enabled"`
-	Listen   string `json:"listen,omitempty"`
-	Port     uint16 `json:"port"`
-	Strategy string `json:"strategy,omitempty"`
+	ID                string `json:"id"`
+	SourceID          string `json:"source_id"`
+	Enabled           bool   `json:"enabled"`
+	Listen            string `json:"listen,omitempty"`
+	Port              uint16 `json:"port"`
+	Strategy          string `json:"strategy,omitempty"`
 	OutboundInterface string `json:"outbound_interface,omitempty"`
-	Input    string `json:"input"`
+	Input             string `json:"input"`
 }
 
 type Store struct{ dir string }
