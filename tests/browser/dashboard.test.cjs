@@ -179,7 +179,7 @@ test('HRNeo navigation order and draggable routing rules are preserved', async (
     assert.equal(await page.locator('.nav-item[data-page="rules"]').getAttribute('class').then(v => v.includes('active')), true);
     assert.equal(await page.locator('.rule-card').count(), 2);
     await page.locator('[data-drag-rule="0"]').dragTo(page.locator('.rule-card').nth(1));
-    assert.equal(await page.locator('.rule-card').first().locator('.rule-name').inputValue(), 'Second');
+    assert.equal((await page.locator('.rule-card').first().locator('.rule-name-text').textContent()).trim(), 'Second');
     await page.locator('#saveRouting').click();
     await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
     assert.deepEqual(savedRouting.rules.map(rule => rule.name), ['Second', 'Sample']);
@@ -195,7 +195,9 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
     await page.locator('.nav-item[data-page="rules"]').click();
+    await page.locator('[data-edit-rule="0"]').click();
     await page.locator('.rule-values').fill('domain:one.example\r\ndomain:two.example,domain:three.example');
+    await page.locator('#ruleEditorForm button[type="submit"]').click();
     await page.locator('#saveRouting').click();
     await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
     assert.deepEqual(savedRouting.rules[0].values, [
