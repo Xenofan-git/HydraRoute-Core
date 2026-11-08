@@ -202,6 +202,27 @@ func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "cannot read previous routing config")
 			return
 		}
+		// Allow users to prepare dormant routing rules before adding their first
+			// profile. Never leave a previously prepared runtime config stale.
+		if !cfg.Enabled {
+			stored, listErr := s.profileStore.ListProfiles()
+			if listErr != nil {
+				writeError(w, http.StatusInternalServerError, "cannot read stored profiles")
+				return
+			}
+			if len(stored) == 0 {
+				if s.supervisor.Status().Configured {
+					writeError(w, http.StatusConflict, "cannot save disabled routing without stored profiles while a runtime config is prepared")
+					return
+				}
+				if err := s.routingStore.Save(cfg); err != nil {
+					writeError(w, http.StatusInternalServerError, "cannot save routing config")
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]any{"routing": cfg, "status": "saved"})
+				return
+			}
+		}
 		if err := s.routingStore.Save(cfg); err != nil {
 			writeError(w, http.StatusInternalServerError, "cannot save routing config")
 			return

@@ -138,6 +138,32 @@ func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	}
 }
 
+func TestRoutingEndpointCanSaveDisabledConfigBeforeProfiles(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	body := `{"enabled":false,"listen":"127.0.0.1","port":16122,"default_action":"block","rules":[{"id":"youtube","name":"YouTube","enabled":false,"match_type":"domain","values":["geosite:youtube"],"action":"profile","profile_id":"not-added-yet"}]}`
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/routing", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var result map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["status"] != "saved" {
+		t.Fatalf("expected deferred save status, got %v", result)
+	}
+	if h.supervisor.Status().Configured {
+		t.Fatal("saving dormant routing before profiles must not prepare an Xray config")
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/routing"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"configured":true`) || !strings.Contains(rr.Body.String(), `"not-added-yet"`) {
+		t.Fatalf("dormant routing config was not preserved: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestRoutingEndpointRollsBackInvalidConfig(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
