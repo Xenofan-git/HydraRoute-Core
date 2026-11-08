@@ -814,3 +814,16 @@ func TestMutationEndpointsRejectDifferentLocalhostOriginPort(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestNetworkInterfacesEndpointReturnsClassifiedHostInterfaces(t *testing.T) {
+	h:=New(apiSupervisor(t))
+	rr:=httptest.NewRecorder()
+	h.mux.ServeHTTP(rr,localGet("/v1/network/interfaces"))
+	if rr.Code!=http.StatusOK { t.Fatalf("status=%d body=%s",rr.Code,rr.Body.String()) }
+	var result struct { Interfaces []struct { Name string `json:"name"`; Category string `json:"category"`; Up bool `json:"up"` } `json:"interfaces"` }
+	if err:=json.Unmarshal(rr.Body.Bytes(),&result); err!=nil { t.Fatal(err) }
+	for _,item:=range result.Interfaces {
+		if item.Name=="" || (item.Category!="vpn" && item.Category!="internet" && item.Category!="other") { t.Fatalf("invalid interface record: %+v",item) }
+		if item.Name=="lo" { t.Fatal("loopback must not be offered as an outbound interface") }
+	}
+}
