@@ -20,6 +20,7 @@ type ProfileInput struct {
 	Listen   string   `json:"listen,omitempty"`
 	Port     uint16   `json:"port"`
 	Strategy string   `json:"strategy,omitempty"`
+	OutboundInterface string `json:"outbound_interface,omitempty"`
 	Picked   []string `json:"picked,omitempty"`
 	Excluded []string `json:"excluded,omitempty"`
 }
@@ -160,7 +161,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 			fail("invalid profile/source identity")
 			continue
 		}
-		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
+		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, OutboundInterface: input.Profile.OutboundInterface, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
 		if !profile.Enabled {
 			compiledProfiles = append(compiledProfiles, profile)
 			continue
