@@ -429,6 +429,10 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 	}
 	wasRunning := s.supervisor.Status().Running
 	shouldRun := wasRunning || s.refreshOpts.AutoStart
+	previousConfig, err := s.supervisor.SnapshotConfig()
+	if err != nil {
+		return nil, fmt.Errorf("cannot snapshot last-good config: %w", err)
+	}
 	if wasRunning {
 		stopCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
 		stopErr := s.supervisor.Stop(stopCtx)
@@ -447,8 +451,45 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 		return nil, fmt.Errorf("refresh config validation failed; previous config retained: %w", prepareErr)
 	}
 	if shouldRun {
-		if err := s.supervisor.Start(context.Background()); err != nil {
-			return nil, fmt.Errorf("new config prepared but Xray start/restart failed: %w", err)
+		startErr := s.supervisor.Start(context.Background())
+		if startErr == nil {
+			// Starting the child does not prove that Xray accepted its ports.
+			// Detect immediate startup exits before reporting refresh success.
+			timer := time.NewTimer(350 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				startErr = ctx.Err()
+			case <-timer.C:
+				if !s.supervisor.Status().Running {
+					startErr = fmt.Errorf("Xray exited immediately after startup")
+				}
+			}
+		}
+		if startErr != nil {
+			if s.supervisor.Status().Running {
+				stopCtx, stopCancel := context.WithTimeout(context.Background(), 7*time.Second)
+				stopErr := s.supervisor.Stop(stopCtx)
+				stopCancel()
+				if stopErr != nil {
+					return nil, fmt.Errorf("new Xray failed and cannot be stopped for rollback: %w", stopErr)
+				}
+			}
+			if len(previousConfig) == 0 {
+				return nil, fmt.Errorf("new Xray startup failed; no previous config to restore: %w", startErr)
+			}
+			restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 20*time.Second)
+			restoreErr := s.supervisor.Prepare(restoreCtx, previousConfig)
+			restoreCancel()
+			if restoreErr != nil {
+				return nil, fmt.Errorf("new Xray startup failed; previous config restore failed: %w", restoreErr)
+			}
+			if wasRunning {
+				if restartErr := s.supervisor.Start(context.Background()); restartErr != nil {
+					return nil, fmt.Errorf("new Xray startup failed; previous config restored but restart failed: %w", restartErr)
+				}
+			}
+			return nil, fmt.Errorf("new Xray startup failed; previous config restored: %w", startErr)
 		}
 	}
 	return map[string]any{"status": "prepared", "profiles": result.ProfileCount, "nodes": result.NodeCount, "bytes": len(result.Config), "runtime": s.supervisor.Status()}, nil
