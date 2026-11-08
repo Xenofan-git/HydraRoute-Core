@@ -1,0 +1,78 @@
+name: HydraRoute Core CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hydraroute-core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Format, test and vet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check formatting
+        shell: bash
+        run: |
+          files="$(gofmt -l $(find cmd internal -type f -name '*.go' -print))"
+          if [[ -n "$files" ]]; then
+            printf 'These Go files are not gofmt-clean:\n%s\n' "$files"
+            exit 1
+          fi
+      - name: Run tests
+        run: go test -count=1 ./...
+      - name: Run go vet
+        run: go vet ./...
+
+  build:
+    name: Build Linux ${{ matrix.arch }}
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build static binaries
+        env:
+          GOARCH: ${{ matrix.arch }}
+          GOOS: linux
+          CGO_ENABLED: 0
+        shell: bash
+        run: |
+          mkdir -p dist
+          for command in hrapi hrcore hrparse; do
+            go build -trimpath -ldflags='-s -w' \
+              -o "dist/${command}-linux-${GOARCH}" "./cmd/${command}"
+          done
+          file dist/*
+          sha256sum dist/*
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hydraroute-core-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

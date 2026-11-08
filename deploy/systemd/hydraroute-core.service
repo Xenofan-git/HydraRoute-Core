@@ -1,0 +1,43 @@
+[Unit]
+Description=HydraRoute Core (isolated Xray profile manager)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=hydraroute
+Group=hydraroute
+StateDirectory=hydraroute
+StateDirectoryMode=0700
+WorkingDirectory=/usr/local/libexec/hydraroute
+Environment=XRAY_LOCATION_ASSET=/usr/local/libexec/hydraroute
+ExecStart=/usr/local/libexec/hydraroute/hrapi -listen 127.0.0.1:17890 -xray /usr/local/libexec/hydraroute/xray -config /var/lib/hydraroute/config/xray.json -state-dir /var/lib/hydraroute/state -restore-config=true -autostart -refresh-interval=6h -retry-min=30s -retry-max=15m
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/hydraroute
+
+[Install]
+WantedBy=multi-user.target
