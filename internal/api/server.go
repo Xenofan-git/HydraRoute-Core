@@ -18,6 +18,7 @@ import (
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
+	"hydraroute.local/core/internal/routeconfig"
 	hrruntime "hydraroute.local/core/internal/runtime"
 	"hydraroute.local/core/internal/service"
 	"hydraroute.local/core/internal/state"
@@ -47,6 +48,7 @@ type Server struct {
 	supervisor   *hrruntime.Supervisor
 	stateDir     string
 	profileStore *profiles.Store
+	routingStore *routeconfig.Store
 	opMu         sync.Mutex
 	refreshMu    sync.Mutex
 	refreshOpts  Options
@@ -75,6 +77,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, mux: http.NewServeMux()}
 	if stateDir != "" {
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
+		s.routingStore = routeconfig.NewStore(stateDir)
 	}
 	s.mux.HandleFunc("/healthz", s.health)
 	s.mux.HandleFunc("/v1/config", s.config)
@@ -83,6 +86,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/profiles/refresh", s.refreshProfiles)
 	s.mux.HandleFunc("/v1/refresh/status", s.refreshStatus)
 	s.mux.HandleFunc("/v1/profiles", s.profileCollection)
+	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
 	return s
 }
@@ -159,6 +163,77 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "runtime": s.supervisor.Status()})
 }
 
+func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
+	if s.routingStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "routing config directory is not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		cfg, found, err := s.routingStore.Load()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot read routing config")
+			return
+		}
+		if !found {
+			cfg = compiler.RoutingConfig{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"routing": cfg, "configured": found})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
+		var cfg compiler.RoutingConfig
+		if err := decodeStrictJSON(w, r, &cfg, 1<<20); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid routing config")
+			return
+		}
+		previous, hadPrevious, err := s.routingStore.Load()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot read previous routing config")
+			return
+		}
+		if err := s.routingStore.Save(cfg); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot save routing config")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		result, err := s.refreshProfilesLocked(ctx)
+		if err != nil {
+			if hadPrevious {
+				_ = s.routingStore.Save(previous)
+			} else {
+				_ = s.routingStore.Delete()
+			}
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"routing": cfg, "apply": result})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func routingReferencesProfile(cfg compiler.RoutingConfig, profileID string) bool {
+	if cfg.DefaultAction == "profile" && cfg.DefaultProfileID == profileID {
+		return true
+	}
+	for _, rule := range cfg.Rules {
+		if rule.Enabled && rule.Action == "profile" && rule.ProfileID == profileID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -216,6 +291,14 @@ func (s *Server) compileSubscription(w http.ResponseWriter, r *http.Request) {
 	if err := decodeStrictJSON(w, r, &req, maxRequestBytes); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid subscription request")
 		return
+	}
+	if s.routingStore != nil {
+		if routing, found, err := s.routingStore.Load(); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot read routing config")
+			return
+		} else if found {
+			req.Routing = &routing
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
@@ -368,6 +451,15 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "stop runtime before deleting a profile")
 			return
 		}
+		if s.routingStore != nil {
+			if routing, found, loadErr := s.routingStore.Load(); loadErr != nil {
+				writeError(w, http.StatusInternalServerError, "cannot inspect shared routing references")
+				return
+			} else if found && routingReferencesProfile(routing, req.ID) {
+				writeError(w, http.StatusConflict, "remove routing rules referencing this profile before deleting it")
+				return
+			}
+		}
 		if err := service.DeleteSelection(s.stateDir, req.ID); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
@@ -423,7 +515,15 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 	for _, p := range stored {
 		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy}, Links: p.Links, Subscription: p.Subscription, SubscriptionURL: p.SubscriptionURL})
 	}
-	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs}, s.stateDir)
+	var routing *compiler.RoutingConfig
+	if s.routingStore != nil {
+		if storedRouting, found, loadErr := s.routingStore.Load(); loadErr != nil {
+			return nil, fmt.Errorf("cannot load shared routing config: %w", loadErr)
+		} else if found {
+			routing = &storedRouting
+		}
+	}
+	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs, Routing: routing}, s.stateDir)
 	if err != nil {
 		return nil, err
 	}

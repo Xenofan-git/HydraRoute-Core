@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/state"
 )
@@ -31,6 +32,21 @@ func TestCompileSubscriptionsIsolatesProfiles(t *testing.T) {
 	if got := len(cfg["inbounds"].([]any)); got != 2 {
 		t.Fatalf("inbounds=%d", got)
 	}
+}
+
+func TestCompileSubscriptionsAppliesSharedRouting(t *testing.T) {
+	req := SubscriptionRequest{
+		Profiles: []ProfileRequest{{Source:"foreign", Profile:ProfileInput{ID:"foreign", Enabled:true, Port:16140},
+			Links:[]string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}},
+		Routing:&compiler.RoutingConfig{Enabled:true, Port:16141, DefaultAction:"block",
+			Rules:[]compiler.RoutingRule{{ID:"local", Name:"Local domains", Enabled:true, MatchType:"domain", Values:[]string{"domain:local.example"}, Action:"direct"}}},
+	}
+	result, err := CompileSubscriptions(context.Background(), req, filepath.Join(t.TempDir(), "state"))
+	if err != nil { t.Fatal(err) }
+	var cfg map[string]any
+	if err := json.Unmarshal(result.Config, &cfg); err != nil { t.Fatal(err) }
+	if len(cfg["inbounds"].([]any)) != 2 { t.Fatalf("expected shared and profile inbounds, got %d", len(cfg["inbounds"].([]any))) }
+	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 3 { t.Fatal("expected profile, user and fallback rules") }
 }
 
 func TestPersistedSelectionAppliedAndManualFailsClosed(t *testing.T) {

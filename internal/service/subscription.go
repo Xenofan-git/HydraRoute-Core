@@ -37,6 +37,7 @@ type SubscriptionRequest struct {
 	Subscription    string           `json:"subscription,omitempty"`
 	SubscriptionURL string           `json:"subscription_url,omitempty"`
 	Profiles        []ProfileRequest `json:"profiles,omitempty"`
+	Routing         *compiler.RoutingConfig `json:"-"`
 }
 
 type CompileResult struct {
@@ -164,7 +165,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 	if len(failures) > 0 {
 		return CompileResult{}, &RefreshError{Failures: failures}
 	}
-	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles})
+	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles, Routing: req.Routing})
 	if err != nil {
 		return CompileResult{}, err
 	}
