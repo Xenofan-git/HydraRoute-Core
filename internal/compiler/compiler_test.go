@@ -326,3 +326,26 @@ func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
 		t.Fatalf("DPI options changed default outbound: %#v", out)
 	}
 }
+
+func TestCompileBindsOutboundsToSelectedInterface(t *testing.T) {
+	for _, tc := range []struct{name, global, profile, want string}{
+		{name:"global",global:"wg0",want:"wg0"},
+		{name:"profile override",global:"eth0",profile:"tailscale0",want:"tailscale0"},
+		{name:"profile only",profile:"enp2s0",want:"enp2s0"},
+	} {
+		t.Run(tc.name,func(t *testing.T){
+			got,err:=Compile(CompileRequest{Profiles:[]Profile{{ID:"iface",Enabled:true,Port:23990,OutboundInterface:tc.profile,Nodes:[]Node{node("n1","vless")}}},Routing:&RoutingConfig{OutboundInterface:tc.global}})
+			if err!=nil { t.Fatal(err) }
+			out:=decode(t,got)["outbounds"].([]any)[2].(map[string]any)
+			stream:=out["streamSettings"].(map[string]any)
+			sock:=stream["sockopt"].(map[string]any)
+			if sock["interface"]!=tc.want { t.Fatalf("interface=%v want %q",sock["interface"],tc.want) }
+		})
+	}
+}
+func TestCompileRejectsInvalidOutboundInterfaceName(t *testing.T) {
+	for _,name:=range []string{"../eth0","interface-name-too-long","bad/name"," bad"} {
+		_,err:=Compile(CompileRequest{Profiles:[]Profile{{ID:"badif",Enabled:true,Port:23991,Nodes:[]Node{node("n1","vless")}}},Routing:&RoutingConfig{OutboundInterface:name}})
+		if err==nil { t.Fatalf("expected invalid interface name %q to be rejected",name) }
+	}
+}
