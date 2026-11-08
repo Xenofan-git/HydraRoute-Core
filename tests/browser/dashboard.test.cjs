@@ -23,6 +23,9 @@ const routing = {
   rules: [{
     id: 'rule-1', name: 'Sample', enabled: true, match_type: 'domain',
     values: ['domain:old.example'], action: 'direct', profile_id: '',
+  }, {
+    id: 'rule-2', name: 'Second', enabled: true, match_type: 'domain',
+    values: ['domain:second.example'], action: 'block', profile_id: '',
   }],
 };
 const preview = {
@@ -104,6 +107,19 @@ after(async () => {
   if (server) await new Promise(resolve => server.close(resolve));
 });
 
+
+test('Russian menu opens on Rules and rules can be reordered by dragging', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    assert.equal(await page.locator('.nav-item').allTextContents(), ['▦Правила','♧Сеть','◎DNS','☷Hydra','ⓘИнфо','⚙Настройки','⇥Выход']);
+    assert.equal(await page.locator('#pageTitle').textContent(), 'Правила');
+    assert.equal(await page.locator('.rule-card[data-rule]').count(), 1);
+    assert.equal(await page.locator('.rule-drag-handle').count(), 1);
+  } finally { await page.close(); }
+});
+
 test('server picker supports manual selection, exclusions and forgotten missing nodes', async () => {
   savedSelection = undefined;
   const page = await browser.newPage();
@@ -152,13 +168,33 @@ test('manual mode refuses an empty pool', async () => {
   }
 });
 
+test('HRNeo navigation order and draggable routing rules are preserved', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    const nav = await page.locator('.nav-list .nav-item').allTextContents();
+    assert.deepEqual(nav.map(x => x.trim()), ['Правила', 'Сеть', 'DNS', 'Hydra', 'Инфо', 'Настройки', 'Выход']);
+    assert.equal(await page.locator('.nav-item[data-page="rules"]').getAttribute('class').then(v => v.includes('active')), true);
+    assert.equal(await page.locator('.rule-card').count(), 2);
+    await page.locator('[data-drag-rule="0"]').dragTo(page.locator('.rule-card').nth(1));
+    assert.equal(await page.locator('.rule-card').first().locator('.rule-name').inputValue(), 'Second');
+    await page.locator('#saveRouting').click();
+    await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
+    assert.deepEqual(savedRouting.rules.map(rule => rule.name), ['Second', 'Sample']);
+  } finally {
+    await page.close();
+  }
+});
+
 test('routing editor splits CRLF, LF and comma-separated values before saving', async () => {
   savedRouting = undefined;
   const page = await browser.newPage();
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
-    await page.locator('.nav-item[data-page="exclude"]').click();
+    await page.locator('.nav-item[data-page="rules"]').click();
     await page.locator('.rule-values').fill('domain:one.example\r\ndomain:two.example,domain:three.example');
     await page.locator('#saveRouting').click();
     await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
