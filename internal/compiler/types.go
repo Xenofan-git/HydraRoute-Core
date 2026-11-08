@@ -10,6 +10,7 @@ type Profile struct {
 	Listen   string   `json:"listen,omitempty"`
 	Port     uint16   `json:"port"`
 	Strategy string   `json:"strategy"`
+	OutboundInterface string `json:"outbound_interface,omitempty"`
 	Nodes    []Node   `json:"nodes"`
 	Picked   []string `json:"picked,omitempty"`
 	Excluded []string `json:"excluded,omitempty"`
@@ -40,6 +41,7 @@ type RoutingConfig struct {
 	Rules            []RoutingRule `json:"rules,omitempty"`
 	DPIBypass        DPIBypass     `json:"dpi_bypass,omitempty"`
 	BalancingStrategy string       `json:"balancing_strategy,omitempty"`
+	OutboundInterface string       `json:"outbound_interface,omitempty"`
 }
 
 // RoutingRule is evaluated in slice order; the first matching rule wins.
