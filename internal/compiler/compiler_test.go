@@ -229,3 +229,51 @@ func TestDisabledSharedRoutingPreservesDormantRules(t *testing.T) {
 		t.Fatalf("disabled shared routing must not emit dormant rules")
 	}
 }
+
+
+func TestCompileAppliesIndependentDPIBypassOptionsToProxyOutbounds(t *testing.T) {
+	profiles := []Profile{{ID: "dpi", Enabled: true, Port: 23040, Nodes: []Node{
+		{Key: "tls", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"tls","tlsSettings":{"serverName":"tls.example","fingerprint":"chrome"}}}`)},
+		{Key: "reality", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"reality","realitySettings":{"serverName":"reality.example","fingerprint":"chrome"}}}`)},
+	}}}
+	routing := &RoutingConfig{DPIBypass: DPIBypass{
+		NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true,
+	}}
+	got, err := Compile(CompileRequest{Profiles: profiles, Routing: routing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	outbounds := cfg["outbounds"].([]any)
+	for _, raw := range outbounds[2:] {
+		out := raw.(map[string]any)
+		stream := out["streamSettings"].(map[string]any)
+		fm := stream["finalmask"].(map[string]any)
+		tcp := fm["tcp"].([]any)
+		udp := fm["udp"].([]any)
+		if len(tcp) != 1 || tcp[0].(map[string]any)["type"] != "fragment" {
+			t.Fatalf("TLS fragmentation missing for %s: %#v", out["tag"], fm)
+		}
+		if len(udp) != 1 || udp[0].(map[string]any)["type"] != "noise" {
+			t.Fatalf("UDP noise missing for %s: %#v", out["tag"], fm)
+		}
+		if tls, ok := stream["tlsSettings"].(map[string]any); ok && tls["fingerprint"] != "random" {
+			t.Fatalf("TLS fingerprint was not randomized: %#v", tls)
+		}
+		if reality, ok := stream["realitySettings"].(map[string]any); ok && reality["fingerprint"] != "random" {
+			t.Fatalf("REALITY fingerprint was not randomized: %#v", reality)
+		}
+	}
+}
+
+func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
+	got, err := Compile(CompileRequest{Profiles: []Profile{{ID: "plain", Enabled: true, Port: 23041, Nodes: []Node{node("plain", "vless")}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	out := cfg["outbounds"].([]any)[2].(map[string]any)
+	if _, exists := out["streamSettings"]; exists {
+		t.Fatalf("DPI options should not modify default outbound: %#v", out)
+	}
+}
