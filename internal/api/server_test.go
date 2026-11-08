@@ -381,6 +381,43 @@ func TestRefreshProfilesRestartsRunningRuntime(t *testing.T) {
 	}
 }
 
+func TestRefreshStartupFailureRollsBackPreviousConfig(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "xray")
+	script := "#!/bin/sh\nif [ \"$2\" = -test ]; then exit 0; fi\nif grep -q hr_in_ \"$3\"; then exit 1; fi\ntrap 'exit 0' TERM\nwhile :; do sleep 0.1; done\n"
+	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "private", "config.json")
+	sup, err := hrruntime.NewSupervisor(bin, configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := []byte(`{"inbounds":[],"outbounds":[]}`)
+	if err := sup.Prepare(context.Background(), previous); err != nil {
+		t.Fatal(err)
+	}
+	if err := sup.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer sup.Stop(context.Background())
+	h := NewWithStateDir(sup, filepath.Join(t.TempDir(), "state"))
+	if err := h.profileStore.Save(profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16174, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge"}}); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/profiles/refresh", `{}`))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected failed refresh, got %d: %s", rr.Code, rr.Body.String())
+	}
+	got, err := os.ReadFile(configPath)
+	if err != nil || string(got) != string(previous) {
+		t.Fatalf("last-good config not restored: %s, err=%v", got, err)
+	}
+	if !sup.Status().Running {
+		t.Fatal("previous Xray runtime was not restarted")
+	}
+}
+
 func TestRefreshFailurePreservesRunningConfig(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "xray")
 	script := "#!/bin/sh\nif [ \"$2\" = -test ]; then exit 0; fi\ntrap 'exit 0' TERM\nwhile :; do sleep 0.1; done\n"
