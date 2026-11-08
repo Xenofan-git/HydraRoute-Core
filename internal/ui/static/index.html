@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#11101d">
+<title>HydraRoute Core</title>
+<link rel="stylesheet" href="/app.css">
+<script defer src="/app.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <a class="brand" href="#" data-page="overview">
+      <span class="brand-mark">H</span>
+      <span><strong>HYDRAROUTE</strong><small>CORE CONTROL</small></span>
+    </a>
+    <div class="top-actions">
+      <span class="connection-pill"><i></i><span id="connectionText">Проверка API</span></span>
+      <button class="icon-button" id="themeToggle" aria-label="Переключить тему" title="Сменить тему">☼</button>
+      <button class="icon-button mobile-menu" id="menuToggle" aria-label="Открыть меню">☰</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="side-caption">УПРАВЛЕНИЕ</div>
+      <nav class="nav-list">
+        <button class="nav-item active" data-page="overview"><span class="nav-icon">◈</span>Обзор</button>
+        <button class="nav-item" data-page="profiles"><span class="nav-icon">▤</span>Профили</button>
+        <button class="nav-item" data-page="routing"><span class="nav-icon">⌘</span>Маршрутизация</button>
+        <button class="nav-item" data-page="logs"><span class="nav-icon">≋</span>Журнал</button>
+        <button class="nav-item" data-page="info"><span class="nav-icon">ⓘ</span>Информация</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="mini-status"><span class="status-dot" id="runtimeDot"></span><div><b id="runtimeLabel">Runtime неизвестен</b><small id="runtimeSub">Ожидание статуса</small></div></div>
+        <small class="version-label">HydraRoute Core · Pre-release</small>
+      </div>
+    </aside>
+    <main class="main-content">
+      <div class="page-heading">
+        <div><div class="eyebrow" id="pageEyebrow">CONTROL CENTER</div><h1 id="pageTitle">Обзор</h1><p id="pageDescription">Состояние системы и активные подключения</p></div>
+        <button class="button secondary" id="refreshButton">↻ Обновить</button>
+      </div>
+      <section id="pageContent" aria-live="polite">
+        <div class="loading-card">Загрузка состояния HydraRoute Core…</div>
+      </section>
+      <footer class="footer">HYDRAROUTE CORE <span>·</span> Независимые профили. Контролируемая маршрутизация.</footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+</div>
+</body>
+</html>

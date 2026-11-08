@@ -52,6 +52,21 @@ func apiSupervisor(t *testing.T) *hrruntime.Supervisor {
 	return s
 }
 
+func TestEmbeddedDashboardServesWithSecurityHeaders(t *testing.T) {
+	h := New(apiSupervisor(t))
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dashboard status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "HYDRAROUTE") {
+		t.Fatal("dashboard HTML was not served")
+	}
+	if rr.Header().Get("Content-Security-Policy") == "" || rr.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("missing dashboard security headers: %v", rr.Header())
+	}
+}
+
 func TestHealthAndMethodHandling(t *testing.T) {
 	h := New(apiSupervisor(t))
 	rr := httptest.NewRecorder()

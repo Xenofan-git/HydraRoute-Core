@@ -22,6 +22,7 @@ import (
 	hrruntime "hydraroute.local/core/internal/runtime"
 	"hydraroute.local/core/internal/service"
 	"hydraroute.local/core/internal/state"
+	"hydraroute.local/core/internal/ui"
 )
 
 const maxRequestBytes = 8 << 20
@@ -88,6 +89,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/profiles", s.profileCollection)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
+	s.mux.Handle("/", ui.Handler())
 	return s
 }
 
