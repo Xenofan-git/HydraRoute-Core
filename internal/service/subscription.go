@@ -31,12 +31,12 @@ type ProfileRequest struct {
 }
 
 type SubscriptionRequest struct {
-	Source          string           `json:"source,omitempty"`
-	Profile         ProfileInput     `json:"profile,omitempty"`
-	Links           []string         `json:"links,omitempty"`
-	Subscription    string           `json:"subscription,omitempty"`
-	SubscriptionURL string           `json:"subscription_url,omitempty"`
-	Profiles        []ProfileRequest `json:"profiles,omitempty"`
+	Source          string                  `json:"source,omitempty"`
+	Profile         ProfileInput            `json:"profile,omitempty"`
+	Links           []string                `json:"links,omitempty"`
+	Subscription    string                  `json:"subscription,omitempty"`
+	SubscriptionURL string                  `json:"subscription_url,omitempty"`
+	Profiles        []ProfileRequest        `json:"profiles,omitempty"`
 	Routing         *compiler.RoutingConfig `json:"-"`
 }
 

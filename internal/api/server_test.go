@@ -90,39 +90,61 @@ func TestConfigEndpointCompilesAndPreparesOnly(t *testing.T) {
 func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
-	profile := profiles.Profile{ID:"foreign", SourceID:"providerA", Enabled:true, Port:16120,
-		Links:[]string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
-	if err := h.profileStore.Save(profile); err != nil { t.Fatal(err) }
+	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16120,
+		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
 	body := `{"enabled":true,"listen":"127.0.0.1","port":16121,"default_action":"block","rules":[{"id":"ru","name":"Russian services","enabled":true,"match_type":"domain","values":["geosite:category-ru"],"action":"direct"}]}`
 	rr := httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localPut("/v1/routing", body))
-	if rr.Code != http.StatusOK { t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String()) }
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
 	config, err := h.supervisor.SnapshotConfig()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var compiled map[string]any
-	if err := json.Unmarshal(config, &compiled); err != nil { t.Fatal(err) }
-	if got := len(compiled["inbounds"].([]any)); got != 2 { t.Fatalf("expected profile and shared inbounds, got %d", got) }
+	if err := json.Unmarshal(config, &compiled); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(compiled["inbounds"].([]any)); got != 2 {
+		t.Fatalf("expected profile and shared inbounds, got %d", got)
+	}
 	rules := compiled["routing"].(map[string]any)["rules"].([]any)
-	if got := len(rules); got != 3 { t.Fatalf("expected profile, custom and default rules, got %d", got) }
+	if got := len(rules); got != 3 {
+		t.Fatalf("expected profile, custom and default rules, got %d", got)
+	}
 	rr = httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localGet("/v1/routing"))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"configured":true`) { t.Fatalf("GET status=%d body=%s", rr.Code, rr.Body.String()) }
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"configured":true`) {
+		t.Fatalf("GET status=%d body=%s", rr.Code, rr.Body.String())
+	}
 }
 
 func TestRoutingEndpointRollsBackInvalidConfig(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
-	profile := profiles.Profile{ID:"foreign", SourceID:"providerA", Enabled:true, Port:16130,
-		Links:[]string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
-	if err := h.profileStore.Save(profile); err != nil { t.Fatal(err) }
+	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16130,
+		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
 	body := `{"enabled":true,"port":16131,"default_action":"profile","default_profile_id":"missing"}`
 	rr := httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localPut("/v1/routing", body))
-	if rr.Code != http.StatusUnprocessableEntity { t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String()) }
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
 	rr = httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localGet("/v1/routing"))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"configured":false`) { t.Fatalf("failed update was not rolled back: status=%d body=%s", rr.Code, rr.Body.String()) }
-	if h.supervisor.Status().Configured { t.Fatal("invalid routing config must not be prepared") }
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"configured":false`) {
+		t.Fatalf("failed update was not rolled back: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if h.supervisor.Status().Configured {
+		t.Fatal("invalid routing config must not be prepared")
+	}
 }
 
 func TestRuntimeEndpointRequiresPreparedConfig(t *testing.T) {
