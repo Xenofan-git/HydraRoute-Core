@@ -203,7 +203,7 @@ func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Allow users to prepare dormant routing rules before adding their first
-			// profile. Never leave a previously prepared runtime config stale.
+		// profile. Never leave a previously prepared runtime config stale.
 		if !cfg.Enabled {
 			stored, listErr := s.profileStore.ListProfiles()
 			if listErr != nil {
