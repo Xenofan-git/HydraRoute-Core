@@ -37,6 +37,18 @@ jobs:
         run: node --check internal/ui/static/app.js
       - name: Run tests
         run: go test -count=1 ./...
+      - name: Validate generated Xray routing config
+        shell: bash
+        run: |
+          set -euo pipefail
+          xray_version=26.10.31
+          xray_zip="$RUNNER_TEMP/Xray-linux-64.zip"
+          curl -fsSL --retry 3 -o "$xray_zip" "https://github.com/XTLS/Xray-core/releases/download/v${xray_version}/Xray-linux-64.zip"
+          echo "e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214  $xray_zip" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/xray"
+          unzip -q "$xray_zip" -d "$RUNNER_TEMP/xray"
+          go run ./cmd/hrcore -input internal/compiler/testdata/shared-routing.json -output "$RUNNER_TEMP/shared-routing.json"
+          (cd "$RUNNER_TEMP/xray" && XRAY_LOCATION_ASSET="$RUNNER_TEMP/xray" ./xray run -test -config "$RUNNER_TEMP/shared-routing.json")
       - name: Run go vet
         run: go vet ./...
 

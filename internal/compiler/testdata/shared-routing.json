@@ -1,0 +1,65 @@
+{
+  "profiles": [
+    {
+      "id": "youtube",
+      "enabled": true,
+      "listen": "127.0.0.1",
+      "port": 16090,
+      "strategy": "leastPing",
+      "nodes": [
+        {
+          "key": "test-node",
+          "outbound": {
+            "protocol": "freedom",
+            "settings": {}
+          }
+        }
+      ]
+    }
+  ],
+  "routing": {
+    "enabled": true,
+    "listen": "127.0.0.1",
+    "port": 16080,
+    "default_action": "block",
+    "rules": [
+      {
+        "id": "youtube",
+        "name": "YouTube",
+        "enabled": true,
+        "match_type": "domain",
+        "values": [
+          "geosite:youtube",
+          "domain:youtube.com",
+          "full:www.youtube.com",
+          "keyword:googlevideo",
+          "regexp:^.*\\.ytimg\\.com$"
+        ],
+        "action": "profile",
+        "profile_id": "youtube"
+      },
+      {
+        "id": "private",
+        "name": "Private networks",
+        "enabled": true,
+        "match_type": "ip",
+        "values": [
+          "geoip:private",
+          "10.0.0.0/8",
+          "192.168.0.0/16"
+        ],
+        "action": "direct"
+      },
+      {
+        "id": "ads",
+        "name": "Block test domains",
+        "enabled": true,
+        "match_type": "domain",
+        "values": [
+          "domain:ads.example"
+        ],
+        "action": "block"
+      }
+    ]
+  }
+}
