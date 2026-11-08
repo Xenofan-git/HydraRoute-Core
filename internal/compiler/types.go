@@ -26,12 +26,12 @@ type Node struct {
 // is routed only by Rules and the explicit default action. Profile inbounds
 // remain independently bound to their own balancers.
 type RoutingConfig struct {
-	Enabled           bool          `json:"enabled"`
-	Listen            string        `json:"listen,omitempty"`
-	Port              uint16        `json:"port"`
-	DefaultAction     string        `json:"default_action"`
-	DefaultProfileID  string        `json:"default_profile_id,omitempty"`
-	Rules             []RoutingRule `json:"rules,omitempty"`
+	Enabled          bool          `json:"enabled"`
+	Listen           string        `json:"listen,omitempty"`
+	Port             uint16        `json:"port"`
+	DefaultAction    string        `json:"default_action"`
+	DefaultProfileID string        `json:"default_profile_id,omitempty"`
+	Rules            []RoutingRule `json:"rules,omitempty"`
 }
 
 // RoutingRule is evaluated in slice order; the first matching rule wins.

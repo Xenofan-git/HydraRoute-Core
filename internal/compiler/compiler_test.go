@@ -175,7 +175,7 @@ func TestCompileSharedSOCKSOrderedRulesAndExplicitDefault(t *testing.T) {
 func TestSharedSOCKSRejectsUnsafeFallbackAndInvalidTargets(t *testing.T) {
 	base := CompileRequest{
 		Profiles: []Profile{{ID: "ok", Enabled: true, Port: 23101, Nodes: []Node{node("n1", "vless")}}},
-		Routing: &RoutingConfig{Enabled: true, Port: 23100, DefaultAction: "profile", DefaultProfileID: "missing"},
+		Routing:  &RoutingConfig{Enabled: true, Port: 23100, DefaultAction: "profile", DefaultProfileID: "missing"},
 	}
 	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "not enabled") {
 		t.Fatalf("expected invalid default profile rejection, got %v", err)
@@ -191,7 +191,7 @@ func TestSharedSOCKSRejectsUnsafeFallbackAndInvalidTargets(t *testing.T) {
 func TestSharedSOCKSRejectsPortCollisionAndNonLoopback(t *testing.T) {
 	req := CompileRequest{
 		Profiles: []Profile{{ID: "p", Enabled: true, Port: 23200, Nodes: []Node{node("n", "vless")}}},
-		Routing: &RoutingConfig{Enabled: true, Listen: "0.0.0.0", Port: 23200, DefaultAction: "block"},
+		Routing:  &RoutingConfig{Enabled: true, Listen: "0.0.0.0", Port: 23200, DefaultAction: "block"},
 	}
 	if _, err := Compile(req); err == nil || !strings.Contains(err.Error(), "duplicate port") {
 		t.Fatalf("expected duplicate port rejection, got %v", err)
@@ -205,7 +205,7 @@ func TestSharedSOCKSRejectsPortCollisionAndNonLoopback(t *testing.T) {
 func TestDisabledSharedRoutingRejectsDormantRules(t *testing.T) {
 	req := CompileRequest{
 		Profiles: []Profile{{ID: "p", Enabled: true, Port: 23300, Nodes: []Node{node("n", "vless")}}},
-		Routing: &RoutingConfig{Enabled: false, Rules: []RoutingRule{{ID: "r", Enabled: true}}},
+		Routing:  &RoutingConfig{Enabled: false, Rules: []RoutingRule{{ID: "r", Enabled: true}}},
 	}
 	if _, err := Compile(req); err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("expected disabled routing config rejection, got %v", err)

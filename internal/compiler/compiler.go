@@ -222,10 +222,10 @@ func Compile(req CompileRequest) ([]byte, error) {
 	}
 
 	cfg := map[string]any{
-		"log":      map[string]any{"loglevel": "warning"},
-		"inbounds": inbounds,
+		"log":       map[string]any{"loglevel": "warning"},
+		"inbounds":  inbounds,
 		"outbounds": outbounds,
-		"routing": map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers},
+		"routing":   map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers},
 	}
 	if len(inbounds) > 0 {
 		cfg["observatory"] = map[string]any{
