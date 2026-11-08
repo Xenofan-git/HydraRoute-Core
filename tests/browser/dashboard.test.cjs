@@ -209,6 +209,28 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     await page.close();
   }
 });
+test('balancing selector opens on hover and persists exactly one of three modes', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="network"]').click();
+    await page.locator('#balanceToggle').hover();
+    await page.locator('#balanceOptions').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('input[name="balancingStrategy"]:checked').inputValue(), 'leastPing');
+    await page.locator('input[name="balancingStrategy"][value="random"]').check();
+    await page.waitForFunction(() => window.document.querySelector('#balanceCurrent')?.textContent === 'Случайный сервер');
+    await page.waitForFunction(() => window.document.querySelector('input[name="balancingStrategy"][value="random"]')?.disabled === false);
+    assert.equal(savedRouting.balancing_strategy, 'random');
+    assert.equal(await page.locator('input[name="balancingStrategy"]:checked').count(), 1);
+    await page.locator('input[name="balancingStrategy"][value="roundRobin"]').check();
+    await page.waitForFunction(() => window.document.querySelector('#balanceCurrent')?.textContent === 'По кругу');
+    assert.equal(savedRouting.balancing_strategy, 'roundRobin');
+    assert.equal(await page.locator('input[name="balancingStrategy"]:checked').count(), 1);
+  } finally { await page.close(); }
+});
+
 test('DPI bypass options open as a side popover and persist each independent toggle', async () => {
   savedRouting = undefined;
   const page = await browser.newPage();
