@@ -161,3 +161,7 @@ No license has been added yet. Until a license is published, the source is not g
 ---
 
 **HydraRoute Core** — independent profiles, controlled routing, and Xray-based load balancing.
+
+### Dashboard browser tests
+
+The CI test job runs Playwright against the embedded dashboard assets with a local API fixture. It exercises manual server selection, mutually exclusive Picked/Excluded state, retention and explicit removal of missing server identities, empty manual-pool rejection, and CR/LF/comma parsing in the routing editor. The browser is Chromium headless; the test fixture does not start Xray or modify host networking.
