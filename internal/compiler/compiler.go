@@ -99,7 +99,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s node %q: outbound protocol is missing", p.ID, n.Key)
 			}
 			applyDPIBypass(outbound, dpiBypass)
-			applyDPIBypass(outbound, dpiBypass)
 			h := sha256.Sum256([]byte(p.ID + "\x00" + n.Key))
 			tag := "hr_" + p.ID + "_" + hex.EncodeToString(h[:6])
 			outbound["tag"] = tag
@@ -231,6 +230,22 @@ func Compile(req CompileRequest) ([]byte, error) {
 		"outbounds": outbounds,
 		"routing":   map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers},
 	}
+	if req.DNS != nil && req.DNS.Enabled {
+		listen := req.DNS.Listen
+		if listen == "" {
+			listen = "127.0.0.1"
+		}
+		ip := net.ParseIP(listen)
+		if ip == nil || !ip.IsLoopback() {
+			return nil, fmt.Errorf("Core DNS listen address %q is not loopback", listen)
+		}
+		if req.DNS.Port < 1024 {
+			return nil, fmt.Errorf("Core DNS port %d is outside allowed range 1024-65535", req.DNS.Port)
+		}
+		cfg["dns"] = map[string]any{
+			"servers": []any{map[string]any{"address": listen, "port": req.DNS.Port}},
+		}
+	}
 	if len(inbounds) > 0 {
 		cfg["observatory"] = map[string]any{
 			"subjectSelector": allOutboundTags,
@@ -358,39 +373,20 @@ func applyDPIBypass(outbound map[string]any, options DPIBypass) {
 		}
 	}
 	if options.TLSFragmentation || options.NoiseTraffic {
-		finalmask, ok := stream["finalmask"].(map[string]any)
+		fm, ok := stream["finalmask"].(map[string]any)
 		if !ok {
-			finalmask = map[string]any{}
-			stream["finalmask"] = finalmask
+			fm = map[string]any{}
+			stream["finalmask"] = fm
 		}
 		if options.TLSFragmentation {
-			tcp, _ := finalmask["tcp"].([]any)
-			tcp = append(tcp, map[string]any{
-				"type": "fragment",
-				"settings": map[string]any{
-					"packets":  "tlshello",
-					"lengths":  []string{"10-20"},
-					"delays":   []string{"1-2"},
-					"maxSplit": "3-6",
-				},
-			})
-			finalmask["tcp"] = tcp
+			tcp, _ := fm["tcp"].([]any)
+			tcp = append(tcp, map[string]any{"type": "fragment", "settings": map[string]any{"packets": "tlshello", "lengths": []string{"10-20"}, "delays": []string{"1-2"}, "maxSplit": "3-6"}})
+			fm["tcp"] = tcp
 		}
 		if options.NoiseTraffic {
-			udp, _ := finalmask["udp"].([]any)
-			udp = append(udp, map[string]any{
-				"type": "noise",
-				"settings": map[string]any{
-					"reset": "30-60",
-					"noise": []any{map[string]any{
-						"rand": "50-100", "randRange": "0-255", "delay": "10-20",
-					}},
-				},
-			})
-			finalmask["udp"] = udp
+			udp, _ := fm["udp"].([]any)
+			udp = append(udp, map[string]any{"type": "noise", "settings": map[string]any{"reset": "30-60", "noise": []any{map[string]any{"rand": "50-100", "randRange": "0-255", "delay": "10-20"}}}})
+			fm["udp"] = udp
 		}
 	}
 }
-
-// applyDPIBypass decorates each eligible proxy's first-hop transport. It only
-// touches the generated Xray object; it never changes host routes or firewall.
