@@ -53,7 +53,16 @@ type RoutingRule struct {
 	ProfileID string   `json:"profile_id,omitempty"`
 }
 
+// DNSConfig connects only the managed HydraRoute Xray process to the local
+// Core DNS service. It never changes the host resolver configuration.
+type DNSConfig struct {
+	Enabled bool   `json:"enabled"`
+	Listen  string `json:"listen"`
+	Port    uint16 `json:"port"`
+}
+
 type CompileRequest struct {
 	Profiles []Profile      `json:"profiles"`
 	Routing  *RoutingConfig `json:"routing,omitempty"`
+	DNS      *DNSConfig     `json:"dns,omitempty"`
 }
