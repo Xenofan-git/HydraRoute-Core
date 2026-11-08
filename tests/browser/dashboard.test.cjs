@@ -65,6 +65,7 @@ before(async () => {
     try {
       if (url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
       if (url.pathname === '/v1/runtime') return json(res, 200, { running: false, configured: false });
+      if (url.pathname === '/v1/network/interfaces') return json(res, 200, { interfaces: [{ name: 'wg0', category: 'vpn', kind: 'VPN / туннель', up: true, addresses: ['10.0.0.2/32'] }, { name: 'eth0', category: 'internet', kind: 'Физическая сеть', up: true, addresses: ['192.0.2.2/24'] }] });
       if (url.pathname === '/v1/profiles' && req.method === 'GET') return json(res, 200, { profiles });
       if (url.pathname === '/v1/routing' && req.method === 'GET') return json(res, 200, { routing, configured: false });
       if (url.pathname === '/v1/refresh/status') return json(res, 200, { enabled: false, running: false, consecutive_failures: 0 });
@@ -248,5 +249,22 @@ test('DPI bypass options open as a side popover and persist each independent tog
     }
     assert.equal(await page.locator('#dpiCount').textContent(), '2 из 3');
     assert.deepEqual(savedRouting.dpi_bypass, { noise_traffic: true, tls_fragmentation: true, random_tls_fingerprint: false });
+  } finally { await page.close(); }
+});
+
+test('outgoing interface picker discovers Linux interfaces and persists a selected binding', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="network"]').click();
+    await page.locator('#outgoingInterfaceToggle').hover();
+    await page.locator('#outgoingPicker').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#interfaceCountVpn').textContent(), '1');
+    await page.locator('[data-interface-category="vpn"]').click();
+    await page.locator('[data-interface-select="wg0"]').click();
+    await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
+    assert.equal(savedRouting.outbound_interface, 'wg0');
   } finally { await page.close(); }
 });
