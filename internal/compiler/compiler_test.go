@@ -57,6 +57,36 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 	}
 }
 
+func TestSharedBalancingStrategyOverridesEveryProfileBalancer(t *testing.T) {
+	for _, strategy := range []string{"leastPing", "random", "roundRobin"} {
+		got, err := Compile(CompileRequest{
+			Profiles: []Profile{
+				{ID: "alpha", Enabled: true, Port: 23501, Strategy: "random", Nodes: []Node{node("a1", "vless")}},
+				{ID: "beta", Enabled: true, Port: 23502, Strategy: "leastPing", Nodes: []Node{node("b1", "trojan")}},
+			},
+			Routing: &RoutingConfig{BalancingStrategy: strategy},
+		})
+		if err != nil { t.Fatalf("%s: %v", strategy, err) }
+		balancers := decode(t, got)["routing"].(map[string]any)["balancers"].([]any)
+		if len(balancers) != 2 { t.Fatalf("%s: want two balancers, got %d", strategy, len(balancers)) }
+		for _, raw := range balancers {
+			balancer := raw.(map[string]any)
+			actual := balancer["strategy"].(map[string]any)["type"]
+			if actual != strategy { t.Fatalf("%s: balancer %s uses %v", strategy, balancer["tag"], actual) }
+		}
+	}
+}
+
+func TestRejectsUnknownSharedBalancingStrategy(t *testing.T) {
+	_, err := Compile(CompileRequest{
+		Profiles: []Profile{{ID: "alpha", Enabled: true, Port: 23503, Nodes: []Node{node("a1", "vless")}}},
+		Routing: &RoutingConfig{BalancingStrategy: "fastest"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported shared balancing strategy") {
+		t.Fatalf("expected unsupported shared strategy rejection, got %v", err)
+	}
+}
+
 func TestEmptyPickedMeansAutomaticPool(t *testing.T) {
 	got, err := Compile(CompileRequest{Profiles: []Profile{{
 		ID: "auto", Enabled: true, Port: 23003,
