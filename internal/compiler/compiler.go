@@ -39,10 +39,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 	if req.Routing != nil {
 		dpiBypass = req.Routing.DPIBypass
 	}
-	var dpiBypass DPIBypass
-	if req.Routing != nil {
-		dpiBypass = req.Routing.DPIBypass
-	}
 
 	for _, p := range profiles {
 		if !p.Enabled {
