@@ -117,7 +117,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 		balTag := "hr_bal_" + p.ID
 		inbounds = append(inbounds, map[string]any{
 			"tag": inTag, "listen": listen, "port": p.Port, "protocol": "socks",
-			"settings": map[string]any{"auth": "noauth", "udp": false},
+			"settings": map[string]any{"auth": "noauth", "udp": true},
 		})
 		outbounds = append(outbounds, eligible...)
 		rules = append(rules, map[string]any{
@@ -160,7 +160,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 			sharedTag := "hr_shared_in"
 			inbounds = append(inbounds, map[string]any{
 				"tag": sharedTag, "listen": listen, "port": routing.Port, "protocol": "socks",
-				"settings": map[string]any{"auth": "noauth", "udp": false},
+				"settings": map[string]any{"auth": "noauth", "udp": true},
 			})
 			seenRuleIDs := map[string]bool{}
 			for i, rule := range routing.Rules {
