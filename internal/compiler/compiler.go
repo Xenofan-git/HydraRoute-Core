@@ -110,6 +110,9 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s node %q: outbound protocol is missing", p.ID, n.Key)
 			}
 			applyDPIBypass(outbound, dpiBypass)
+			iface := p.OutboundInterface
+			if iface == "" && req.Routing != nil { iface = req.Routing.OutboundInterface }
+			if iface != "" { if err := applyOutboundInterface(outbound, iface); err != nil { return nil, fmt.Errorf("profile %s node %q: %w", p.ID, n.Key, err) } }
 			h := sha256.Sum256([]byte(p.ID + "\x00" + n.Key))
 			tag := "hr_" + p.ID + "_" + hex.EncodeToString(h[:6])
 			outbound["tag"] = tag
@@ -350,6 +353,13 @@ func stringSet(items []string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// applyOutboundInterface binds Xray first-hop sockets to a Linux interface only.
+func applyOutboundInterface(outbound map[string]any, iface string) error {
+	if len(iface)>15 || strings.TrimSpace(iface)!=iface || iface=="." || iface==".." || strings.ContainsAny(iface, "/\\x00") { return fmt.Errorf("invalid outbound interface name %q",iface) }
+	stream,ok:=outbound["streamSettings"].(map[string]any); if !ok { stream=map[string]any{}; outbound["streamSettings"]=stream }
+	sockopt,ok:=stream["sockopt"].(map[string]any); if !ok { sockopt=map[string]any{}; stream["sockopt"]=sockopt }; sockopt["interface"]=iface; return nil
 }
 
 // ValidateJSON checks that the compiler output remains valid JSON.
