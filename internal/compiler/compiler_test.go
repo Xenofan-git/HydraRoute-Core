@@ -54,6 +54,10 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 		if in["listen"] != "127.0.0.1" {
 			t.Fatalf("non-loopback listener: %v", in["listen"])
 		}
+		settings := in["settings"].(map[string]any)
+		if settings["udp"] != true {
+			t.Fatalf("SOCKS5 UDP relay must be enabled to match HRNeo semantics: %#v", settings)
+		}
 	}
 }
 
@@ -145,6 +149,12 @@ func TestCompileSharedSOCKSOrderedRulesAndExplicitDefault(t *testing.T) {
 	inbounds := cfg["inbounds"].([]any)
 	if len(inbounds) != 3 {
 		t.Fatalf("want 2 profile inbounds plus shared inbound, got %d", len(inbounds))
+	}
+	for _, raw := range inbounds {
+		settings := raw.(map[string]any)["settings"].(map[string]any)
+		if settings["udp"] != true {
+			t.Fatal("all profile and shared SOCKS5 inbounds must enable UDP relay")
+		}
 	}
 	routing := cfg["routing"].(map[string]any)
 	if routing["domainStrategy"] != "IPIfNonMatch" {
