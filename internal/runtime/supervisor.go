@@ -144,6 +144,24 @@ func (s *Supervisor) Prepare(ctx context.Context, config []byte) error {
 	return nil
 }
 
+// SnapshotConfig returns the last prepared config for rollback during refresh.
+// The API serializes refresh operations with its operation mutex.
+func (s *Supervisor) SnapshotConfig() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.configured {
+		return nil, nil
+	}
+	info, err := os.Lstat(s.configPath)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return nil, fmt.Errorf("prepared config is not a private regular file")
+	}
+	return os.ReadFile(s.configPath)
+}
+
 func (s *Supervisor) Start(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
