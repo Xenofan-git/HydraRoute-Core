@@ -66,13 +66,19 @@ func TestSharedBalancingStrategyOverridesEveryProfileBalancer(t *testing.T) {
 			},
 			Routing: &RoutingConfig{BalancingStrategy: strategy},
 		})
-		if err != nil { t.Fatalf("%s: %v", strategy, err) }
+		if err != nil {
+			t.Fatalf("%s: %v", strategy, err)
+		}
 		balancers := decode(t, got)["routing"].(map[string]any)["balancers"].([]any)
-		if len(balancers) != 2 { t.Fatalf("%s: want two balancers, got %d", strategy, len(balancers)) }
+		if len(balancers) != 2 {
+			t.Fatalf("%s: want two balancers, got %d", strategy, len(balancers))
+		}
 		for _, raw := range balancers {
 			balancer := raw.(map[string]any)
 			actual := balancer["strategy"].(map[string]any)["type"]
-			if actual != strategy { t.Fatalf("%s: balancer %s uses %v", strategy, balancer["tag"], actual) }
+			if actual != strategy {
+				t.Fatalf("%s: balancer %s uses %v", strategy, balancer["tag"], actual)
+			}
 		}
 	}
 }
@@ -80,7 +86,7 @@ func TestSharedBalancingStrategyOverridesEveryProfileBalancer(t *testing.T) {
 func TestRejectsUnknownSharedBalancingStrategy(t *testing.T) {
 	_, err := Compile(CompileRequest{
 		Profiles: []Profile{{ID: "alpha", Enabled: true, Port: 23503, Nodes: []Node{node("a1", "vless")}}},
-		Routing: &RoutingConfig{BalancingStrategy: "fastest"},
+		Routing:  &RoutingConfig{BalancingStrategy: "fastest"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported shared balancing strategy") {
 		t.Fatalf("expected unsupported shared strategy rejection, got %v", err)
@@ -328,24 +334,30 @@ func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
 }
 
 func TestCompileBindsOutboundsToSelectedInterface(t *testing.T) {
-	for _, tc := range []struct{name, global, profile, want string}{
-		{name:"global",global:"wg0",want:"wg0"},
-		{name:"profile override",global:"eth0",profile:"tailscale0",want:"tailscale0"},
-		{name:"profile only",profile:"enp2s0",want:"enp2s0"},
+	for _, tc := range []struct{ name, global, profile, want string }{
+		{name: "global", global: "wg0", want: "wg0"},
+		{name: "profile override", global: "eth0", profile: "tailscale0", want: "tailscale0"},
+		{name: "profile only", profile: "enp2s0", want: "enp2s0"},
 	} {
-		t.Run(tc.name,func(t *testing.T){
-			got,err:=Compile(CompileRequest{Profiles:[]Profile{{ID:"iface",Enabled:true,Port:23990,OutboundInterface:tc.profile,Nodes:[]Node{node("n1","vless")}}},Routing:&RoutingConfig{OutboundInterface:tc.global}})
-			if err!=nil { t.Fatal(err) }
-			out:=decode(t,got)["outbounds"].([]any)[2].(map[string]any)
-			stream:=out["streamSettings"].(map[string]any)
-			sock:=stream["sockopt"].(map[string]any)
-			if sock["interface"]!=tc.want { t.Fatalf("interface=%v want %q",sock["interface"],tc.want) }
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Compile(CompileRequest{Profiles: []Profile{{ID: "iface", Enabled: true, Port: 23990, OutboundInterface: tc.profile, Nodes: []Node{node("n1", "vless")}}}, Routing: &RoutingConfig{OutboundInterface: tc.global}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := decode(t, got)["outbounds"].([]any)[2].(map[string]any)
+			stream := out["streamSettings"].(map[string]any)
+			sock := stream["sockopt"].(map[string]any)
+			if sock["interface"] != tc.want {
+				t.Fatalf("interface=%v want %q", sock["interface"], tc.want)
+			}
 		})
 	}
 }
 func TestCompileRejectsInvalidOutboundInterfaceName(t *testing.T) {
-	for _,name:=range []string{"../eth0","interface-name-too-long","bad/name"," bad"} {
-		_,err:=Compile(CompileRequest{Profiles:[]Profile{{ID:"badif",Enabled:true,Port:23991,Nodes:[]Node{node("n1","vless")}}},Routing:&RoutingConfig{OutboundInterface:name}})
-		if err==nil { t.Fatalf("expected invalid interface name %q to be rejected",name) }
+	for _, name := range []string{"../eth0", "interface-name-too-long", "bad/name", " bad"} {
+		_, err := Compile(CompileRequest{Profiles: []Profile{{ID: "badif", Enabled: true, Port: 23991, Nodes: []Node{node("n1", "vless")}}}, Routing: &RoutingConfig{OutboundInterface: name}})
+		if err == nil {
+			t.Fatalf("expected invalid interface name %q to be rejected", name)
+		}
 	}
 }
