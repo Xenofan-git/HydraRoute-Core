@@ -39,6 +39,10 @@ func Compile(req CompileRequest) ([]byte, error) {
 	if req.Routing != nil {
 		dpiBypass = req.Routing.DPIBypass
 	}
+	var dpiBypass DPIBypass
+	if req.Routing != nil {
+		dpiBypass = req.Routing.DPIBypass
+	}
 
 	for _, p := range profiles {
 		if !p.Enabled {
@@ -98,6 +102,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 			if _, ok := outbound["protocol"]; !ok {
 				return nil, fmt.Errorf("profile %s node %q: outbound protocol is missing", p.ID, n.Key)
 			}
+			applyDPIBypass(outbound, dpiBypass)
 			applyDPIBypass(outbound, dpiBypass)
 			h := sha256.Sum256([]byte(p.ID + "\x00" + n.Key))
 			tag := "hr_" + p.ID + "_" + hex.EncodeToString(h[:6])
@@ -335,6 +340,61 @@ func ValidateJSON(data []byte) error {
 		return errors.New("empty JSON document")
 	}
 	return nil
+}
+
+
+// applyDPIBypass decorates each eligible proxy's first-hop transport. It only
+// touches the generated Xray object; it never changes host routes or firewall.
+func applyDPIBypass(outbound map[string]any, options DPIBypass) {
+	if !options.NoiseTraffic && !options.TLSFragmentation && !options.RandomTLSFingerprint {
+		return
+	}
+	stream, ok := outbound["streamSettings"].(map[string]any)
+	if !ok {
+		stream = map[string]any{}
+		outbound["streamSettings"] = stream
+	}
+	if options.RandomTLSFingerprint {
+		if tls, ok := stream["tlsSettings"].(map[string]any); ok {
+			tls["fingerprint"] = "random"
+		}
+		if reality, ok := stream["realitySettings"].(map[string]any); ok {
+			reality["fingerprint"] = "random"
+		}
+	}
+	if options.TLSFragmentation || options.NoiseTraffic {
+		finalmask, ok := stream["finalmask"].(map[string]any)
+		if !ok {
+			finalmask = map[string]any{}
+			stream["finalmask"] = finalmask
+		}
+		if options.TLSFragmentation {
+			tcp, _ := finalmask["tcp"].([]any)
+			tcp = append(tcp, map[string]any{
+				"type": "fragment",
+				"settings": map[string]any{
+					"packets": "tlshello",
+					"lengths": []string{"10-20"},
+					"delays": []string{"1-2"},
+					"maxSplit": "3-6",
+				},
+			})
+			finalmask["tcp"] = tcp
+		}
+		if options.NoiseTraffic {
+			udp, _ := finalmask["udp"].([]any)
+			udp = append(udp, map[string]any{
+				"type": "noise",
+				"settings": map[string]any{
+					"reset": "30-60",
+					"noise": []any{map[string]any{
+						"rand": "50-100", "randRange": "0-255", "delay": "10-20",
+					}},
+				},
+			})
+			finalmask["udp"] = udp
+		}
+	}
 }
 
 
