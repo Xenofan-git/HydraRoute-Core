@@ -18,30 +18,39 @@ const maxProfileBytes = 8 << 20
 
 var profileIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
 var sourceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+var outboundInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`)
 
 // Profile contains subscription source material. It is encrypted at rest by Store.
+type DPIBypass struct {
+	NoiseTraffic         bool `json:"noise_traffic,omitempty"`
+	TLSFragmentation     bool `json:"tls_fragmentation,omitempty"`
+	RandomTLSFingerprint bool `json:"random_tls_fingerprint,omitempty"`
+}
+
 type Profile struct {
-	ID                string   `json:"id"`
-	SourceID          string   `json:"source_id"`
-	Enabled           bool     `json:"enabled"`
-	Listen            string   `json:"listen,omitempty"`
-	Port              uint16   `json:"port"`
-	Strategy          string   `json:"strategy,omitempty"`
-	OutboundInterface string   `json:"outbound_interface,omitempty"`
-	Links             []string `json:"links,omitempty"`
-	Subscription      string   `json:"subscription,omitempty"`
-	SubscriptionURL   string   `json:"subscription_url,omitempty"`
+	ID                string    `json:"id"`
+	SourceID          string    `json:"source_id"`
+	Enabled           bool      `json:"enabled"`
+	Listen            string    `json:"listen,omitempty"`
+	Port              uint16    `json:"port"`
+	Strategy          string    `json:"strategy,omitempty"`
+	OutboundInterface string    `json:"outbound_interface,omitempty"`
+	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
+	Links             []string  `json:"links,omitempty"`
+	Subscription      string    `json:"subscription,omitempty"`
+	SubscriptionURL   string    `json:"subscription_url,omitempty"`
 }
 
 type Metadata struct {
-	ID                string `json:"id"`
-	SourceID          string `json:"source_id"`
-	Enabled           bool   `json:"enabled"`
-	Listen            string `json:"listen,omitempty"`
-	Port              uint16 `json:"port"`
-	Strategy          string `json:"strategy,omitempty"`
-	OutboundInterface string `json:"outbound_interface,omitempty"`
-	Input             string `json:"input"`
+	ID                string    `json:"id"`
+	SourceID          string    `json:"source_id"`
+	Enabled           bool      `json:"enabled"`
+	Listen            string    `json:"listen,omitempty"`
+	Port              uint16    `json:"port"`
+	Strategy          string    `json:"strategy,omitempty"`
+	OutboundInterface string    `json:"outbound_interface,omitempty"`
+	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
+	Input             string    `json:"input"`
 }
 
 type Store struct{ dir string }
@@ -54,6 +63,12 @@ func Validate(p Profile) error {
 	}
 	if !sourceIDPattern.MatchString(p.SourceID) {
 		return fmt.Errorf("invalid source id")
+	}
+	if p.Strategy != "" && p.Strategy != "leastPing" && p.Strategy != "roundRobin" && p.Strategy != "random" {
+		return fmt.Errorf("invalid balancing strategy")
+	}
+	if p.OutboundInterface != "" && !outboundInterfacePattern.MatchString(p.OutboundInterface) {
+		return fmt.Errorf("invalid outbound interface name")
 	}
 	inputs := 0
 	if len(p.Links) > 0 {
@@ -285,7 +300,7 @@ func (s *Store) List() ([]Metadata, error) {
 		if p.SubscriptionURL != "" {
 			input = "url"
 		}
-		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, Input: input})
+		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: p.DPIBypass, Input: input})
 	}
 	return out, nil
 }

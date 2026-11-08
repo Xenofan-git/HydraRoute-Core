@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -107,11 +109,11 @@ func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
 	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16120,
-		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
+		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}, DPIBypass: profiles.DPIBypass{NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true}}
 	if err := h.profileStore.Save(profile); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"enabled":true,"listen":"127.0.0.1","port":16121,"default_action":"block","dpi_bypass":{"noise_traffic":true,"tls_fragmentation":true,"random_tls_fingerprint":true},"rules":[{"id":"ru","name":"Russian services","enabled":true,"match_type":"domain","values":["geosite:category-ru"],"action":"direct"}]}`
+	body := `{"enabled":true,"listen":"127.0.0.1","port":16121,"default_action":"block","rules":[{"id":"ru","name":"Russian services","enabled":true,"match_type":"domain","values":["geosite:category-ru"],"action":"direct"}]}`
 	rr := httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localPut("/v1/routing", body))
 	if rr.Code != http.StatusOK {
@@ -815,29 +817,91 @@ func TestMutationEndpointsRejectDifferentLocalhostOriginPort(t *testing.T) {
 	}
 }
 
-func TestNetworkInterfacesEndpointReturnsClassifiedHostInterfaces(t *testing.T) {
+func TestProfileSettingsArePersistedPerProfileAndExposedWithoutSecrets(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	for i, id := range []string{"alpha", "beta"} {
+		if err := h.profileStore.Save(profiles.Profile{ID: id, SourceID: "providerA", Enabled: true, Port: uint16(16180 + i), Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	available, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ifaceName := ""
+	for _, candidate := range available {
+		if candidate.Flags&net.FlagLoopback == 0 {
+			ifaceName = candidate.Name
+			break
+		}
+	}
+	if ifaceName == "" {
+		t.Skip("no selectable network interface in test environment")
+	}
+	body := fmt.Sprintf(`{"id":"alpha","strategy":"roundRobin","outbound_interface":%q,"dpi_bypass":{"noise_traffic":true,"tls_fragmentation":false,"random_tls_fingerprint":true}}`, ifaceName)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/profiles", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	a, err := h.profileStore.Get("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := h.profileStore.Get("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Strategy != "roundRobin" || a.OutboundInterface != ifaceName || !a.DPIBypass.NoiseTraffic || !a.DPIBypass.RandomTLSFingerprint {
+		t.Fatalf("alpha settings not saved: %+v", a)
+	}
+	if b.Strategy != "" || b.OutboundInterface != "" || b.DPIBypass != (profiles.DPIBypass{}) {
+		t.Fatalf("settings leaked into beta: %+v", b)
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/profiles"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"outbound_interface":"`+ifaceName+`"`) || !strings.Contains(rr.Body.String(), `"noise_traffic":true`) {
+		t.Fatalf("profile metadata did not expose settings: %s", rr.Body.String())
+	}
+	if _, err := h.refreshProfilesLocked(context.Background()); err != nil {
+		t.Fatalf("profile settings failed to compile through refresh: %v", err)
+	}
+	config, err := h.supervisor.SnapshotConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compiled map[string]any
+	if err := json.Unmarshal(config, &compiled); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range compiled["outbounds"].([]any) {
+		out := raw.(map[string]any)
+		tag, _ := out["tag"].(string)
+		stream, _ := out["streamSettings"].(map[string]any)
+		if strings.HasPrefix(tag, "hr_alpha_") {
+			sock, _ := stream["sockopt"].(map[string]any)
+			fm, _ := stream["finalmask"].(map[string]any)
+			if sock["interface"] != ifaceName || fm["udp"] == nil {
+				t.Fatalf("alpha options missing from compiled Xray outbound: %#v", out)
+			}
+		}
+		if strings.HasPrefix(tag, "hr_beta_") {
+			if _, ok := stream["finalmask"]; ok {
+				t.Fatalf("alpha DPI settings leaked into beta outbound: %#v", out)
+			}
+		}
+	}
+}
+
+func TestInterfaceListIsReadOnlyAndLoopbackIsExcluded(t *testing.T) {
 	h := New(apiSupervisor(t))
 	rr := httptest.NewRecorder()
-	h.mux.ServeHTTP(rr, localGet("/v1/network/interfaces"))
+	h.mux.ServeHTTP(rr, localGet("/v1/interfaces"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	var result struct {
-		Interfaces []struct {
-			Name     string `json:"name"`
-			Category string `json:"category"`
-			Up       bool   `json:"up"`
-		} `json:"interfaces"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range result.Interfaces {
-		if item.Name == "" || (item.Category != "vpn" && item.Category != "internet" && item.Category != "other") {
-			t.Fatalf("invalid interface record: %+v", item)
-		}
-		if item.Name == "lo" {
-			t.Fatal("loopback must not be offered as an outbound interface")
-		}
+	if strings.Contains(rr.Body.String(), `"name":"lo"`) {
+		t.Fatalf("loopback should not be selectable: %s", rr.Body.String())
 	}
 }

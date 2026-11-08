@@ -15,14 +15,15 @@ import (
 )
 
 type ProfileInput struct {
-	ID                string   `json:"id"`
-	Enabled           bool     `json:"enabled"`
-	Listen            string   `json:"listen,omitempty"`
-	Port              uint16   `json:"port"`
-	Strategy          string   `json:"strategy,omitempty"`
-	OutboundInterface string   `json:"outbound_interface,omitempty"`
-	Picked            []string `json:"picked,omitempty"`
-	Excluded          []string `json:"excluded,omitempty"`
+	ID                string             `json:"id"`
+	Enabled           bool               `json:"enabled"`
+	Listen            string             `json:"listen,omitempty"`
+	Port              uint16             `json:"port"`
+	Strategy          string             `json:"strategy,omitempty"`
+	OutboundInterface string             `json:"outbound_interface,omitempty"`
+	DPIBypass         compiler.DPIBypass `json:"dpi_bypass,omitempty"`
+	Picked            []string           `json:"picked,omitempty"`
+	Excluded          []string           `json:"excluded,omitempty"`
 }
 
 type ProfileRequest struct {
@@ -41,6 +42,7 @@ type SubscriptionRequest struct {
 	SubscriptionURL string                  `json:"subscription_url,omitempty"`
 	Profiles        []ProfileRequest        `json:"profiles,omitempty"`
 	Routing         *compiler.RoutingConfig `json:"-"`
+	DNS             *compiler.DNSConfig     `json:"-"`
 }
 
 type CompileResult struct {
@@ -161,7 +163,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 			fail("invalid profile/source identity")
 			continue
 		}
-		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, OutboundInterface: input.Profile.OutboundInterface, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
+		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, OutboundInterface: input.Profile.OutboundInterface, DPIBypass: input.Profile.DPIBypass, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
 		if !profile.Enabled {
 			compiledProfiles = append(compiledProfiles, profile)
 			continue
@@ -240,7 +242,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 	if len(failures) > 0 {
 		return CompileResult{}, &RefreshError{Failures: failures}
 	}
-	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles, Routing: req.Routing})
+	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles, Routing: req.Routing, DNS: req.DNS})
 	if err != nil {
 		return CompileResult{}, err
 	}

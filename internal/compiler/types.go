@@ -5,15 +5,16 @@ import "encoding/json"
 // Profile is an independent proxy interface. Empty Picked means automatic mode:
 // every supported pool member not listed in Excluded is eligible.
 type Profile struct {
-	ID                string   `json:"id"`
-	Enabled           bool     `json:"enabled"`
-	Listen            string   `json:"listen,omitempty"`
-	Port              uint16   `json:"port"`
-	Strategy          string   `json:"strategy"`
-	OutboundInterface string   `json:"outbound_interface,omitempty"`
-	Nodes             []Node   `json:"nodes"`
-	Picked            []string `json:"picked,omitempty"`
-	Excluded          []string `json:"excluded,omitempty"`
+	ID                string    `json:"id"`
+	Enabled           bool      `json:"enabled"`
+	Listen            string    `json:"listen,omitempty"`
+	Port              uint16    `json:"port"`
+	Strategy          string    `json:"strategy"`
+	OutboundInterface string    `json:"outbound_interface,omitempty"`
+	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
+	Nodes             []Node    `json:"nodes"`
+	Picked            []string  `json:"picked,omitempty"`
+	Excluded          []string  `json:"excluded,omitempty"`
 }
 
 // Node contains a stable identity and a validated Xray outbound object.
@@ -33,15 +34,12 @@ type DPIBypass struct {
 }
 
 type RoutingConfig struct {
-	Enabled           bool          `json:"enabled"`
-	Listen            string        `json:"listen,omitempty"`
-	Port              uint16        `json:"port"`
-	DefaultAction     string        `json:"default_action"`
-	DefaultProfileID  string        `json:"default_profile_id,omitempty"`
-	Rules             []RoutingRule `json:"rules,omitempty"`
-	DPIBypass         DPIBypass     `json:"dpi_bypass,omitempty"`
-	BalancingStrategy string        `json:"balancing_strategy,omitempty"`
-	OutboundInterface string        `json:"outbound_interface,omitempty"`
+	Enabled          bool          `json:"enabled"`
+	Listen           string        `json:"listen,omitempty"`
+	Port             uint16        `json:"port"`
+	DefaultAction    string        `json:"default_action"`
+	DefaultProfileID string        `json:"default_profile_id,omitempty"`
+	Rules            []RoutingRule `json:"rules,omitempty"`
 }
 
 // RoutingRule is evaluated in slice order; the first matching rule wins.

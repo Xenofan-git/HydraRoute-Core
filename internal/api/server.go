@@ -5,17 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/net/proxy"
 	"io"
 	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"hydraroute.local/core/internal/compiler"
+	"hydraroute.local/core/internal/dnsservice"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
 	"hydraroute.local/core/internal/routeconfig"
@@ -50,6 +54,7 @@ type Server struct {
 	stateDir     string
 	profileStore *profiles.Store
 	routingStore *routeconfig.Store
+	dns          *dnsservice.Manager
 	opMu         sync.Mutex
 	refreshMu    sync.Mutex
 	refreshOpts  Options
@@ -79,6 +84,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if stateDir != "" {
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
+		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
 	}
 	s.mux.HandleFunc("/healthz", s.health)
 	s.mux.HandleFunc("/v1/config", s.config)
@@ -86,11 +92,15 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/selections", s.selections)
 	s.mux.HandleFunc("/v1/profiles/refresh", s.refreshProfiles)
 	s.mux.HandleFunc("/v1/profiles/preview", s.profilePreview)
+	s.mux.HandleFunc("/v1/profiles/test", s.profileTest)
 	s.mux.HandleFunc("/v1/refresh/status", s.refreshStatus)
 	s.mux.HandleFunc("/v1/profiles", s.profileCollection)
+	s.mux.HandleFunc("/v1/interfaces", s.interfaces)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
-	s.mux.HandleFunc("/v1/network/interfaces", s.networkInterfaces)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
+	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
+	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
+	s.mux.HandleFunc("/v1/dns/check", s.dnsCheck)
 	s.mux.Handle("/", ui.Handler())
 	return s
 }
@@ -110,6 +120,11 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
 		return fmt.Errorf("API listen address must be a literal loopback IP")
+	}
+	if s.dns != nil && s.dns.Config().Enabled {
+		if err := s.dns.Start(); err != nil {
+			return fmt.Errorf("start saved DNS service: %w", err)
+		}
 	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -137,6 +152,9 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		return err
 	case <-ctx.Done():
+		if s.dns != nil {
+			_ = s.dns.Stop()
+		}
 		schedulerCancel()
 		<-schedulerDone
 		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -165,54 +183,6 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "runtime": s.supervisor.Status()})
-}
-
-type networkInterface struct {
-	Name      string   `json:"name"`
-	Category  string   `json:"category"`
-	Kind      string   `json:"kind"`
-	Up        bool     `json:"up"`
-	Addresses []string `json:"addresses"`
-}
-
-func (s *Server) networkInterfaces(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w)
-		return
-	}
-	if !validLocalReadRequest(r) {
-		writeError(w, http.StatusForbidden, "local request required")
-		return
-	}
-	items, err := net.Interfaces()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot enumerate network interfaces")
-		return
-	}
-	out := make([]networkInterface, 0, len(items))
-	for _, item := range items {
-		if item.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		name, lower := item.Name, strings.ToLower(item.Name)
-		category, kind := "other", "Виртуальный / прочий"
-		switch {
-		case strings.HasPrefix(lower, "wg") || strings.HasPrefix(lower, "tun") || strings.HasPrefix(lower, "tap") || lower == "tailscale0" || strings.HasPrefix(lower, "zt"):
-			category, kind = "vpn", "VPN / туннель"
-		case strings.HasPrefix(lower, "eth") || strings.HasPrefix(lower, "en") || strings.HasPrefix(lower, "wlan") || strings.HasPrefix(lower, "wl") || strings.HasPrefix(lower, "wwan") || strings.HasPrefix(lower, "usb"):
-			category, kind = "internet", "Физическая сеть"
-		case strings.HasPrefix(lower, "br") || strings.HasPrefix(lower, "docker") || strings.HasPrefix(lower, "veth") || strings.Contains(lower, "."):
-			category, kind = "other", "Bridge / VLAN / виртуальный"
-		}
-		addresses := make([]string, 0)
-		if addrs, e := item.Addrs(); e == nil {
-			for _, a := range addrs {
-				addresses = append(addresses, a.String())
-			}
-		}
-		out = append(out, networkInterface{Name: name, Category: category, Kind: kind, Up: item.Flags&net.FlagUp != 0, Addresses: addresses})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"interfaces": out})
 }
 
 func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
@@ -336,6 +306,7 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "request must contain one JSON value")
 		return
 	}
+	req.DNS = s.coreDNSConfig()
 	compiled, err := compiler.Compile(req)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -370,6 +341,7 @@ func (s *Server) compileSubscription(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid subscription request")
 		return
 	}
+	req.DNS = s.coreDNSConfig()
 	if s.routingStore != nil {
 		if routing, found, err := s.routingStore.Load(); err != nil {
 			writeError(w, http.StatusInternalServerError, "cannot read routing config")
@@ -477,6 +449,74 @@ func validLocalReadRequest(r *http.Request) bool {
 	return !strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site")
 }
 
+type networkInterfaceDTO struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Up       bool   `json:"up"`
+	Loopback bool   `json:"loopback"`
+}
+
+// interfaces exposes read-only Linux network-device metadata. It never changes routes or link state.
+func (s *Server) interfaces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	items, err := net.Interfaces()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot enumerate network interfaces")
+		return
+	}
+	defaultIf := defaultRouteInterface()
+	result := make([]networkInterfaceDTO, 0, len(items))
+	for _, item := range items {
+		if item.Name == "lo" || item.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		iface := networkInterfaceDTO{Name: item.Name, Up: item.Flags&net.FlagUp != 0, Loopback: false, Category: "Остальное"}
+		lower := strings.ToLower(item.Name)
+		if item.Flags&net.FlagPointToPoint != 0 || strings.HasPrefix(lower, "tun") || strings.HasPrefix(lower, "tap") || strings.HasPrefix(lower, "wg") || strings.HasPrefix(lower, "tailscale") || strings.HasPrefix(lower, "ppp") || strings.HasPrefix(lower, "vpn") {
+			iface.Category = "VPN"
+		} else if item.Name == defaultIf || strings.HasPrefix(lower, "eth") || strings.HasPrefix(lower, "en") || strings.HasPrefix(lower, "wlan") || strings.HasPrefix(lower, "wlp") || strings.HasPrefix(lower, "wwan") || strings.HasPrefix(lower, "usb") {
+			iface.Category = "Интернет"
+		}
+		result = append(result, iface)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"interfaces": result, "default_interface": defaultIf})
+}
+
+func defaultRouteInterface() string {
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 3 && fields[1] == "00000000" {
+			flags, _ := strconv.ParseInt(fields[3], 16, 64)
+			if flags&1 != 0 {
+				return fields[0]
+			}
+		}
+	}
+	return ""
+}
+
+func validateOutboundInterface(name string) error {
+	if name == "" {
+		return nil
+	}
+	iface, err := net.InterfaceByName(name)
+	if err != nil || iface.Flags&net.FlagLoopback != 0 {
+		return fmt.Errorf("unknown or unsupported outbound interface")
+	}
+	return nil
+}
+
 func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 	if s.profileStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "profile store is not configured")
@@ -506,11 +546,81 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid profile request")
 			return
 		}
+		if err := validateOutboundInterface(p.OutboundInterface); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		if err := s.profileStore.Save(p); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "profile_id": p.ID})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
+		var req struct {
+			ID                string              `json:"id"`
+			Enabled           *bool               `json:"enabled,omitempty"`
+			Port              *uint16             `json:"port,omitempty"`
+			Strategy          *string             `json:"strategy,omitempty"`
+			OutboundInterface *string             `json:"outbound_interface,omitempty"`
+			DPIBypass         *profiles.DPIBypass `json:"dpi_bypass,omitempty"`
+		}
+		if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid profile update")
+			return
+		}
+		p, err := s.profileStore.Get(req.ID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "profile not found")
+			return
+		}
+		previous := p
+		if req.Enabled != nil {
+			p.Enabled = *req.Enabled
+		}
+		if req.Port != nil {
+			p.Port = *req.Port
+		}
+		if req.Strategy != nil {
+			p.Strategy = *req.Strategy
+		}
+		if req.OutboundInterface != nil {
+			p.OutboundInterface = strings.TrimSpace(*req.OutboundInterface)
+		}
+		if err := validateOutboundInterface(p.OutboundInterface); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		if req.DPIBypass != nil {
+			p.DPIBypass = *req.DPIBypass
+		}
+		if err := profiles.Validate(p); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		if p.Port < 1024 || (p.Strategy != "" && p.Strategy != "leastPing" && p.Strategy != "roundRobin" && p.Strategy != "random") {
+			writeError(w, http.StatusUnprocessableEntity, "invalid profile port or balancing strategy")
+			return
+		}
+		if err := s.profileStore.Save(p); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot save profile settings")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+		defer cancel()
+		if s.supervisor.Status().Configured {
+			if _, err := s.refreshProfilesLocked(ctx); err != nil {
+				_ = s.profileStore.Save(previous)
+				writeError(w, http.StatusUnprocessableEntity, "profile update was rolled back: "+err.Error())
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "profile_id": p.ID, "enabled": p.Enabled, "port": p.Port, "strategy": p.Strategy, "outbound_interface": p.OutboundInterface, "dpi_bypass": p.DPIBypass, "runtime": s.supervisor.Status()})
 	case http.MethodDelete:
 		if !validLocalJSONRequest(r) {
 			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
@@ -550,6 +660,57 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+// profileTest measures TCP reachability through one enabled profile SOCKS5
+// inbound. It never tests through the host's default route directly.
+func (s *Server) profileTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalJSONRequest(r) {
+		writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+		return
+	}
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid profile test request")
+		return
+	}
+	if !s.supervisor.Status().Running {
+		writeError(w, http.StatusConflict, "start Xray before testing a connection")
+		return
+	}
+	p, err := s.profileStore.Get(req.ID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "profile not found")
+		return
+	}
+	if !p.Enabled {
+		writeError(w, http.StatusConflict, "connection is disabled")
+		return
+	}
+	address := net.JoinHostPort(p.Listen, fmt.Sprint(p.Port))
+	if p.Listen == "" {
+		address = net.JoinHostPort("127.0.0.1", fmt.Sprint(p.Port))
+	}
+	dialer, err := proxy.SOCKS5("tcp", address, nil, &net.Dialer{Timeout: 8 * time.Second})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "cannot initialize SOCKS5 test")
+		return
+	}
+	started := time.Now()
+	conn, err := dialer.Dial("tcp", "www.gstatic.com:443")
+	elapsed := time.Since(started).Milliseconds()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "unavailable", "latency_ms": nil, "error": "connection test through SOCKS5 failed"})
+		return
+	}
+	_ = conn.Close()
+	writeJSON(w, http.StatusOK, map[string]any{"status": "online", "latency_ms": elapsed, "target": "www.gstatic.com:443"})
 }
 
 func (s *Server) profilePreview(w http.ResponseWriter, r *http.Request) {
@@ -628,7 +789,10 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 	}
 	inputs := make([]service.ProfileRequest, 0, len(stored))
 	for _, p := range stored {
-		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy}, Links: p.Links, Subscription: p.Subscription, SubscriptionURL: p.SubscriptionURL})
+		if err := validateOutboundInterface(p.OutboundInterface); err != nil {
+			return nil, fmt.Errorf("profile %s: %w", p.ID, err)
+		}
+		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: compiler.DPIBypass{NoiseTraffic: p.DPIBypass.NoiseTraffic, TLSFragmentation: p.DPIBypass.TLSFragmentation, RandomTLSFingerprint: p.DPIBypass.RandomTLSFingerprint}}, Links: p.Links, Subscription: p.Subscription, SubscriptionURL: p.SubscriptionURL})
 	}
 	var routing *compiler.RoutingConfig
 	if s.routingStore != nil {
@@ -638,7 +802,7 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 			routing = &storedRouting
 		}
 	}
-	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs, Routing: routing}, s.stateDir)
+	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs, Routing: routing, DNS: s.coreDNSConfig()}, s.stateDir)
 	if err != nil {
 		return nil, err
 	}
@@ -869,4 +1033,207 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (s *Server) coreDNSConfig() *compiler.DNSConfig {
+	if s.dns == nil {
+		return nil
+	}
+	c := s.dns.Config()
+	if !c.Enabled {
+		return nil
+	}
+	return &compiler.DNSConfig{Enabled: true, Listen: c.Listen, Port: uint16(c.Port)}
+}
+
+// applyCoreDNSRuntime updates only the managed Xray config. The host resolver,
+// NetworkManager, routes and firewall are never touched. If Xray is running,
+// it is restarted with the new per-Core DNS setting and rolled back on error.
+func (s *Server) applyCoreDNSRuntime(enabled bool) error {
+	previous, err := s.supervisor.SnapshotConfig()
+	if err != nil || len(previous) == 0 {
+		return err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(previous, &cfg); err != nil {
+		return fmt.Errorf("cannot read prepared Xray config: %w", err)
+	}
+	if enabled {
+		d := s.coreDNSConfig()
+		if d == nil {
+			return fmt.Errorf("Core DNS settings are not enabled")
+		}
+		cfg["dns"] = map[string]any{"servers": []any{map[string]any{"address": d.Listen, "port": d.Port}}}
+	} else {
+		delete(cfg, "dns")
+	}
+	next, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	wasRunning := s.supervisor.Status().Running
+	if wasRunning {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		err = s.supervisor.Stop(ctx)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("cannot stop Xray to apply Core DNS: %w", err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	err = s.supervisor.Prepare(ctx, next)
+	if err == nil && wasRunning {
+		err = s.supervisor.Start(ctx)
+	}
+	if err != nil {
+		rollbackErr := s.supervisor.Prepare(ctx, previous)
+		if rollbackErr == nil && wasRunning {
+			rollbackErr = s.supervisor.Start(ctx)
+		}
+		cancel()
+		if rollbackErr != nil {
+			return fmt.Errorf("apply Core DNS failed: %v; rollback failed: %w", err, rollbackErr)
+		}
+		return fmt.Errorf("apply Core DNS failed; previous Xray config restored: %w", err)
+	}
+	cancel()
+	return nil
+}
+
+func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
+	if s.dns == nil {
+		writeError(w, 503, "DNS state directory is not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, 403, "local request required")
+			return
+		}
+		c := s.dns.Config()
+		det := s.dns.Detect()
+		if c.AutoProvider {
+			c.ProviderName = det["provider_name"].(string)
+			c.ProviderServers = det["provider_servers"].([]string)
+		}
+		status := s.dns.Status()
+		status["provider_name"] = c.ProviderName
+		status["provider_servers"] = c.ProviderServers
+		stats := s.dns.Stats()
+		stats.Provider = c.ProviderName
+		writeJSON(w, 200, map[string]any{"config": c, "status": status, "stats": stats})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, 403, "local same-origin JSON request required")
+			return
+		}
+		var c dnsservice.Config
+		if err := decodeStrictJSON(w, r, &c, 1<<20); err != nil {
+			writeError(w, 400, "invalid DNS configuration")
+			return
+		}
+		was := s.dns.Status()["running"].(bool)
+		if was {
+			if err := s.dns.Stop(); err != nil {
+				writeError(w, 500, "cannot stop DNS service for configuration update")
+				return
+			}
+		}
+		if err := s.dns.Save(c); err != nil {
+			if was {
+				_ = s.dns.Start()
+			}
+			writeError(w, 422, err.Error())
+			return
+		}
+		if c.Enabled {
+			if err := s.dns.Start(); err != nil {
+				writeError(w, 500, "DNS settings saved but service restart failed: "+err.Error())
+				return
+			}
+		}
+		if err := s.applyCoreDNSRuntime(c.Enabled); err != nil {
+			writeError(w, 500, "DNS settings saved but Core Xray update failed: "+err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"config": s.dns.Config(), "status": s.dns.Status(), "stats": s.dns.Stats()})
+	default:
+		methodNotAllowed(w)
+	}
+}
+func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalJSONRequest(r) {
+		writeError(w, 403, "local same-origin JSON request required")
+		return
+	}
+	var req struct{ Action string }
+	if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+		writeError(w, 400, "invalid DNS service action")
+		return
+	}
+	c := s.dns.Config()
+	var err error
+	switch req.Action {
+	case "start":
+		c.Enabled = true
+		if err = s.dns.Save(c); err == nil {
+			err = s.dns.Start()
+		}
+		if err == nil {
+			err = s.applyCoreDNSRuntime(true)
+		}
+		if err != nil {
+			_ = s.dns.Stop()
+			c.Enabled = false
+			_ = s.dns.Save(c)
+		}
+	case "stop":
+		// First detach Xray from the listener; only then close the DNS socket.
+		if err = s.applyCoreDNSRuntime(false); err == nil {
+			err = s.dns.Stop()
+		}
+		if err == nil {
+			c.Enabled = false
+			err = s.dns.Save(c)
+		}
+	default:
+		writeError(w, 400, "action must be start or stop")
+		return
+	}
+	if err != nil {
+		writeError(w, 409, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"status": s.dns.Status(), "config": s.dns.Config()})
+}
+func (s *Server) dnsCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalJSONRequest(r) {
+		writeError(w, 403, "local same-origin JSON request required")
+		return
+	}
+	var req struct{ Domain string }
+	if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+		writeError(w, 400, "invalid domain check")
+		return
+	}
+	req.Domain = strings.TrimSpace(req.Domain)
+	if req.Domain == "" || len(req.Domain) > 253 || strings.ContainsAny(req.Domain, "/\\\r\n ") {
+		writeError(w, 400, "invalid domain")
+		return
+	}
+	ips, err := s.dns.Check(req.Domain)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"status": "Нет ответа: " + err.Error(), "addresses": []string{}})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"status": "Разрешён", "addresses": ips})
 }

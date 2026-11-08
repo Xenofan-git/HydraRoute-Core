@@ -57,42 +57,6 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 	}
 }
 
-func TestSharedBalancingStrategyOverridesEveryProfileBalancer(t *testing.T) {
-	for _, strategy := range []string{"leastPing", "random", "roundRobin"} {
-		got, err := Compile(CompileRequest{
-			Profiles: []Profile{
-				{ID: "alpha", Enabled: true, Port: 23501, Strategy: "random", Nodes: []Node{node("a1", "vless")}},
-				{ID: "beta", Enabled: true, Port: 23502, Strategy: "leastPing", Nodes: []Node{node("b1", "trojan")}},
-			},
-			Routing: &RoutingConfig{BalancingStrategy: strategy},
-		})
-		if err != nil {
-			t.Fatalf("%s: %v", strategy, err)
-		}
-		balancers := decode(t, got)["routing"].(map[string]any)["balancers"].([]any)
-		if len(balancers) != 2 {
-			t.Fatalf("%s: want two balancers, got %d", strategy, len(balancers))
-		}
-		for _, raw := range balancers {
-			balancer := raw.(map[string]any)
-			actual := balancer["strategy"].(map[string]any)["type"]
-			if actual != strategy {
-				t.Fatalf("%s: balancer %s uses %v", strategy, balancer["tag"], actual)
-			}
-		}
-	}
-}
-
-func TestRejectsUnknownSharedBalancingStrategy(t *testing.T) {
-	_, err := Compile(CompileRequest{
-		Profiles: []Profile{{ID: "alpha", Enabled: true, Port: 23503, Nodes: []Node{node("a1", "vless")}}},
-		Routing:  &RoutingConfig{BalancingStrategy: "fastest"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported shared balancing strategy") {
-		t.Fatalf("expected unsupported shared strategy rejection, got %v", err)
-	}
-}
-
 func TestEmptyPickedMeansAutomaticPool(t *testing.T) {
 	got, err := Compile(CompileRequest{Profiles: []Profile{{
 		ID: "auto", Enabled: true, Port: 23003,
@@ -298,8 +262,8 @@ func TestCompileAppliesIndependentDPIBypassOptionsToProxyOutbounds(t *testing.T)
 		{Key: "tls", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"tls","tlsSettings":{"serverName":"tls.example","fingerprint":"chrome"}}}`)},
 		{Key: "reality", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"reality","realitySettings":{"serverName":"reality.example","fingerprint":"chrome"}}}`)},
 	}}}
-	routing := &RoutingConfig{DPIBypass: DPIBypass{NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true}}
-	got, err := Compile(CompileRequest{Profiles: profiles, Routing: routing})
+	profiles[0].DPIBypass = DPIBypass{NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true}
+	got, err := Compile(CompileRequest{Profiles: profiles})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,6 +285,32 @@ func TestCompileAppliesIndependentDPIBypassOptionsToProxyOutbounds(t *testing.T)
 	}
 }
 
+func TestCompileAppliesDPIAndOutboundInterfacePerProfileOnly(t *testing.T) {
+	profiles := []Profile{
+		{ID: "alpha", Enabled: true, Port: 23042, OutboundInterface: "eth0", DPIBypass: DPIBypass{TLSFragmentation: true}, Nodes: []Node{node("a", "vless")}},
+		{ID: "beta", Enabled: true, Port: 23043, Nodes: []Node{node("b", "trojan")}},
+	}
+	got, err := Compile(CompileRequest{Profiles: profiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	outs := cfg["outbounds"].([]any)
+	a := outs[2].(map[string]any)
+	b := outs[3].(map[string]any)
+	astream := a["streamSettings"].(map[string]any)
+	asock := astream["sockopt"].(map[string]any)
+	if asock["interface"] != "eth0" {
+		t.Fatalf("outbound interface missing: %#v", asock)
+	}
+	if _, ok := astream["finalmask"]; !ok {
+		t.Fatal("per-profile TLS fragmentation missing")
+	}
+	if _, ok := b["streamSettings"]; ok {
+		t.Fatalf("profile alpha settings leaked into beta: %#v", b)
+	}
+}
+
 func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
 	got, err := Compile(CompileRequest{Profiles: []Profile{{ID: "plain", Enabled: true, Port: 23041, Nodes: []Node{node("plain", "vless")}}}})
 	if err != nil {
@@ -330,34 +320,5 @@ func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
 	out := cfg["outbounds"].([]any)[2].(map[string]any)
 	if _, ok := out["streamSettings"]; ok {
 		t.Fatalf("DPI options changed default outbound: %#v", out)
-	}
-}
-
-func TestCompileBindsOutboundsToSelectedInterface(t *testing.T) {
-	for _, tc := range []struct{ name, global, profile, want string }{
-		{name: "global", global: "wg0", want: "wg0"},
-		{name: "profile override", global: "eth0", profile: "tailscale0", want: "tailscale0"},
-		{name: "profile only", profile: "enp2s0", want: "enp2s0"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := Compile(CompileRequest{Profiles: []Profile{{ID: "iface", Enabled: true, Port: 23990, OutboundInterface: tc.profile, Nodes: []Node{node("n1", "vless")}}}, Routing: &RoutingConfig{OutboundInterface: tc.global}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			out := decode(t, got)["outbounds"].([]any)[2].(map[string]any)
-			stream := out["streamSettings"].(map[string]any)
-			sock := stream["sockopt"].(map[string]any)
-			if sock["interface"] != tc.want {
-				t.Fatalf("interface=%v want %q", sock["interface"], tc.want)
-			}
-		})
-	}
-}
-func TestCompileRejectsInvalidOutboundInterfaceName(t *testing.T) {
-	for _, name := range []string{"../eth0", "interface-name-too-long", "bad/name", " bad"} {
-		_, err := Compile(CompileRequest{Profiles: []Profile{{ID: "badif", Enabled: true, Port: 23991, Nodes: []Node{node("n1", "vless")}}}, Routing: &RoutingConfig{OutboundInterface: name}})
-		if err == nil {
-			t.Fatalf("expected invalid interface name %q to be rejected", name)
-		}
 	}
 }

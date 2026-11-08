@@ -11,7 +11,7 @@ import (
 func TestEncryptedProfileStoreRoundTripAndMetadataRedaction(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	store := NewStore(dir)
-	p := Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16140, Strategy: "leastPing", SubscriptionURL: "https://provider.example/sub?token=SECRET-TOKEN"}
+	p := Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16140, Strategy: "roundRobin", OutboundInterface: "eth0", DPIBypass: DPIBypass{NoiseTraffic: true, TLSFragmentation: true}, SubscriptionURL: "https://provider.example/sub?token=SECRET-TOKEN"}
 	if err := store.Save(p); err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestEncryptedProfileStoreRoundTripAndMetadataRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SubscriptionURL != p.SubscriptionURL || got.Port != p.Port {
+	if got.SubscriptionURL != p.SubscriptionURL || got.Port != p.Port || got.Strategy != p.Strategy || got.OutboundInterface != p.OutboundInterface || got.DPIBypass != p.DPIBypass {
 		t.Fatalf("got=%+v", got)
 	}
 	blob, err := os.ReadFile(filepath.Join(dir, "foreign.profile"))
@@ -41,7 +41,7 @@ func TestEncryptedProfileStoreRoundTripAndMetadataRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].Input != "url" {
+	if len(list) != 1 || list[0].Input != "url" || list[0].Strategy != p.Strategy || list[0].OutboundInterface != p.OutboundInterface || list[0].DPIBypass != p.DPIBypass {
 		t.Fatalf("metadata=%+v", list)
 	}
 	meta, _ := json.Marshal(list)

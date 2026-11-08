@@ -35,18 +35,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 	rules := make([]any, 0)
 	balancers := make([]any, 0)
 	allOutboundTags := make([]string, 0)
-	var dpiBypass DPIBypass
-	sharedStrategy := ""
-	if req.Routing != nil {
-		dpiBypass = req.Routing.DPIBypass
-		sharedStrategy = req.Routing.BalancingStrategy
-		if sharedStrategy == "" {
-			sharedStrategy = "leastPing"
-		}
-		if sharedStrategy != "" && !allowedStrategies[sharedStrategy] {
-			return nil, fmt.Errorf("unsupported shared balancing strategy %q", sharedStrategy)
-		}
-	}
 
 	for _, p := range profiles {
 		if !p.Enabled {
@@ -76,9 +64,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 			return nil, fmt.Errorf("profile %s: SOCKS listen address %q is not loopback", p.ID, listen)
 		}
 		strategy := p.Strategy
-		if sharedStrategy != "" {
-			strategy = sharedStrategy
-		}
 		if strategy == "" {
 			strategy = "leastPing"
 		}
@@ -109,15 +94,22 @@ func Compile(req CompileRequest) ([]byte, error) {
 			if _, ok := outbound["protocol"]; !ok {
 				return nil, fmt.Errorf("profile %s node %q: outbound protocol is missing", p.ID, n.Key)
 			}
-			applyDPIBypass(outbound, dpiBypass)
-			iface := p.OutboundInterface
-			if iface == "" && req.Routing != nil {
-				iface = req.Routing.OutboundInterface
-			}
-			if iface != "" {
-				if err := applyOutboundInterface(outbound, iface); err != nil {
-					return nil, fmt.Errorf("profile %s node %q: %w", p.ID, n.Key, err)
+			applyDPIBypass(outbound, p.DPIBypass)
+			if p.OutboundInterface != "" {
+				if !regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`).MatchString(p.OutboundInterface) {
+					return nil, fmt.Errorf("profile %s: invalid outbound interface name", p.ID)
 				}
+				stream, _ := outbound["streamSettings"].(map[string]any)
+				if stream == nil {
+					stream = map[string]any{}
+					outbound["streamSettings"] = stream
+				}
+				sockopt, _ := stream["sockopt"].(map[string]any)
+				if sockopt == nil {
+					sockopt = map[string]any{}
+					stream["sockopt"] = sockopt
+				}
+				sockopt["interface"] = p.OutboundInterface
 			}
 			h := sha256.Sum256([]byte(p.ID + "\x00" + n.Key))
 			tag := "hr_" + p.ID + "_" + hex.EncodeToString(h[:6])
@@ -359,25 +351,6 @@ func stringSet(items []string) map[string]bool {
 		}
 	}
 	return out
-}
-
-// applyOutboundInterface binds Xray first-hop sockets to a Linux interface only.
-func applyOutboundInterface(outbound map[string]any, iface string) error {
-	if len(iface) > 15 || strings.TrimSpace(iface) != iface || iface == "." || iface == ".." || strings.ContainsAny(iface, "/\x00") {
-		return fmt.Errorf("invalid outbound interface name %q", iface)
-	}
-	stream, ok := outbound["streamSettings"].(map[string]any)
-	if !ok {
-		stream = map[string]any{}
-		outbound["streamSettings"] = stream
-	}
-	sockopt, ok := stream["sockopt"].(map[string]any)
-	if !ok {
-		sockopt = map[string]any{}
-		stream["sockopt"] = sockopt
-	}
-	sockopt["interface"] = iface
-	return nil
 }
 
 // ValidateJSON checks that the compiler output remains valid JSON.
