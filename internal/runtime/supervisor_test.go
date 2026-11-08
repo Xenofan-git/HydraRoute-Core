@@ -120,22 +120,42 @@ func TestRestoreValidatesExistingConfigWithoutStarting(t *testing.T) {
 	binary := fakeXray(t, `if [ "$2" = -test ]; then exit 0; fi; sleep 30`)
 	config := filepath.Join(t.TempDir(), "private", "xray.json")
 	first, err := NewSupervisor(binary, config)
-	if err != nil { t.Fatal(err) }
-	if err := first.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+		t.Fatal(err)
+	}
 	second, err := NewSupervisor(binary, config)
-	if err != nil { t.Fatal(err) }
-	if err := second.Restore(context.Background()); err != nil { t.Fatal(err) }
-	if !second.Status().Configured || second.Status().Running { t.Fatalf("status=%+v", second.Status()) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !second.Status().Configured || second.Status().Running {
+		t.Fatalf("status=%+v", second.Status())
+	}
 }
 
 func TestRestoreRejectsTamperedOrPermissiveConfig(t *testing.T) {
 	binary := fakeXray(t, `if [ "$2" = -test ]; then exit 0; fi`)
 	dir := filepath.Join(t.TempDir(), "private")
-	if err := os.Mkdir(dir, 0700); err != nil { t.Fatal(err) }
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	config := filepath.Join(dir, "xray.json")
-	if err := os.WriteFile(config, []byte(`{"valid":true}`), 0644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(config, []byte(`{"valid":true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 	s, err := NewSupervisor(binary, config)
-	if err != nil { t.Fatal(err) }
-	if err := s.Restore(context.Background()); err == nil { t.Fatal("expected permissive config rejection") }
-	if s.Status().Configured { t.Fatal("unsafe config must not be restored") }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Restore(context.Background()); err == nil {
+		t.Fatal("expected permissive config rejection")
+	}
+	if s.Status().Configured {
+		t.Fatal("unsafe config must not be restored")
+	}
 }
