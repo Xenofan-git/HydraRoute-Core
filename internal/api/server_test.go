@@ -111,7 +111,7 @@ func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	if err := h.profileStore.Save(profile); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"enabled":true,"listen":"127.0.0.1","port":16121,"default_action":"block","rules":[{"id":"ru","name":"Russian services","enabled":true,"match_type":"domain","values":["geosite:category-ru"],"action":"direct"}]}`
+	body := `{"enabled":true,"listen":"127.0.0.1","port":16121,"default_action":"block","dpi_bypass":{"noise_traffic":true,"tls_fragmentation":true,"random_tls_fingerprint":true},"rules":[{"id":"ru","name":"Russian services","enabled":true,"match_type":"domain","values":["geosite:category-ru"],"action":"direct"}]}`
 	rr := httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localPut("/v1/routing", body))
 	if rr.Code != http.StatusOK {
@@ -127,6 +127,12 @@ func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	}
 	if got := len(compiled["inbounds"].([]any)); got != 2 {
 		t.Fatalf("expected profile and shared inbounds, got %d", got)
+	}
+	proxy := compiled["outbounds"].([]any)[2].(map[string]any)
+	stream := proxy["streamSettings"].(map[string]any)
+	mask := stream["finalmask"].(map[string]any)
+	if len(mask["tcp"].([]any)) != 1 || len(mask["udp"].([]any)) != 1 {
+		t.Fatalf("DPI options were not applied to compiled proxy: %#v", mask)
 	}
 	rules := compiled["routing"].(map[string]any)["rules"].([]any)
 	if got := len(rules); got != 3 {
