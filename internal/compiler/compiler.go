@@ -36,8 +36,13 @@ func Compile(req CompileRequest) ([]byte, error) {
 	balancers := make([]any, 0)
 	allOutboundTags := make([]string, 0)
 	var dpiBypass DPIBypass
+	sharedStrategy := ""
 	if req.Routing != nil {
 		dpiBypass = req.Routing.DPIBypass
+		sharedStrategy = req.Routing.BalancingStrategy
+		if sharedStrategy != "" && !allowedStrategies[sharedStrategy] {
+			return nil, fmt.Errorf("unsupported shared balancing strategy %q", sharedStrategy)
+		}
 	}
 
 	for _, p := range profiles {
@@ -68,6 +73,9 @@ func Compile(req CompileRequest) ([]byte, error) {
 			return nil, fmt.Errorf("profile %s: SOCKS listen address %q is not loopback", p.ID, listen)
 		}
 		strategy := p.Strategy
+		if sharedStrategy != "" {
+			strategy = sharedStrategy
+		}
 		if strategy == "" {
 			strategy = "leastPing"
 		}
