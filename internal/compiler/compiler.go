@@ -13,26 +13,20 @@ import (
 )
 
 var profileIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
+var ruleIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,48}$`)
+var domainNamePattern = regexp.MustCompile(`^(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\.?$`)
+var geoTagPattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,96}$`)
 var allowedStrategies = map[string]bool{"random": true, "roundRobin": true, "leastPing": true}
 
-// Compile builds one aggregate Xray configuration with strictly isolated
-// per-profile pools, inbounds and balancers. It performs no I/O or host changes.
+// Compile builds one aggregate Xray configuration. Profile inbounds remain
+// isolated; the optional shared inbound has its own ordered routing table.
 func Compile(req CompileRequest) ([]byte, error) {
-	cfg := map[string]any{
-		"log":      map[string]any{"loglevel": "warning"},
-		"inbounds": []any{},
-		"outbounds": []any{
-			map[string]any{"tag": "direct", "protocol": "freedom"},
-			map[string]any{"tag": "block", "protocol": "blackhole"},
-		},
-		"routing": map[string]any{"domainStrategy": "AsIs", "rules": []any{}, "balancers": []any{}},
-	}
-
 	profiles := append([]Profile(nil), req.Profiles...)
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
+
 	seenIDs := map[string]bool{}
 	seenPorts := map[uint16]string{}
-	allOutboundTags := make([]string, 0)
+	enabledProfiles := map[string]bool{}
 	inbounds := make([]any, 0)
 	outbounds := []any{
 		map[string]any{"tag": "direct", "protocol": "freedom"},
@@ -40,6 +34,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 	}
 	rules := make([]any, 0)
 	balancers := make([]any, 0)
+	allOutboundTags := make([]string, 0)
 
 	for _, p := range profiles {
 		if !p.Enabled {
@@ -52,6 +47,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 			return nil, fmt.Errorf("duplicate profile id %q", p.ID)
 		}
 		seenIDs[p.ID] = true
+		enabledProfiles[p.ID] = true
 		if p.Port < 1024 {
 			return nil, fmt.Errorf("profile %s: port %d is outside allowed range 1024-65535", p.ID, p.Port)
 		}
@@ -132,21 +128,188 @@ func Compile(req CompileRequest) ([]byte, error) {
 		})
 	}
 
-	if len(inbounds) > 0 {
-		cfg["inbounds"] = inbounds
-		cfg["outbounds"] = outbounds
-		cfg["routing"] = map[string]any{
-			"domainStrategy": "AsIs", "rules": rules, "balancers": balancers,
+	domainStrategy := "AsIs"
+	if req.Routing != nil {
+		routing := req.Routing
+		if !routing.Enabled {
+			if len(routing.Rules) > 0 || routing.DefaultAction != "" || routing.DefaultProfileID != "" {
+				return nil, fmt.Errorf("shared routing is disabled but routing settings are present")
+			}
+		} else {
+			if len(enabledProfiles) == 0 {
+				return nil, fmt.Errorf("shared SOCKS5 requires at least one enabled profile")
+			}
+			if routing.Port < 1024 {
+				return nil, fmt.Errorf("shared SOCKS5 port %d is outside allowed range 1024-65535", routing.Port)
+			}
+			if other, ok := seenPorts[routing.Port]; ok {
+				return nil, fmt.Errorf("shared SOCKS5 and profile %s use duplicate port %d", other, routing.Port)
+			}
+			listen := routing.Listen
+			if listen == "" {
+				listen = "127.0.0.1"
+			}
+			ip := net.ParseIP(listen)
+			if ip == nil || !ip.IsLoopback() {
+				return nil, fmt.Errorf("shared SOCKS5 listen address %q is not loopback", listen)
+			}
+			if err := validateRouteTarget(routing.DefaultAction, routing.DefaultProfileID, enabledProfiles); err != nil {
+				return nil, fmt.Errorf("shared SOCKS5 default: %w", err)
+			}
+			if len(routing.Rules) > 256 {
+				return nil, fmt.Errorf("shared routing exceeds 256 rules")
+			}
+			sharedTag := "hr_shared_in"
+			inbounds = append(inbounds, map[string]any{
+				"tag": sharedTag, "listen": listen, "port": routing.Port, "protocol": "socks",
+				"settings": map[string]any{"auth": "noauth", "udp": false},
+			})
+			seenRuleIDs := map[string]bool{}
+			for i, rule := range routing.Rules {
+				if !rule.Enabled {
+					continue
+				}
+				if !ruleIDPattern.MatchString(rule.ID) || seenRuleIDs[rule.ID] {
+					return nil, fmt.Errorf("shared routing rule %d: invalid or duplicate rule id %q", i+1, rule.ID)
+				}
+				seenRuleIDs[rule.ID] = true
+				if strings.TrimSpace(rule.Name) == "" || len(rule.Name) > 96 {
+					return nil, fmt.Errorf("shared routing rule %s: name must contain 1-96 characters", rule.ID)
+				}
+				if len(rule.Values) == 0 || len(rule.Values) > 512 {
+					return nil, fmt.Errorf("shared routing rule %s: provide 1-512 match values", rule.ID)
+				}
+				field := ""
+				switch rule.MatchType {
+				case "domain":
+					field = "domain"
+				case "ip":
+					field = "ip"
+					domainStrategy = "IPIfNonMatch"
+				default:
+					return nil, fmt.Errorf("shared routing rule %s: match_type must be domain or ip", rule.ID)
+				}
+				values := make([]string, 0, len(rule.Values))
+				seenValues := map[string]bool{}
+				for _, value := range rule.Values {
+					value = strings.TrimSpace(value)
+					if err := validateMatchValue(rule.MatchType, value); err != nil {
+						return nil, fmt.Errorf("shared routing rule %s: %w", rule.ID, err)
+					}
+					if seenValues[value] {
+						return nil, fmt.Errorf("shared routing rule %s: duplicate match value %q", rule.ID, value)
+					}
+					seenValues[value] = true
+					values = append(values, value)
+				}
+				entry := map[string]any{
+					"type": "field", "inboundTag": []string{sharedTag}, field: values,
+					"ruleTag": rule.Name,
+				}
+				if err := applyRouteTarget(entry, rule.Action, rule.ProfileID, enabledProfiles); err != nil {
+					return nil, fmt.Errorf("shared routing rule %s: %w", rule.ID, err)
+				}
+				rules = append(rules, entry)
+			}
+			// Explicit catch-all prevents Xray's implicit first-outbound fallback
+			// from sending unmatched shared traffic through the direct outbound.
+			fallback := map[string]any{"type": "field", "inboundTag": []string{sharedTag}, "ruleTag": "shared-default"}
+			if err := applyRouteTarget(fallback, routing.DefaultAction, routing.DefaultProfileID, enabledProfiles); err != nil {
+				return nil, fmt.Errorf("shared SOCKS5 default: %w", err)
+			}
+			rules = append(rules, fallback)
 		}
+	}
+
+	cfg := map[string]any{
+		"log":      map[string]any{"loglevel": "warning"},
+		"inbounds": inbounds,
+		"outbounds": outbounds,
+		"routing": map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers},
+	}
+	if len(inbounds) > 0 {
 		cfg["observatory"] = map[string]any{
 			"subjectSelector": allOutboundTags,
 			"probeUrl":        "https://www.gstatic.com/generate_204",
 			"probeInterval":   "180s",
 		}
-	} else {
-		cfg["outbounds"] = outbounds
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+func validateRouteTarget(action, profileID string, enabled map[string]bool) error {
+	entry := map[string]any{}
+	return applyRouteTarget(entry, action, profileID, enabled)
+}
+
+func applyRouteTarget(entry map[string]any, action, profileID string, enabled map[string]bool) error {
+	switch action {
+	case "profile":
+		if !profileIDPattern.MatchString(profileID) || !enabled[profileID] {
+			return fmt.Errorf("target profile %q is not enabled", profileID)
+		}
+		entry["balancerTag"] = "hr_bal_" + profileID
+	case "direct":
+		if profileID != "" {
+			return fmt.Errorf("direct action must not specify a profile")
+		}
+		entry["outboundTag"] = "direct"
+	case "block":
+		if profileID != "" {
+			return fmt.Errorf("block action must not specify a profile")
+		}
+		entry["outboundTag"] = "block"
+	default:
+		return fmt.Errorf("action must be profile, direct, or block")
+	}
+	return nil
+}
+
+func validateMatchValue(matchType, value string) error {
+	if value == "" || len(value) > 512 || strings.ContainsAny(value, " \t\r\n\x00") {
+		return fmt.Errorf("invalid empty, oversized, or whitespace-containing match value")
+	}
+	if matchType == "domain" {
+		switch {
+		case strings.HasPrefix(value, "domain:") || strings.HasPrefix(value, "full:"):
+			if !domainNamePattern.MatchString(strings.TrimPrefix(strings.TrimPrefix(value, "domain:"), "full:")) {
+				return fmt.Errorf("invalid domain value %q", value)
+			}
+		case strings.HasPrefix(value, "keyword:"):
+			if strings.TrimPrefix(value, "keyword:") == "" {
+				return fmt.Errorf("empty keyword match")
+			}
+		case strings.HasPrefix(value, "regexp:"):
+			if _, err := regexp.Compile(strings.TrimPrefix(value, "regexp:")); err != nil {
+				return fmt.Errorf("invalid domain regexp: %w", err)
+			}
+		case strings.HasPrefix(value, "geosite:"):
+			if !geoTagPattern.MatchString(strings.TrimPrefix(value, "geosite:")) {
+				return fmt.Errorf("invalid geosite tag %q", value)
+			}
+		case strings.HasPrefix(value, "ext:"):
+			parts := strings.Split(value, ":")
+			if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+				return fmt.Errorf("invalid external geosite reference %q", value)
+			}
+		default:
+			return fmt.Errorf("domain values must use domain:, full:, keyword:, regexp:, geosite:, or ext: syntax")
+		}
+		return nil
+	}
+	if strings.HasPrefix(value, "geoip:") {
+		if !geoTagPattern.MatchString(strings.TrimPrefix(value, "geoip:")) {
+			return fmt.Errorf("invalid geoip tag %q", value)
+		}
+		return nil
+	}
+	if net.ParseIP(value) != nil {
+		return nil
+	}
+	if _, _, err := net.ParseCIDR(value); err != nil {
+		return fmt.Errorf("invalid IP or CIDR %q", value)
+	}
+	return nil
 }
 
 func stringSet(items []string) map[string]bool {

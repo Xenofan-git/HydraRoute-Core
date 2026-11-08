@@ -22,6 +22,31 @@ type Node struct {
 	Outbound json.RawMessage `json:"outbound"`
 }
 
+// RoutingConfig optionally adds a dedicated shared SOCKS5 inbound. Its traffic
+// is routed only by Rules and the explicit default action. Profile inbounds
+// remain independently bound to their own balancers.
+type RoutingConfig struct {
+	Enabled           bool          `json:"enabled"`
+	Listen            string        `json:"listen,omitempty"`
+	Port              uint16        `json:"port"`
+	DefaultAction     string        `json:"default_action"`
+	DefaultProfileID  string        `json:"default_profile_id,omitempty"`
+	Rules             []RoutingRule `json:"rules,omitempty"`
+}
+
+// RoutingRule is evaluated in slice order; the first matching rule wins.
+// MatchType is domain or ip. Values use Xray domain/IP syntax.
+type RoutingRule struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Enabled   bool     `json:"enabled"`
+	MatchType string   `json:"match_type"`
+	Values    []string `json:"values"`
+	Action    string   `json:"action"`
+	ProfileID string   `json:"profile_id,omitempty"`
+}
+
 type CompileRequest struct {
-	Profiles []Profile `json:"profiles"`
+	Profiles []Profile      `json:"profiles"`
+	Routing  *RoutingConfig `json:"routing,omitempty"`
 }

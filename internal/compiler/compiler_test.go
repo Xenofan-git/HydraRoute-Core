@@ -122,3 +122,92 @@ func TestDeterministicOutput(t *testing.T) {
 		t.Fatal("compiler output is not deterministic")
 	}
 }
+
+func TestCompileSharedSOCKSOrderedRulesAndExplicitDefault(t *testing.T) {
+	got, err := Compile(CompileRequest{
+		Profiles: []Profile{
+			{ID: "youtube", Enabled: true, Port: 23011, Nodes: []Node{node("yt1", "vless")}},
+			{ID: "foreign", Enabled: true, Port: 23012, Nodes: []Node{node("f1", "trojan")}},
+		},
+		Routing: &RoutingConfig{
+			Enabled: true, Port: 23010, DefaultAction: "profile", DefaultProfileID: "foreign",
+			Rules: []RoutingRule{
+				{ID: "yt", Name: "YouTube", Enabled: true, MatchType: "domain", Values: []string{"geosite:youtube"}, Action: "profile", ProfileID: "youtube"},
+				{ID: "ru", Name: "Russian services", Enabled: true, MatchType: "ip", Values: []string{"geoip:ru", "192.0.2.0/24"}, Action: "direct"},
+				{ID: "ads", Name: "Block test", Enabled: true, MatchType: "domain", Values: []string{"domain:ads.example"}, Action: "block"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	inbounds := cfg["inbounds"].([]any)
+	if len(inbounds) != 3 {
+		t.Fatalf("want 2 profile inbounds plus shared inbound, got %d", len(inbounds))
+	}
+	routing := cfg["routing"].(map[string]any)
+	if routing["domainStrategy"] != "IPIfNonMatch" {
+		t.Fatalf("IP rules must enable IPIfNonMatch, got %v", routing["domainStrategy"])
+	}
+	rules := routing["rules"].([]any)
+	if len(rules) != 6 {
+		t.Fatalf("want 2 profile rules, 3 user rules and explicit fallback, got %d", len(rules))
+	}
+	first := rules[2].(map[string]any)
+	if first["inboundTag"].([]any)[0] != "hr_shared_in" || first["balancerTag"] != "hr_bal_youtube" {
+		t.Fatalf("first shared rule not bound to YouTube balancer: %#v", first)
+	}
+	second := rules[3].(map[string]any)
+	if second["outboundTag"] != "direct" {
+		t.Fatalf("direct action not compiled correctly: %#v", second)
+	}
+	third := rules[4].(map[string]any)
+	if third["outboundTag"] != "block" {
+		t.Fatalf("block action not compiled correctly: %#v", third)
+	}
+	fallback := rules[5].(map[string]any)
+	if fallback["inboundTag"].([]any)[0] != "hr_shared_in" || fallback["balancerTag"] != "hr_bal_foreign" {
+		t.Fatalf("explicit default profile fallback missing: %#v", fallback)
+	}
+}
+
+func TestSharedSOCKSRejectsUnsafeFallbackAndInvalidTargets(t *testing.T) {
+	base := CompileRequest{
+		Profiles: []Profile{{ID: "ok", Enabled: true, Port: 23101, Nodes: []Node{node("n1", "vless")}}},
+		Routing: &RoutingConfig{Enabled: true, Port: 23100, DefaultAction: "profile", DefaultProfileID: "missing"},
+	}
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "not enabled") {
+		t.Fatalf("expected invalid default profile rejection, got %v", err)
+	}
+	base.Routing.DefaultAction = "direct"
+	base.Routing.DefaultProfileID = ""
+	base.Routing.Rules = []RoutingRule{{ID: "bad", Name: "bad cidr", Enabled: true, MatchType: "ip", Values: []string{"10.0.0.999/24"}, Action: "block"}}
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "invalid IP or CIDR") {
+		t.Fatalf("expected invalid CIDR rejection, got %v", err)
+	}
+}
+
+func TestSharedSOCKSRejectsPortCollisionAndNonLoopback(t *testing.T) {
+	req := CompileRequest{
+		Profiles: []Profile{{ID: "p", Enabled: true, Port: 23200, Nodes: []Node{node("n", "vless")}}},
+		Routing: &RoutingConfig{Enabled: true, Listen: "0.0.0.0", Port: 23200, DefaultAction: "block"},
+	}
+	if _, err := Compile(req); err == nil || !strings.Contains(err.Error(), "duplicate port") {
+		t.Fatalf("expected duplicate port rejection, got %v", err)
+	}
+	req.Routing.Port = 23201
+	if _, err := Compile(req); err == nil || !strings.Contains(err.Error(), "not loopback") {
+		t.Fatalf("expected non-loopback rejection, got %v", err)
+	}
+}
+
+func TestDisabledSharedRoutingRejectsDormantRules(t *testing.T) {
+	req := CompileRequest{
+		Profiles: []Profile{{ID: "p", Enabled: true, Port: 23300, Nodes: []Node{node("n", "vless")}}},
+		Routing: &RoutingConfig{Enabled: false, Rules: []RoutingRule{{ID: "r", Enabled: true}}},
+	}
+	if _, err := Compile(req); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("expected disabled routing config rejection, got %v", err)
+	}
+}
