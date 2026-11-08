@@ -15,14 +15,14 @@ import (
 )
 
 type ProfileInput struct {
-	ID       string   `json:"id"`
-	Enabled  bool     `json:"enabled"`
-	Listen   string   `json:"listen,omitempty"`
-	Port     uint16   `json:"port"`
-	Strategy string   `json:"strategy,omitempty"`
-	OutboundInterface string `json:"outbound_interface,omitempty"`
-	Picked   []string `json:"picked,omitempty"`
-	Excluded []string `json:"excluded,omitempty"`
+	ID                string   `json:"id"`
+	Enabled           bool     `json:"enabled"`
+	Listen            string   `json:"listen,omitempty"`
+	Port              uint16   `json:"port"`
+	Strategy          string   `json:"strategy,omitempty"`
+	OutboundInterface string   `json:"outbound_interface,omitempty"`
+	Picked            []string `json:"picked,omitempty"`
+	Excluded          []string `json:"excluded,omitempty"`
 }
 
 type ProfileRequest struct {
