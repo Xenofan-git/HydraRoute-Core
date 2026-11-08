@@ -4,7 +4,7 @@
 
 HydraRoute Core is a Go-based service for managing multiple VPN subscription profiles and compiling them into an Xray configuration. It is designed for ARM64 devices such as NanoPi, as well as standard Linux systems.
 
-The project focuses on per-profile isolation: each enabled profile receives its own loopback-only SOCKS5 endpoint and its own Xray balancer. Profiles are kept separate instead of merging unrelated subscriptions into a single pool.
+The project keeps subscription profiles isolated: each enabled profile receives its own loopback-only SOCKS5 endpoint and Xray balancer. An optional shared SOCKS5 inbound can apply ordered domain/IP rules and route traffic to a profile balancer, DIRECT, or BLOCK. The shared inbound is separate from the per-profile endpoints.
 
 > **Project status:** Active development / pre-production. The core, API, parser, configuration compiler, encrypted profile storage, and runtime supervisor are implemented and covered by automated tests. Production deployment and integration with a host's network policy remain separate steps.
 
@@ -38,14 +38,27 @@ HydraRoute configuration compiler
        v
 One profile = one SOCKS5 inbound + one balancer
        |
-       v
-Xray runtime
+       +-------------------------------+
+       |                               |
+       v                               v
+Per-profile SOCKS5              Optional shared SOCKS5
+       |                               |
+       v                               v
+Profile balancer              Ordered domain/IP rules
+                                       |
+                                       v
+                              Profile / DIRECT / BLOCK
+       |                               |
+       +---------------+---------------+
+                       |
+                       v
+                  Xray runtime
        |
        v
 Applications / router policy (configured separately)
 ```
 
-Each profile has an independent loopback SOCKS5 endpoint. The generated configuration does not install system routes, modify firewall rules, change DNS settings, or reconfigure network interfaces.
+Each profile has an independent loopback SOCKS5 endpoint. The optional shared inbound is also loopback-only and has an explicit default action so unmatched traffic cannot fall through to Xray's first outbound. The embedded dashboard is served by the same loopback API at `http://127.0.0.1:17890/`. The generated configuration does not install system routes, modify firewall rules, change DNS settings, or reconfigure network interfaces.
 
 ## Supported protocols
 
@@ -118,6 +131,19 @@ A systemd unit template and deployment notes are provided under `deploy/`. Revie
 The API defaults to `127.0.0.1:17890`. Xray executable and configuration paths must be supplied explicitly. Runtime auto-start and scheduled subscription refresh are opt-in settings.
 
 HydraRoute Core is designed to coexist with other proxy clients. Integrating its SOCKS5 endpoint into a router policy is an explicit, separate network-administration task; the core does not create global routes or alter existing routing policies.
+
+## Management API
+
+The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory.
+
+- `GET /v1/profiles` — list profile metadata.
+- `POST /v1/profiles` and `DELETE /v1/profiles` — create and delete profiles.
+- `POST /v1/profiles/refresh` — compile stored subscriptions and prepare the Xray configuration.
+- `GET /v1/routing` and `PUT /v1/routing` — read, validate, persist, and apply shared SOCKS5 routing rules.
+- `GET /v1/runtime` and `POST /v1/runtime` — inspect and control the managed Xray process.
+- `GET /v1/refresh/status` — inspect scheduled refresh status.
+
+Mutating endpoints require a same-origin JSON request. The dashboard does not expose the API beyond loopback.
 
 ## Current limitations
 

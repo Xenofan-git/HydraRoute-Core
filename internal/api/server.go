@@ -210,10 +210,15 @@ func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		result, err := s.refreshProfilesLocked(ctx)
 		if err != nil {
+			var rollbackErr error
 			if hadPrevious {
-				_ = s.routingStore.Save(previous)
+				rollbackErr = s.routingStore.Save(previous)
 			} else {
-				_ = s.routingStore.Delete()
+				rollbackErr = s.routingStore.Delete()
+			}
+			if rollbackErr != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("routing apply failed: %v; routing config rollback failed: %v", err, rollbackErr))
+				return
 			}
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
