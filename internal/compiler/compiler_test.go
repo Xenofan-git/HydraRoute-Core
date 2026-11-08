@@ -202,12 +202,20 @@ func TestSharedSOCKSRejectsPortCollisionAndNonLoopback(t *testing.T) {
 	}
 }
 
-func TestDisabledSharedRoutingRejectsDormantRules(t *testing.T) {
+func TestDisabledSharedRoutingPreservesDormantRules(t *testing.T) {
 	req := CompileRequest{
 		Profiles: []Profile{{ID: "p", Enabled: true, Port: 23300, Nodes: []Node{node("n", "vless")}}},
 		Routing:  &RoutingConfig{Enabled: false, Rules: []RoutingRule{{ID: "r", Enabled: true}}},
 	}
-	if _, err := Compile(req); err == nil || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("expected disabled routing config rejection, got %v", err)
+	got, err := Compile(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	if len(cfg["inbounds"].([]any)) != 1 {
+		t.Fatalf("disabled shared routing must not emit an inbound")
+	}
+	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 1 {
+		t.Fatalf("disabled shared routing must not emit dormant rules")
 	}
 }

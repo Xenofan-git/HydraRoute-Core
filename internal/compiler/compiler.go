@@ -132,9 +132,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 	if req.Routing != nil {
 		routing := req.Routing
 		if !routing.Enabled {
-			if len(routing.Rules) > 0 || routing.DefaultAction != "" || routing.DefaultProfileID != "" {
-				return nil, fmt.Errorf("shared routing is disabled but routing settings are present")
-			}
+			// Keep dormant rules in persistent settings; disabled routing emits no shared inbound.
 		} else {
 			if len(enabledProfiles) == 0 {
 				return nil, fmt.Errorf("shared SOCKS5 requires at least one enabled profile")

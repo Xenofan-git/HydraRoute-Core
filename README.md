@@ -17,7 +17,9 @@ The project focuses on per-profile isolation: each enabled profile receives its 
 - **Load balancing** — supports random, round-robin, and least-ping strategies.
 - **Encrypted profile storage** — subscription source data is encrypted at rest using AES-256-GCM.
 - **Selection persistence** — stores manual/automatic node selection and exclusions without persisting raw subscription credentials in selection state.
-- **Local REST API** — loopback-only API for health, runtime status, profile management, refresh, and selection operations.
+- **Embedded web dashboard** — responsive Midnight + Violet interface with dark/light themes, profile cards, shared SOCKS5 routing editor, and runtime controls.
+- **Shared SOCKS5 routing** — optional dedicated inbound with ordered domain/IP rules, profile/DIRECT/BLOCK actions, and an explicit default route.
+- **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, and selection operations.
 - **Runtime supervision** — validates candidate configurations with Xray before activation and preserves the last known-good configuration on refresh failures.
 - **Scheduled refresh** — optional refresh scheduler with capped exponential retry; disabled unless configured.
 - **ARM64 and AMD64 builds** — cross-compilation for Linux ARM64/AArch64 and AMD64.
@@ -121,7 +123,6 @@ HydraRoute Core is designed to coexist with other proxy clients. Integrating its
 
 - Hysteria2 is not supported by the current Xray-based engine.
 - IDN hostname normalization is not implemented.
-- No web management UI is included in the current core.
 - Host routing, firewall, DNS, and router-policy integration are intentionally outside the core's scope.
 - Review dependency provenance and licensing before redistribution or public binary releases.
 
