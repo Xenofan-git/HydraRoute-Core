@@ -167,16 +167,52 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "runtime": s.supervisor.Status()})
 }
 
-type networkInterface struct { Name string `json:"name"`; Category string `json:"category"`; Kind string `json:"kind"`; Up bool `json:"up"`; Addresses []string `json:"addresses"` }
-func (s *Server) networkInterfaces(w http.ResponseWriter,r *http.Request) {
- if r.Method!=http.MethodGet { methodNotAllowed(w); return }; if !validLocalReadRequest(r) { writeError(w,http.StatusForbidden,"local request required"); return }
- items,err:=net.Interfaces(); if err!=nil { writeError(w,http.StatusInternalServerError,"cannot enumerate network interfaces"); return }; out:=make([]networkInterface,0,len(items))
- for _,item:=range items { if item.Flags&net.FlagLoopback!=0 { continue }; name,lower:=item.Name,strings.ToLower(item.Name); category,kind:="other","Виртуальный / прочий"
- switch { case strings.HasPrefix(lower,"wg")||strings.HasPrefix(lower,"tun")||strings.HasPrefix(lower,"tap")||lower=="tailscale0"||strings.HasPrefix(lower,"zt"): category,kind="vpn","VPN / туннель"
- case strings.HasPrefix(lower,"eth")||strings.HasPrefix(lower,"en")||strings.HasPrefix(lower,"wlan")||strings.HasPrefix(lower,"wl")||strings.HasPrefix(lower,"wwan")||strings.HasPrefix(lower,"usb"): category,kind="internet","Физическая сеть"
- case strings.HasPrefix(lower,"br")||strings.HasPrefix(lower,"docker")||strings.HasPrefix(lower,"veth")||strings.Contains(lower,"."): category,kind="other","Bridge / VLAN / виртуальный" }
- addresses:=make([]string,0); if addrs,e:=item.Addrs(); e==nil { for _,a:=range addrs { addresses=append(addresses,a.String()) } }; out=append(out,networkInterface{Name:name,Category:category,Kind:kind,Up:item.Flags&net.FlagUp!=0,Addresses:addresses}) }
- writeJSON(w,http.StatusOK,map[string]any{"interfaces":out})
+type networkInterface struct {
+	Name      string   `json:"name"`
+	Category  string   `json:"category"`
+	Kind      string   `json:"kind"`
+	Up        bool     `json:"up"`
+	Addresses []string `json:"addresses"`
+}
+
+func (s *Server) networkInterfaces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	items, err := net.Interfaces()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot enumerate network interfaces")
+		return
+	}
+	out := make([]networkInterface, 0, len(items))
+	for _, item := range items {
+		if item.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		name, lower := item.Name, strings.ToLower(item.Name)
+		category, kind := "other", "Виртуальный / прочий"
+		switch {
+		case strings.HasPrefix(lower, "wg") || strings.HasPrefix(lower, "tun") || strings.HasPrefix(lower, "tap") || lower == "tailscale0" || strings.HasPrefix(lower, "zt"):
+			category, kind = "vpn", "VPN / туннель"
+		case strings.HasPrefix(lower, "eth") || strings.HasPrefix(lower, "en") || strings.HasPrefix(lower, "wlan") || strings.HasPrefix(lower, "wl") || strings.HasPrefix(lower, "wwan") || strings.HasPrefix(lower, "usb"):
+			category, kind = "internet", "Физическая сеть"
+		case strings.HasPrefix(lower, "br") || strings.HasPrefix(lower, "docker") || strings.HasPrefix(lower, "veth") || strings.Contains(lower, "."):
+			category, kind = "other", "Bridge / VLAN / виртуальный"
+		}
+		addresses := make([]string, 0)
+		if addrs, e := item.Addrs(); e == nil {
+			for _, a := range addrs {
+				addresses = append(addresses, a.String())
+			}
+		}
+		out = append(out, networkInterface{Name: name, Category: category, Kind: kind, Up: item.Flags&net.FlagUp != 0, Addresses: addresses})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"interfaces": out})
 }
 
 func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
