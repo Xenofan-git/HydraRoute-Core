@@ -40,6 +40,9 @@ func Compile(req CompileRequest) ([]byte, error) {
 	if req.Routing != nil {
 		dpiBypass = req.Routing.DPIBypass
 		sharedStrategy = req.Routing.BalancingStrategy
+		if sharedStrategy == "" {
+			sharedStrategy = "leastPing"
+		}
 		if sharedStrategy != "" && !allowedStrategies[sharedStrategy] {
 			return nil, fmt.Errorf("unsupported shared balancing strategy %q", sharedStrategy)
 		}
