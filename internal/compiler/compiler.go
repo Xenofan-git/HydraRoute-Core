@@ -1,6 +1,3 @@
-Ran on ams-1-vm-skeg.tail93b564.ts.net (user root), exit code 0:
-
-###internal/compiler/compiler.go
 package compiler
 
 import (
