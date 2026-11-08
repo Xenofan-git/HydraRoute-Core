@@ -8,3 +8,6 @@
 .server-card { gap: 12px; }
 .server-flags { display: flex; flex-wrap: wrap; gap: 18px; padding-top: 10px; border-top: 1px solid var(--border); }
 .server-flags .checkline { color: var(--text-secondary); font-size: 13px; }
+
+/* Rule ordering controls: layout-only additions, existing color tokens retained. */
+.rule-title-wrap{display:flex;align-items:center;gap:10px;min-width:0}.rule-drag-handle{width:30px;height:34px;flex:none;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--muted);font-size:20px;line-height:1;cursor:grab;touch-action:none}.rule-drag-handle:active{cursor:grabbing}.rule-card.drag-over{outline:2px dashed var(--accent);outline-offset:2px}.rule-head{align-items:center}
