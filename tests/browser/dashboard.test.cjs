@@ -115,8 +115,8 @@ test('Russian menu opens on Rules and rules can be reordered by dragging', async
     await page.getByText('API подключён').waitFor();
     assert.deepEqual(await page.locator('.nav-item').allTextContents(), ['▦Правила','♧Сеть','◎DNS','☷Hydra','ⓘИнфо','⚙Настройки','⇥Выход']);
     assert.equal(await page.locator('#pageTitle').textContent(), 'Правила');
-    assert.equal(await page.locator('.rule-card[data-rule]').count(), 1);
-    assert.equal(await page.locator('.rule-drag-handle').count(), 1);
+    assert.equal(await page.locator('.rule-card[data-rule]').count(), 2);
+    assert.equal(await page.locator('.rule-drag-handle').count(), 2);
   } finally { await page.close(); }
 });
 
@@ -205,6 +205,30 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     assert.deepEqual(savedRouting.rules[0].values, [
       'domain:one.example', 'domain:two.example', 'domain:three.example',
     ]);
+  } finally {
+    await page.close();
+  }
+});
+test('DPI bypass options expand on hover and save independent toggles', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="network"]').click();
+    const trigger = page.locator('#dpiBypassToggle');
+    await trigger.hover();
+    await page.locator('#dpiNoise').waitFor({ state: 'visible' });
+    await page.locator('#dpiNoise').check();
+    await page.locator('#dpiFragment').check();
+    await page.locator('#dpiFingerprint').uncheck();
+    await page.locator('#saveDPIBypass').click();
+    await page.getByText('Настройки обхода DPI сохранены и применены').waitFor();
+    assert.deepEqual(savedRouting.dpi_bypass, {
+      noise_traffic: true,
+      tls_fragmentation: true,
+      random_tls_fingerprint: false,
+    });
   } finally {
     await page.close();
   }
