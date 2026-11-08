@@ -363,7 +363,7 @@ func stringSet(items []string) map[string]bool {
 
 // applyOutboundInterface binds Xray first-hop sockets to a Linux interface only.
 func applyOutboundInterface(outbound map[string]any, iface string) error {
-	if len(iface) > 15 || strings.TrimSpace(iface) != iface || iface == "." || iface == ".." || strings.ContainsAny(iface, "/\\x00") {
+	if len(iface) > 15 || strings.TrimSpace(iface) != iface || iface == "." || iface == ".." || strings.ContainsAny(iface, "/\x00") {
 		return fmt.Errorf("invalid outbound interface name %q", iface)
 	}
 	stream, ok := outbound["streamSettings"].(map[string]any)
