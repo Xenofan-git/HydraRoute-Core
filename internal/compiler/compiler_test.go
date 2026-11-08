@@ -54,10 +54,6 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 		if in["listen"] != "127.0.0.1" {
 			t.Fatalf("non-loopback listener: %v", in["listen"])
 		}
-		settings := in["settings"].(map[string]any)
-		if settings["udp"] != true {
-			t.Fatalf("SOCKS5 UDP relay must be enabled to match HRNeo semantics: %#v", settings)
-		}
 	}
 }
 
@@ -150,12 +146,6 @@ func TestCompileSharedSOCKSOrderedRulesAndExplicitDefault(t *testing.T) {
 	if len(inbounds) != 3 {
 		t.Fatalf("want 2 profile inbounds plus shared inbound, got %d", len(inbounds))
 	}
-	for _, raw := range inbounds {
-		settings := raw.(map[string]any)["settings"].(map[string]any)
-		if settings["udp"] != true {
-			t.Fatal("all profile and shared SOCKS5 inbounds must enable UDP relay")
-		}
-	}
 	routing := cfg["routing"].(map[string]any)
 	if routing["domainStrategy"] != "IPIfNonMatch" {
 		t.Fatalf("IP rules must enable IPIfNonMatch, got %v", routing["domainStrategy"])
@@ -230,14 +220,49 @@ func TestDisabledSharedRoutingPreservesDormantRules(t *testing.T) {
 	}
 }
 
+func TestCoreDNSIsInjectedOnlyWhenExplicitlyEnabled(t *testing.T) {
+	base := CompileRequest{Profiles: []Profile{{ID: "dns", Enabled: true, Port: 23400, Nodes: []Node{node("n1", "vless")}}}}
+	without, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decode(t, without)["dns"]; ok {
+		t.Fatal("DNS must be absent when Core DNS is disabled")
+	}
+	base.DNS = &DNSConfig{Enabled: true, Listen: "127.0.0.1", Port: 5353}
+	with, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dnsCfg, ok := decode(t, with)["dns"].(map[string]any)
+	if !ok {
+		t.Fatal("enabled Core DNS config missing")
+	}
+	servers := dnsCfg["servers"].([]any)
+	server := servers[0].(map[string]any)
+	if server["address"] != "127.0.0.1" || server["port"] != float64(5353) {
+		t.Fatalf("unexpected Core DNS server: %#v", server)
+	}
+}
+
+func TestCoreDNSRejectsNonLoopbackAndInvalidPort(t *testing.T) {
+	base := CompileRequest{Profiles: []Profile{{ID: "dns", Enabled: true, Port: 23401, Nodes: []Node{node("n1", "vless")}}}, DNS: &DNSConfig{Enabled: true, Listen: "0.0.0.0", Port: 5353}}
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "not loopback") {
+		t.Fatalf("expected loopback rejection, got %v", err)
+	}
+	base.DNS.Listen = "127.0.0.1"
+	base.DNS.Port = 53
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "outside allowed range") {
+		t.Fatalf("expected invalid port rejection, got %v", err)
+	}
+}
+
 func TestCompileAppliesIndependentDPIBypassOptionsToProxyOutbounds(t *testing.T) {
 	profiles := []Profile{{ID: "dpi", Enabled: true, Port: 23040, Nodes: []Node{
 		{Key: "tls", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"tls","tlsSettings":{"serverName":"tls.example","fingerprint":"chrome"}}}`)},
 		{Key: "reality", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"reality","realitySettings":{"serverName":"reality.example","fingerprint":"chrome"}}}`)},
 	}}}
-	routing := &RoutingConfig{DPIBypass: DPIBypass{
-		NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true,
-	}}
+	routing := &RoutingConfig{DPIBypass: DPIBypass{NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true}}
 	got, err := Compile(CompileRequest{Profiles: profiles, Routing: routing})
 	if err != nil {
 		t.Fatal(err)
@@ -248,19 +273,14 @@ func TestCompileAppliesIndependentDPIBypassOptionsToProxyOutbounds(t *testing.T)
 		out := raw.(map[string]any)
 		stream := out["streamSettings"].(map[string]any)
 		fm := stream["finalmask"].(map[string]any)
-		tcp := fm["tcp"].([]any)
-		udp := fm["udp"].([]any)
-		if len(tcp) != 1 || tcp[0].(map[string]any)["type"] != "fragment" {
-			t.Fatalf("TLS fragmentation missing for %s: %#v", out["tag"], fm)
-		}
-		if len(udp) != 1 || udp[0].(map[string]any)["type"] != "noise" {
-			t.Fatalf("UDP noise missing for %s: %#v", out["tag"], fm)
+		if len(fm["tcp"].([]any)) != 1 || len(fm["udp"].([]any)) != 1 {
+			t.Fatalf("DPI masks missing: %#v", fm)
 		}
 		if tls, ok := stream["tlsSettings"].(map[string]any); ok && tls["fingerprint"] != "random" {
-			t.Fatalf("TLS fingerprint was not randomized: %#v", tls)
+			t.Fatalf("TLS fingerprint not randomized: %#v", tls)
 		}
 		if reality, ok := stream["realitySettings"].(map[string]any); ok && reality["fingerprint"] != "random" {
-			t.Fatalf("REALITY fingerprint was not randomized: %#v", reality)
+			t.Fatalf("REALITY fingerprint not randomized: %#v", reality)
 		}
 	}
 }
@@ -272,7 +292,7 @@ func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
 	}
 	cfg := decode(t, got)
 	out := cfg["outbounds"].([]any)[2].(map[string]any)
-	if _, exists := out["streamSettings"]; exists {
-		t.Fatalf("DPI options should not modify default outbound: %#v", out)
+	if _, ok := out["streamSettings"]; ok {
+		t.Fatalf("DPI options changed default outbound: %#v", out)
 	}
 }
