@@ -85,6 +85,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/subscriptions/compile", s.compileSubscription)
 	s.mux.HandleFunc("/v1/selections", s.selections)
 	s.mux.HandleFunc("/v1/profiles/refresh", s.refreshProfiles)
+	s.mux.HandleFunc("/v1/profiles/preview", s.profilePreview)
 	s.mux.HandleFunc("/v1/refresh/status", s.refreshStatus)
 	s.mux.HandleFunc("/v1/profiles", s.profileCollection)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
@@ -500,6 +501,43 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (s *Server) profilePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalJSONRequest(r) {
+		writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+		return
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.profileStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "profile store is not configured")
+		return
+	}
+	var req struct {
+		ProfileID string `json:"profile_id"`
+	}
+	if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid profile preview request")
+		return
+	}
+	profile, err := s.profileStore.Get(req.ProfileID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "profile not found or invalid")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	preview, err := service.PreviewProfile(ctx, profile, s.stateDir)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
 }
 
 func (s *Server) refreshProfiles(w http.ResponseWriter, r *http.Request) {

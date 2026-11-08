@@ -134,11 +134,13 @@ HydraRoute Core is designed to coexist with other proxy clients. Integrating its
 
 ## Management API
 
-The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory.
+The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory. Each profile card has a **Серверы** action: it opens a per-profile picker with automatic/manual pool modes, individual Picked/Excluded flags, and explicit handling of server identities that disappeared from the latest subscription.
 
 - `GET /v1/profiles` — list profile metadata.
 - `POST /v1/profiles` and `DELETE /v1/profiles` — create and delete profiles.
 - `POST /v1/profiles/refresh` — compile stored subscriptions and prepare the Xray configuration.
+- `POST /v1/profiles/preview` — fetch and parse one stored profile for the dashboard server picker; returns credential-free server identities and saved selection flags only.
+- `GET /v1/selections?profile_id=<id>` and `PUT /v1/selections` — read and persist per-profile automatic/manual server selection and exclusions. Missing server identities are retained for review; manual selection fails closed if no selected node remains.
 - `GET /v1/routing` and `PUT /v1/routing` — read, validate, persist, and apply shared SOCKS5 routing rules.
 - `GET /v1/runtime` and `POST /v1/runtime` — inspect and control the managed Xray process.
 - `GET /v1/refresh/status` — inspect scheduled refresh status.

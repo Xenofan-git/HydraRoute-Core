@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/parser"
+	"hydraroute.local/core/internal/profiles"
 	"hydraroute.local/core/internal/state"
 )
 
@@ -44,6 +46,78 @@ type CompileResult struct {
 	Config       []byte
 	ProfileCount int
 	NodeCount    int
+}
+
+type PreviewNode struct {
+	Key      parser.ServerKey `json:"key"`
+	Name     string           `json:"name"`
+	Picked   bool             `json:"picked"`
+	Excluded bool             `json:"excluded"`
+}
+
+type ProfilePreview struct {
+	ProfileID       string             `json:"profile_id"`
+	SourceID        string             `json:"source_id"`
+	PickMode        string             `json:"pick_mode"`
+	Nodes           []PreviewNode      `json:"nodes"`
+	MissingPicked   []parser.ServerKey `json:"missing_picked,omitempty"`
+	MissingExcluded []parser.ServerKey `json:"missing_excluded,omitempty"`
+}
+
+// PreviewProfile fetches/parses one encrypted profile source and returns only
+// credential-free server identities plus reconciled selection metadata. Raw
+// outbounds, links, subscription URLs and credentials never leave this layer.
+func PreviewProfile(ctx context.Context, profile profiles.Profile, stateDir string) (ProfilePreview, error) {
+	if err := profiles.Validate(profile); err != nil {
+		return ProfilePreview{}, fmt.Errorf("invalid stored profile")
+	}
+	var servers []parser.ParsedServer
+	var err error
+	switch {
+	case profile.SubscriptionURL != "":
+		var body string
+		body, err = parser.FetchSubscription(ctx, profile.SubscriptionURL)
+		if err == nil {
+			servers, err = parser.ParseSubscription(profile.SourceID, body)
+		}
+	case profile.Subscription != "":
+		servers, err = parser.ParseSubscription(profile.SourceID, profile.Subscription)
+	default:
+		servers, err = parser.ParseLinks(profile.SourceID, profile.Links)
+	}
+	if err != nil {
+		return ProfilePreview{}, fmt.Errorf("profile source preview failed")
+	}
+	selection := state.Profile{ID: profile.ID, SourceID: profile.SourceID, PickMode: "auto"}
+	if stateDir != "" {
+		saved, loadErr := LoadSelection(stateDir, profile.ID)
+		if loadErr == nil {
+			if saved.SourceID != profile.SourceID {
+				return ProfilePreview{}, fmt.Errorf("saved selection does not match profile/source")
+			}
+			selection = saved
+		} else if !os.IsNotExist(loadErr) {
+			return ProfilePreview{}, fmt.Errorf("cannot load saved selection state")
+		}
+	}
+	reconciled, reconcileErr := state.Reconcile(selection, servers)
+	if reconcileErr != nil && !errors.Is(reconcileErr, state.ErrNoAvailablePickedNodes) {
+		return ProfilePreview{}, fmt.Errorf("saved selection reconciliation failed")
+	}
+	picked := make(map[string]bool, len(reconciled.Picked))
+	for _, key := range reconciled.Picked {
+		picked[key] = true
+	}
+	excluded := make(map[string]bool, len(reconciled.Excluded))
+	for _, key := range reconciled.Excluded {
+		excluded[key] = true
+	}
+	out := ProfilePreview{ProfileID: profile.ID, SourceID: profile.SourceID, PickMode: selection.PickMode, Nodes: make([]PreviewNode, 0, len(servers)), MissingPicked: reconciled.MissingPicked, MissingExcluded: reconciled.MissingExcluded}
+	for _, server := range servers {
+		key := server.CompilerKey()
+		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Picked: picked[key], Excluded: excluded[key]})
+	}
+	return out, nil
 }
 
 // CompileSubscriptions parses links or securely fetches subscription URLs,

@@ -10,8 +10,40 @@ import (
 
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/parser"
+	"hydraroute.local/core/internal/profiles"
 	"hydraroute.local/core/internal/state"
 )
+
+func TestPreviewProfileReturnsSelectionAndRetainsMissingKeys(t *testing.T) {
+	links := []string{
+		"vless://00000000-0000-4000-8000-000000000001@a.example:443#Alpha",
+		"vless://00000000-0000-4000-8000-000000000002@b.example:443#Beta",
+	}
+	servers, err := parser.ParseLinks("providerA", links)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "state")
+	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16161, Links: links}
+	if err := SaveSelection(dir, state.Profile{ID: "foreign", SourceID: "providerA", PickMode: "manual", Picked: []parser.ServerKey{servers[0].Key}, Excluded: []parser.ServerKey{servers[1].Key}}); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := PreviewProfile(context.Background(), profile, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.PickMode != "manual" || len(preview.Nodes) != 2 || !preview.Nodes[0].Picked || !preview.Nodes[1].Excluded {
+		t.Fatalf("unexpected preview: %+v", preview)
+	}
+	profile.Links = links[1:]
+	preview, err = PreviewProfile(context.Background(), profile, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.MissingPicked) != 1 || preview.MissingPicked[0] != servers[0].Key || len(preview.Nodes) != 1 {
+		t.Fatalf("missing manual selection was not retained: %+v", preview)
+	}
+}
 
 func TestCompileSubscriptionsIsolatesProfiles(t *testing.T) {
 	req := SubscriptionRequest{Profiles: []ProfileRequest{

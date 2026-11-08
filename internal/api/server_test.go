@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
 	"net/http"
 	"net/http/httptest"
@@ -359,6 +360,67 @@ func TestSubscriptionCompileRejectsUnknownFieldsAndCrossOrigin(t *testing.T) {
 	h.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin status=%d", rr.Code)
+	}
+}
+
+func TestProfilePreviewReturnsCredentialFreeNodesAndSelection(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	links := []string{
+		"vless://00000000-0000-4000-8000-000000000001@a.example:443#Alpha",
+		"vless://00000000-0000-4000-8000-000000000002@b.example:443#Beta",
+	}
+	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16160, Links: links}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
+	servers, err := parser.ParseLinks("providerA", links)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectionBody, err := json.Marshal(selectionRequest{ID: "foreign", SourceID: "providerA", PickMode: "manual", Picked: []parser.ServerKey{servers[0].Key}, Excluded: []parser.ServerKey{servers[1].Key}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selectionReq := localPost("/v1/selections", string(selectionBody))
+	selectionReq.Method = http.MethodPut
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, selectionReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save selection status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	previewReq := localPost("/v1/profiles/preview", `{"profile_id":"foreign"}`)
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, previewReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		ProfileID string `json:"profile_id"`
+		SourceID  string `json:"source_id"`
+		PickMode  string `json:"pick_mode"`
+		Nodes     []struct {
+			Name     string           `json:"name"`
+			Picked   bool             `json:"picked"`
+			Excluded bool             `json:"excluded"`
+			Key      parser.ServerKey `json:"key"`
+			Outbound json.RawMessage  `json:"outbound"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ProfileID != "foreign" || got.SourceID != "providerA" || got.PickMode != "manual" || len(got.Nodes) != 2 {
+		t.Fatalf("unexpected preview metadata: %+v", got)
+	}
+	if got.Nodes[0].Name != "Alpha" || !got.Nodes[0].Picked || got.Nodes[0].Excluded {
+		t.Fatalf("unexpected first node: %+v", got.Nodes[0])
+	}
+	if got.Nodes[1].Name != "Beta" || got.Nodes[1].Picked || !got.Nodes[1].Excluded {
+		t.Fatalf("unexpected second node: %+v", got.Nodes[1])
+	}
+	if strings.Contains(rr.Body.String(), "00000000-0000-4000-8000-000000000001") || strings.Contains(rr.Body.String(), "outbound") {
+		t.Fatalf("preview leaked outbound credentials or raw payload: %s", rr.Body.String())
 	}
 }
 
