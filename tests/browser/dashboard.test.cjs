@@ -209,27 +209,22 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     await page.close();
   }
 });
-test('DPI bypass options expand on hover and save independent toggles', async () => {
+test('DPI bypass options open as a side popover and persist each independent toggle', async () => {
   savedRouting = undefined;
   const page = await browser.newPage();
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
     await page.locator('.nav-item[data-page="network"]').click();
-    const trigger = page.locator('#dpiBypassToggle');
-    await trigger.hover();
-    await page.locator('#dpiNoise').waitFor({ state: 'visible' });
-    await page.locator('#dpiNoise').check();
-    await page.locator('#dpiFragment').check();
-    await page.locator('#dpiFingerprint').uncheck();
-    await page.locator('#saveDPIBypass').click();
-    await page.getByText('Настройки обхода DPI сохранены и применены').waitFor();
-    assert.deepEqual(savedRouting.dpi_bypass, {
-      noise_traffic: true,
-      tls_fragmentation: true,
-      random_tls_fingerprint: false,
-    });
-  } finally {
-    await page.close();
-  }
+    await page.locator('#dpiBypassToggle').hover();
+    await page.locator('#dpiOptions').waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#dpiCount').textContent(), '0 из 3');
+    for (const [id, checked] of [['dpiNoise', true], ['dpiFragment', true], ['dpiFingerprint', false]]) {
+      const response = page.waitForResponse(r => r.url().endsWith('/v1/routing') && r.request().method() === 'PUT');
+      if (checked) await page.locator('#' + id).check(); else await page.locator('#' + id).uncheck();
+      await response;
+    }
+    assert.equal(await page.locator('#dpiCount').textContent(), '2 из 3');
+    assert.deepEqual(savedRouting.dpi_bypass, { noise_traffic: true, tls_fragmentation: true, random_tls_fingerprint: false });
+  } finally { await page.close(); }
 });
