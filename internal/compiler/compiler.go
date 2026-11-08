@@ -1,3 +1,6 @@
+Ran on ams-1-vm-skeg.tail93b564.ts.net (user root), exit code 0:
+
+###internal/compiler/compiler.go
 package compiler
 
 import (
@@ -342,7 +345,6 @@ func ValidateJSON(data []byte) error {
 	return nil
 }
 
-
 // applyDPIBypass decorates each eligible proxy's first-hop transport. It only
 // touches the generated Xray object; it never changes host routes or firewall.
 func applyDPIBypass(outbound map[string]any, options DPIBypass) {
@@ -373,9 +375,9 @@ func applyDPIBypass(outbound map[string]any, options DPIBypass) {
 			tcp = append(tcp, map[string]any{
 				"type": "fragment",
 				"settings": map[string]any{
-					"packets": "tlshello",
-					"lengths": []string{"10-20"},
-					"delays": []string{"1-2"},
+					"packets":  "tlshello",
+					"lengths":  []string{"10-20"},
+					"delays":   []string{"1-2"},
 					"maxSplit": "3-6",
 				},
 			})
@@ -396,7 +398,6 @@ func applyDPIBypass(outbound map[string]any, options DPIBypass) {
 		}
 	}
 }
-
 
 // applyDPIBypass decorates each eligible proxy's first-hop transport. It only
 // touches the generated Xray object; it never changes host routes or firewall.
