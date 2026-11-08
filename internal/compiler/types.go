@@ -39,6 +39,7 @@ type RoutingConfig struct {
 	DefaultProfileID string        `json:"default_profile_id,omitempty"`
 	Rules            []RoutingRule `json:"rules,omitempty"`
 	DPIBypass        DPIBypass     `json:"dpi_bypass,omitempty"`
+	BalancingStrategy string       `json:"balancing_strategy,omitempty"`
 }
 
 // RoutingRule is evaluated in slice order; the first matching rule wins.
