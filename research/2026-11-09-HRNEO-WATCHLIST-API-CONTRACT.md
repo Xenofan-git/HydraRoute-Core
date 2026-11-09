@@ -90,5 +90,5 @@ K entries include explicit domain.conf entries and GeoSite Domain/Full entries, 
 ## Status
 
 Contract recovery: COMPLETE.
-Core implementation: implemented in source; full CI validation pending. See research/2026-11-09-HRNEO-WATCHLIST-IMPLEMENTATION.md.
+Core implementation: implemented in source; GitHub Actions #191 and #192 passed all tests and AMD64/ARM64 builds. See research/2026-11-09-HRNEO-WATCHLIST-IMPLEMENTATION.md.
 No NanoPi runtime or network changes were made during this research.

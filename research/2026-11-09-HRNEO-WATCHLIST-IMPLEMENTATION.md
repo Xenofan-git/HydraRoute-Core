@@ -34,7 +34,7 @@ This was a parser probe only; no Core/Xray runtime or systemd service was change
 - Snapshot tests: lowest-rank precedence, trailing dot/case normalization, parent suffixes, duplicate first owner, GeoSite Domain/Full filtering, attribute filtering, external files, traversal/symlink rejection, bounded names and DUMP terminator/count.
 - Socket tests: protocol pipelining, CRLF, half-close, socket mode, four-client cap, fifth-client busy, overlong input close, slow DUMP does not block MATCH, socket cleanup.
 - API test: routing apply creates Core-owned socket, MATCH/DUMP responses and status counts, disabling routing removes socket.
-- VPS: full Go tests, go vet and diff check passed; watchlist race test passed. GitHub Actions #191/#192 will validate JS/Playwright and static ARM64/AMD64 builds.
+- VPS: full Go tests, go vet and diff check passed; watchlist race test passed. GitHub Actions #191 (push) and #192 (pull request) both passed formatting, JavaScript syntax, Go tests, generated Xray config validation, HTTP/TLS/QUIC E2E, go vet, Playwright dashboard tests, and static Linux AMD64/ARM64 builds.
 
 ## Safety
 No NanoPi Core runtime deployment/restart. No changes to Keenetic, original HRNeo/Entware, 3x-ui/Xray, Tailscale, DNS, routes, firewall, iptables/nftables or conntrack.

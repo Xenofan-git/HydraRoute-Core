@@ -124,5 +124,5 @@ All changes remain source/CI only. No NanoPi Core runtime deployment/restart and
 - GeoSite protobuf parser expands only Domain/Full entries, as original Watchlist does; explicit domain/full keys are normalized and deduplicated by first insertion. keyword/regexp and GeoSite Plain/Regex are counted as excluded, and /v1/watchlist/status reports partial coverage.
 - Rules UI displays Watchlist readiness, target/key counts, socket path and partial coverage warning.
 - Actual NanoPi ARM64 Xray geosite.dat parser probe: youtube=178 keys, category-ads-all=904, geolocation-!cn=25006, ext:geosite.dat:youtube=178. This probe ran from a temporary ARM64 binary under /tmp and was removed; no Core service was deployed.
-- Unit/API tests and race tests passed on VPS; full CI #191/#192 pending.
+- Unit/API tests and race tests passed on VPS. GitHub Actions #191/#192 both passed formatting, JavaScript syntax, Go tests, Xray config validation, HTTP/TLS/QUIC E2E, go vet, Playwright and static AMD64/ARM64 builds.
 
