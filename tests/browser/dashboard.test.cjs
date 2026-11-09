@@ -34,7 +34,7 @@ const routing = {
   }],
 };
 const preview = {
-  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto', auto_update_available: true, auto_update_enabled: false, auto_update_interval: 1440, filter_keep: '', filter_exclude: '',
+  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto', auto_update_available: true, auto_update_enabled: false, auto_update_interval: 1440, filter_available: true, filter_keep: '', filter_exclude: '',
   nodes: [
     { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: true, excluded: false },
     { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: true, excluded: false },

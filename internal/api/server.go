@@ -972,6 +972,17 @@ func sameObservatoryStatus(a, b xrayapi.OutboundStatus) bool {
 		a.HealthFail == b.HealthFail
 }
 
+func eligibleObservatoryNodes(preview service.ProfilePreview) []service.PreviewNode {
+	nodes := make([]service.PreviewNode, 0, len(preview.Nodes))
+	for _, node := range preview.Nodes {
+		if node.Filtered || node.Excluded || !node.Picked {
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
 func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string, since int64) (observatoryStatusResponse, error) {
 	if s.profileStore == nil {
 		return observatoryStatusResponse{}, fmt.Errorf("profile store is not configured")
@@ -984,12 +995,13 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 	if err != nil {
 		return observatoryStatusResponse{}, err
 	}
+	eligibleNodes := eligibleObservatoryNodes(preview)
 	if !s.supervisor.Status().Running {
-		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, preview.Nodes), Error: "Xray is stopped; showing last known measurements"}, nil
+		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, eligibleNodes), Error: "Xray is stopped; showing last known measurements"}, nil
 	}
 	items, err := xrayapi.GetOutboundStatus(ctx, xrayapi.DefaultAddress)
 	if err != nil {
-		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, preview.Nodes), Error: "Xray Observatory is unavailable; showing last known measurements"}, nil
+		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, eligibleNodes), Error: "Xray Observatory is unavailable; showing last known measurements"}, nil
 	}
 	byTag := make(map[string]xrayapi.OutboundStatus, len(items))
 	for _, item := range items {
@@ -1003,7 +1015,7 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 		s.probeCache[profileID] = cache
 	}
 	cacheChanged := false
-	for _, node := range preview.Nodes {
+	for _, node := range eligibleNodes {
 		keyBytes, _ := json.Marshal(node.Key)
 		key := string(keyBytes)
 		tag := compiler.OutboundTag(profileID, key)
@@ -1157,6 +1169,7 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	eligibleNodes := eligibleObservatoryNodes(preview)
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
@@ -1181,14 +1194,12 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 	// bounded ICMP phase can take several seconds; starting afterward would
 	// discard perfectly fresh Xray probes completed while ICMP was running.
 	started := time.Now().Unix()
-	keys := make([]string, 0, len(preview.Nodes))
-	tags := make(map[string]string, len(preview.Nodes))
-	for _, node := range preview.Nodes {
+	keys := make([]string, 0, len(eligibleNodes))
+	tags := make(map[string]string, len(eligibleNodes))
+	for _, node := range eligibleNodes {
 		keyBytes, _ := json.Marshal(node.Key)
 		key := string(keyBytes)
 		keys = append(keys, key)
-		// Probe all nodes, including excluded and filtered ones. Only the Xray
-		// balancer selection is restricted; otherwise offline nodes can never recover.
 		tags[key] = compiler.OutboundTag(profileID, key)
 	}
 	if !send(pingStreamEvent{Links: keys}) {
@@ -1206,14 +1217,14 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 		echo map[string]any
 	}
 	const maxConcurrentICMP = 8
-	for start := 0; start < len(preview.Nodes); start += maxConcurrentICMP {
+	for start := 0; start < len(eligibleNodes); start += maxConcurrentICMP {
 		end := start + maxConcurrentICMP
-		if end > len(preview.Nodes) {
+		if end > len(eligibleNodes) {
 			end = len(preview.Nodes)
 		}
 		echoes := make(chan echoResult, end-start)
 		var wg sync.WaitGroup
-		for _, node := range preview.Nodes[start:end] {
+		for _, node := range eligibleNodes[start:end] {
 			keyBytes, _ := json.Marshal(node.Key)
 			key, host := string(keyBytes), node.Host
 			wg.Add(1)

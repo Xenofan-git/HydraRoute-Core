@@ -43,16 +43,16 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 		t.Fatalf("want two independent rules/balancers, got %d/%d", len(rules), len(bals))
 	}
 	outbounds := cfg["outbounds"].([]any)
-	if len(outbounds) != 7 {
-		t.Fatalf("want direct+block+4 observed nodes plus private API outbound, got %d", len(outbounds))
+	if len(outbounds) != 6 {
+		t.Fatalf("want direct+block+3 eligible pool nodes plus private API outbound, got %d", len(outbounds))
 	}
 	api := cfg["api"].(map[string]any)
 	if api["tag"] != "hr_api" || api["services"].([]any)[0] != "ObservatoryService" {
 		t.Fatalf("private Observatory API not enabled: %#v", api)
 	}
 	obs := cfg["observatory"].(map[string]any)
-	if len(obs["subjectSelector"].([]any)) != 4 {
-		t.Fatal("observatory selector must include every node, including excluded nodes")
+	if len(obs["subjectSelector"].([]any)) != 3 {
+		t.Fatal("Observatory must probe exactly the eligible nodes in profile balancers")
 	}
 	balSelector := bals[0].(map[string]any)["selector"].([]any)
 	if len(balSelector) != 1 {
@@ -76,8 +76,12 @@ func TestEmptyPickedMeansAutomaticPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["outbounds"].([]any)) != 6 {
-		t.Fatalf("all 3 nodes must remain observable while 2 are in the pool")
+	if len(cfg["outbounds"].([]any)) != 5 {
+		t.Fatalf("only the 2 eligible pool nodes may be compiled as outbounds")
+	}
+	obs := cfg["observatory"].(map[string]any)
+	if len(obs["subjectSelector"].([]any)) != 2 {
+		t.Fatalf("Observatory subjects must match the automatic pool: %#v", obs)
 	}
 }
 
@@ -91,8 +95,12 @@ func TestPickedSubsetIsIndependentFromExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["outbounds"].([]any)) != 6 {
-		t.Fatalf("all 3 nodes must remain observable while only one is picked")
+	if len(cfg["outbounds"].([]any)) != 4 {
+		t.Fatalf("only the picked node may be compiled as an outbound")
+	}
+	obs := cfg["observatory"].(map[string]any)
+	if len(obs["subjectSelector"].([]any)) != 1 {
+		t.Fatalf("Observatory subjects must match the manual pool: %#v", obs)
 	}
 }
 
@@ -344,8 +352,8 @@ func TestManualEmptyPoolOmitsProfileWithoutCreatingEmptyBalancer(t *testing.T) {
 	if len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
 		t.Fatalf("empty manual pool must not create an empty balancer: %s", config)
 	}
-	if len(cfg["inbounds"].([]any)) != 1 || cfg["api"] == nil || cfg["observatory"] == nil {
-		t.Fatalf("empty manual pool must retain the private Observatory API: %s", config)
+	if len(cfg["inbounds"].([]any)) != 0 || cfg["api"] != nil || cfg["observatory"] != nil {
+		t.Fatalf("empty manual pool must not create Observatory or inbounds: %s", config)
 	}
 }
 
@@ -356,7 +364,7 @@ func TestManagedObservatoryAPIReservesLoopbackPort(t *testing.T) {
 	}
 }
 
-func TestAllNodesExcludedRemainObservableWithoutCreatingSOCKSInbound(t *testing.T) {
+func TestAllNodesExcludedAreNotCompiledOrProbed(t *testing.T) {
 	got, err := Compile(CompileRequest{Profiles: []Profile{{
 		ID: "offline", Enabled: true, Port: 23008,
 		Nodes:    []Node{node("n1", "vless"), node("n2", "vmess")},
@@ -366,12 +374,11 @@ func TestAllNodesExcludedRemainObservableWithoutCreatingSOCKSInbound(t *testing.
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	obs := cfg["observatory"].(map[string]any)
-	if len(obs["subjectSelector"].([]any)) != 2 {
-		t.Fatalf("expected both excluded nodes in Observatory: %#v", obs)
+	if cfg["observatory"] != nil || cfg["api"] != nil {
+		t.Fatalf("excluded nodes must not create Observatory subjects: %#v", cfg)
 	}
-	if len(cfg["inbounds"].([]any)) != 1 {
-		t.Fatalf("expected only private API inbound, got %#v", cfg["inbounds"])
+	if len(cfg["outbounds"].([]any)) != 2 || len(cfg["inbounds"].([]any)) != 0 {
+		t.Fatalf("excluded nodes must not create Xray outbounds or inbounds: %#v", cfg)
 	}
 	if len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
 		t.Fatal("empty excluded pool must not create a balancer")

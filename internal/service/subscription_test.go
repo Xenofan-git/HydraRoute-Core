@@ -117,8 +117,8 @@ func TestPersistedSelectionAppliedAndManualFailsClosed(t *testing.T) {
 			vless++
 		}
 	}
-	if vless != 2 {
-		t.Fatalf("expected selected and excluded VLESS outbounds to remain observable, got %d", vless)
+	if vless != 1 {
+		t.Fatalf("expected only the selected VLESS outbound to remain observable, got %d", vless)
 	}
 	balancers := cfg["routing"].(map[string]any)["balancers"].([]any)
 	if len(balancers) != 1 || len(balancers[0].(map[string]any)["selector"].([]any)) != 1 {

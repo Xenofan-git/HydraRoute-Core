@@ -937,6 +937,19 @@ func TestRefreshSettingsPersistAndUpdateRuntimeSchedule(t *testing.T) {
 	}
 }
 
+func TestEligibleObservatoryNodesOnlyIncludesBalancerMembers(t *testing.T) {
+	preview := service.ProfilePreview{Nodes: []service.PreviewNode{
+		{Key: parser.ServerKey{Source: "providerA", Name: "selected"}, Picked: true},
+		{Key: parser.ServerKey{Source: "providerA", Name: "excluded"}, Picked: true, Excluded: true},
+		{Key: parser.ServerKey{Source: "providerA", Name: "filtered"}, Picked: true, Filtered: true},
+		{Key: parser.ServerKey{Source: "providerA", Name: "unpicked"}},
+	}}
+	got := eligibleObservatoryNodes(preview)
+	if len(got) != 1 || got[0].Key.Name != "selected" {
+		t.Fatalf("Observatory members=%#v, want only the selected balancer member", got)
+	}
+}
+
 func TestObservatoryCachePersistsAcrossCoreRestart(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)

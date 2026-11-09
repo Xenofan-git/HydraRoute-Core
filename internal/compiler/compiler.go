@@ -80,7 +80,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 		picked := stringSet(p.Picked)
 		nodeKeys := map[string]bool{}
 		eligible := make([]any, 0)
-		observed := make([]any, 0, len(p.Nodes))
 		selectors := make([]string, 0)
 		for _, n := range p.Nodes {
 			if strings.TrimSpace(n.Key) == "" {
@@ -116,15 +115,14 @@ func Compile(req CompileRequest) ([]byte, error) {
 				}
 				sockopt["interface"] = p.OutboundInterface
 			}
-			tag := OutboundTag(p.ID, n.Key)
-			outbound["tag"] = tag
-			observed = append(observed, outbound)
-			allOutboundTags = append(allOutboundTags, tag)
 			if excluded[n.Key] || ((p.ManualSelection || len(picked) > 0) && !picked[n.Key]) {
 				continue
 			}
+			tag := OutboundTag(p.ID, n.Key)
+			outbound["tag"] = tag
 			eligible = append(eligible, outbound)
 			selectors = append(selectors, tag)
+			allOutboundTags = append(allOutboundTags, tag)
 		}
 		for key := range picked {
 			if !nodeKeys[key] {
@@ -134,9 +132,9 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s: node %q cannot be both picked and excluded", p.ID, key)
 			}
 		}
-		// Observability remains active even when every node is excluded from the
-		// balancing pool. The profile SOCKS inbound is created only for eligible nodes.
-		outbounds = append(outbounds, observed...)
+		// Only eligible balancer members become Xray outbounds or Observatory
+		// subjects. Excluded and unselected nodes must not be probed.
+		outbounds = append(outbounds, eligible...)
 		if len(eligible) == 0 {
 			continue
 		}

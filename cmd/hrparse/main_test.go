@@ -112,8 +112,8 @@ func TestCompileRequestAppliesPersistedManualSelection(t *testing.T) {
 			vlessCount++
 		}
 	}
-	if vlessCount != 2 {
-		t.Fatalf("Observatory must retain both selected and excluded VLESS outbounds, got %d", vlessCount)
+	if vlessCount != 1 {
+		t.Fatalf("only the selected VLESS outbound may be compiled for Observatory, got %d", vlessCount)
 	}
 	balancers := cfg["routing"].(map[string]any)["balancers"].([]any)
 	if len(balancers) != 1 || len(balancers[0].(map[string]any)["selector"].([]any)) != 1 {
