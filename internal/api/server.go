@@ -1036,7 +1036,7 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 			if cached.Tag == tag {
 				cached.Stale = true
 				result.Statuses[key] = cached
-				if since > 0 && !isFreshObservatoryProbe(cached.LastTryTime, since) && !node.Filtered {
+				if since > 0 && !isFreshObservatoryProbe(cached.LastTryTime, since) {
 					result.Refreshed = false
 				}
 				continue
@@ -1046,7 +1046,7 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 			delete(cache, key)
 			cacheChanged = true
 		}
-		if since > 0 && !node.Filtered {
+		if since > 0 {
 			result.Refreshed = false
 		}
 	}

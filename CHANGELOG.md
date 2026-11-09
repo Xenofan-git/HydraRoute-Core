@@ -3,18 +3,18 @@
 - Зафиксирована цель переноса всего функционала оригинального HydraRoute Neo в независимый Debian/Ubuntu ARM64 HydraRoute Core.
 - Добавлена матрица функциональных групп: профили/подписки/балансировка, proxy lifecycle, Phobos/WireGuard, DNS, Geo/FQDN, health/events/system/speed, API/UI/files.
 - Зафиксированы ограничения: никакого глобального маршрутизирования, Keenetic RCI/NDM, изменений DNS/firewall, вмешательства в 3x-ui/HydraRoute Neo/Direct/Reolink.
-- Текущие незавершённые изменения остаются в рабочей копии VPS; GitHub/NanoPi не обновлялись.
+- Начальная реализация опубликована в draft PR #2 ветки `integration/per-profile-connection-settings-20261109`; runtime NanoPi не обновлялся.
 
 ## 2026-11-09 — Observatory integration work (VPS source, not deployed)
 
-- Xray compiler now retains every parsed profile outbound for Observatory, while the profile balancer selector still contains only manually selected, non-excluded nodes. This allows excluded/offline nodes to be observed and recover without entering the pool automatically.
+- Xray compiler now emits only eligible profile outbounds, and Observatory subjectSelector mirrors actual balancer membership. Excluded, unselected and filtered nodes are not probed.
 - Added deterministic per-profile node outbound tags and a loopback-only Xray Observatory gRPC API endpoint.
 - Core reads real Xray `GetOutboundStatus` results, separates proxy delay from ICMP echo, and streams per-node results to the server picker.
 - Added a private, atomic, mode-0600 persistent Observatory status cache; cached measurements remain visible when Xray is stopped or its API is temporarily unavailable.
 - Server picker refreshes live status while open without re-rendering the modal or wiping unsaved form fields. Added clear unavailable-state messaging.
-- Set a conservative 30-second Observatory cycle. The original UI exposes a configurable interval (5–3600 seconds); the Core settings control and runtime reconfiguration are still pending.
-- Updated the manual-selection regression test to assert that excluded outbounds remain observable but are absent from the balancer.
-- Validation: `go test ./...` and `go vet ./...` passed on VPS. Browser/Playwright checks were not run (Node.js is unavailable).
+- Set a conservative 30-second default and added a persisted global Observatory interval control (5–3600 seconds) with runtime reconfiguration.
+- Updated manual-selection regression tests to assert that excluded outbounds are neither compiled nor observed.
+- Validation: local `go test -count=1 ./...`, `go vet ./...` and `git diff --check` passed. Browser/Playwright validation is performed by GitHub Actions; runs #161–#166 exposed and corrected UI/test-fixture issues, run #167 is the current validation.
 - Not deployed to NanoPi: its live Core runtime currently reports unconfigured/stopped, and the active Foreign subscription previously failed parsing. No live VPN, route, firewall, DNS, or service changes were made.
 
 ### Observatory parity — interval configuration (VPS source, not deployed)
@@ -26,7 +26,7 @@
 - Matched the original probe URL: `https://www.google.com/generate_204`.
 - The setting is used on the next Core config build; changing it does not forcibly restart a running Xray process.
 - Tests cover interval distribution, the 100 ms floor, persistence, invalid values, and the original URL.
-- No live HRNeo/Keenetic configuration or NanoPi runtime was changed. This source work remains uncommitted and undeployed.
+- No live HRNeo/Keenetic configuration or NanoPi runtime was changed. Source changes are committed to draft PR #2 but are not merged or deployed.
 - Adjusted the manual Observatory stream timeout to honor the configured global cycle (up to 3600 seconds plus startup margin), with SSE keepalives. The UI now aborts the stream when the picker closes or selection is saved.
 - Serialized cache writes and bounded the in-memory/on-disk cache to the newest 4096 measurements to avoid stale concurrent snapshots and unbounded growth.
 

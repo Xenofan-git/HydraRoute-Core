@@ -89,8 +89,8 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s: duplicate node key %q", p.ID, n.Key)
 			}
 			nodeKeys[n.Key] = true
-			// Keep every parsed node as an Xray outbound so Observatory can continue
-			// probing manually excluded/offline nodes and detect their recovery.
+			// Validate every parsed node, but emit only eligible pool members as
+			// Xray outbounds and Observatory subjects.
 			var outbound map[string]any
 			if len(n.Outbound) == 0 || json.Unmarshal(n.Outbound, &outbound) != nil || outbound == nil {
 				return nil, fmt.Errorf("profile %s node %q: outbound must be a JSON object", p.ID, n.Key)

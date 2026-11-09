@@ -179,6 +179,7 @@ test('subscription modal supports select-all, manual node selection, filters and
     await page.locator('#applySubscriptionFilters').click();
     assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
     await page.locator('[data-drop-missing="picked:0"]').click();
+    await page.locator('[data-sub-tab="update"]').click();
     await page.locator('#autoUpdateSubscription').check();
     await page.locator('#refreshHours').fill('24');
     await page.locator('#saveSubscription').click();
