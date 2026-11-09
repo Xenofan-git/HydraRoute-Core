@@ -95,6 +95,7 @@ before(async () => {
       if (url.pathname === '/v1/observatory/settings' && req.method === 'GET') return json(res, 200, savedObservatorySettings);
       if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, savedObservatorySettings); }
       if (url.pathname === '/v1/geodata/status' && req.method === 'GET') return json(res, 200, { ready: true, assets: [{ name: 'geoip.dat', available: true, size: 3312784, sha256: 'a'.repeat(64) }, { name: 'geosite.dat', available: true, size: 7554929, sha256: 'b'.repeat(64) }] });
+      if (url.pathname === '/v1/watchlist/status' && req.method === 'GET') return json(res, 200, { ready: true, path: '/var/lib/hydraroute/state/watchlist.sock', targets: 3, keys: 178, partial: true, excluded_patterns: 12 });
       if (url.pathname === '/v1/l7/settings' && req.method === 'GET') return json(res, 200, savedL7Settings);
       if (url.pathname === '/v1/l7/settings' && req.method === 'PUT') { savedL7Settings = await readBody(req); return json(res, 200, savedL7Settings); }
       if (url.pathname === '/v1/profiles/ping' && req.method === 'GET') {
@@ -143,6 +144,19 @@ after(async () => {
   if (server) await new Promise(resolve => server.close(resolve));
 });
 
+
+test('rules page displays local Watchlist readiness and partial coverage', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.getByRole('heading', { name: 'Watchlist MATCH / DUMP' }).waitFor();
+    await page.getByText('Активен', { exact: true }).waitFor();
+    await page.getByText(/Частичный список: 12/).waitFor();
+  } finally {
+    await page.close();
+  }
+});
 
 test('rules page displays GeoIP and GeoSite asset readiness', async () => {
   const page = await browser.newPage();

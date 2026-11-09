@@ -10,6 +10,7 @@ import (
 	"hydraroute.local/core/internal/service"
 	"hydraroute.local/core/internal/state"
 	"hydraroute.local/core/internal/xrayapi"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1289,5 +1290,63 @@ func TestEligiblePreviewNodeCountMatchesSelectionAndFilters(t *testing.T) {
 	selection = &state.Profile{PickMode: "manual", Picked: []parser.ServerKey{key1, key2}, Excluded: []parser.ServerKey{key2}}
 	if got := eligiblePreviewNodeCount(preview, selection); got != 1 {
 		t.Fatalf("manual subset pool count=%d, want 1", got)
+	}
+}
+
+func TestRoutingPublishesCoreOwnedWatchlistSocketAndStatus(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16220,
+		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"enabled":true,"listen":"127.0.0.1","port":16221,"default_action":"block","rules":[{"id":"ru","name":"RU","enabled":true,"match_type":"domain","values":["domain:ru"],"action":"profile","profile_id":"foreign"},{"id":"telegram","name":"Telegram","enabled":true,"match_type":"domain","values":["domain:telegram.org"],"action":"direct"},{"id":"geoip","name":"GeoIP RU","enabled":true,"match_type":"ip","values":["geoip:ru"],"action":"block"}]}`
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/routing", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("routing PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	path := filepath.Join(stateDir, "watchlist.sock")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("watchlist socket was not created: %v", err)
+	}
+	if info.Mode().Perm() != 0600 || info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("unsafe watchlist socket mode/type: %v", info.Mode())
+	}
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte("MATCH Mail.Google.RU.\nMATCH api.telegram.org\nDUMP\n")); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.(*net.UnixConn).CloseWrite()
+	response, err := io.ReadAll(conn)
+	_ = conn.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(response)
+	if !strings.Contains(got, "OK foreign 0 ru\n") || !strings.Contains(got, "OK DIRECT 1 telegram.org\n") ||
+		!strings.Contains(got, "T 2 BLOCK\n") || !strings.Contains(got, "END 2\n") {
+		t.Fatalf("unexpected watchlist protocol response:\n%s", got)
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/watchlist/status"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"ready":true`) ||
+		!strings.Contains(rr.Body.String(), `"targets":3`) || !strings.Contains(rr.Body.String(), `"keys":2`) {
+		t.Fatalf("watchlist status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	disabled := `{"enabled":false,"listen":"127.0.0.1","port":16221,"default_action":"block","rules":[]}`
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/routing", disabled))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable routing status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("watchlist socket remains after routing disabled: %v", err)
 	}
 }

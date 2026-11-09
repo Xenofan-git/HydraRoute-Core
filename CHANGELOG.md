@@ -126,3 +126,16 @@
 ### L7 end-to-end test result
 - Added `tests/integration/l7_proxy_sniffing.py`, a loopback-only SOCKS5/Xray test for HTTP Host and TLS SNI routing. Both protocols passed on VPS Xray 26.10.31 AMD64 and actual NanoPi Xray 26.10.31 ARM64. QUIC real-traffic validation remains pending.
 - GitHub Actions #179 passed Playwright and Linux ARM64/AMD64 static builds.
+
+### QUIC SNI end-to-end validation
+- Added `tests/integration/l7_quic_sni.py` (aioquic 1.7.2; `tests/integration/requirements-quic.txt`). VPS Xray 26.10.31 AMD64 passed QUIC SNI block/direct E2E. NanoPi ARM64 passed the QUIC sniffing config test; packet-level ARM64 E2E remains pending.
+
+
+## 2026-11-09 — Watchlist MATCH/DUMP
+
+- Recovered the original HRNeo Unix socket contract and implemented a Core-owned socket at the private state directory with 0600 permissions.
+- Added MATCH/DUMP line protocol, rank-based suffix semantics, bounded concurrent clients, pipelining, half-close handling and streaming DUMP.
+- Added Xray GeoSite protobuf expansion for Domain/Full records; non-enumerable Plain/Regex and keyword/regexp patterns are explicitly counted as partial coverage.
+- Added loopback-only Watchlist status API and Rules UI card.
+- Added snapshot, socket protocol, API lifecycle and browser UI regression tests.
+- No NanoPi runtime deployment or network changes.

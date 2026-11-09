@@ -22,7 +22,8 @@ The project keeps subscription profiles isolated: each enabled profile receives 
 - **Selection persistence** — stores manual/automatic node selection and exclusions without persisting raw subscription credentials in selection state.
 - **Embedded web dashboard** — responsive Midnight + Violet interface with dark/light themes, profile cards, shared SOCKS5 routing editor, and runtime controls.
 - **Shared SOCKS5 routing** — optional dedicated inbound with ordered domain/IP rules, profile/DIRECT/BLOCK actions, and an explicit default route.
-- **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, and selection operations.
+- **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, selection operations, GeoIP/GeoSite readiness, and Watchlist status.
+- **HRNeo-compatible Watchlist** — Core-owned Unix socket with MATCH/DUMP line protocol, rank-based suffix matching, bounded DUMP streaming, and a read-only status endpoint. GeoSite Domain/Full keys are expanded from the installed data file; non-enumerable patterns are reported as partial coverage.
 - **Runtime supervision** — validates candidate configurations with Xray before activation and preserves the last known-good configuration on refresh failures.
 - **Scheduled refresh** — independent per-profile schedules with capped exponential retry; disabled unless configured.
 - **ARM64 and AMD64 builds** — cross-compilation for Linux ARM64/AArch64 and AMD64.
@@ -139,6 +140,11 @@ HydraRoute Core is designed to coexist with other proxy clients. Integrating its
 
 The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory. Each profile card has a **Серверы** action: it opens the HRNeo-style subscription manager. Selection is stored separately from keep/exclude filters, so changing filters does not destroy manual picks. Direct/manual links bypass subscription filters. URL subscription bodies are cached inside the encrypted profile store; per-profile auto-refresh fetches only due sources and uses cached bodies for the rest. The original two measurement columns are kept distinct: ICMP echo is a host-level reachability test, while proxy delay and `offline` state come from the running Xray Observatory.
 
+- GET /v1/geodata/status — inspect the fixed GeoIP/GeoSite assets, sizes and SHA-256.
+- GET /v1/watchlist/status — inspect the local MATCH/DUMP socket and partial-coverage counters.
+- The Core Watchlist socket is created only after a shared routing configuration has been successfully prepared. Its path is /var/lib/hydraroute/state/watchlist.sock (mode 0600); it never reuses HRNeo's /var/run/hrneo.sock.
+- MATCH <name> removes one trailing dot, lowercases, checks exact and parent suffixes, and chooses the lowest numeric rank. DUMP streams T, K, and END records. Targets map to Core profile IDs, DIRECT, or BLOCK; IP-only targets may appear in T, but IP/CIDR entries are not domain K records.
+- GeoSite Domain/Full records are expanded; GeoSite Plain/Regex and Xray keyword/regexp patterns are not enumerable concrete keys and are reported as partial coverage by /v1/watchlist/status.
 - `GET /v1/profiles` — list profile metadata.
 - `POST /v1/profiles` and `DELETE /v1/profiles` — create and delete profiles.
 - `POST /v1/profiles/refresh` — compile stored subscriptions and prepare the Xray configuration.

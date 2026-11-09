@@ -35,7 +35,7 @@ The target is functional parity at the hrcore panel and proxy-control plane, not
 | PolicyOrder | Preserve ordered first-match rule compilation | Partial |
 | GeoIP / GeoSite databases | Managed Xray geodata assets and UI rule types | Pending |
 | DNS capture / dynamic IP sets | Optional SmartDNS sidecar and local resolver groups | Pending |
-| L7 HTTP/TLS/QUIC classification | Opt-in Xray inbound sniffing on Core SOCKS5 only; no NFLOG/firewall capture | Partial; HTTP/TLS end-to-end passed on VPS and NanoPi, QUIC traffic test pending |
+| L7 HTTP/TLS/QUIC classification | Opt-in Xray inbound sniffing on Core SOCKS5 only; no NFLOG/firewall capture | Partial; HTTP/TLS E2E on VPS+NanoPi, QUIC E2E on VPS; ARM64 QUIC E2E pending |
 | DirectRoute / ForceInterface | Per-profile outbound socket interface selection | Partial |
 | GlobalRouting | No safe host-level equivalent under current constraints | Not ported |
 | ConntrackFlush | Not applicable to independent SOCKS sessions | Not ported |
@@ -97,3 +97,9 @@ Expected SHA-256: `553e05c8d50de951c2acbeebf06960c1b5934833c0218065d9bce26077e1e
 ## 8. Active server reverse-engineering note
 
 See `research/2026-11-09-HRWEB-ACTIVE-OUTBOUND-INDEX-MAPPING.md`. HRweb's active-target reverse mapping uses the final two numbers in its outbound tag as interface ordinal and full-pool index. Core should retain stable ServerKey-derived outbound tags instead of copying that fragile index scheme. The last `principle_target.tag` is a balancer candidate, not proof of a live socket.
+
+## Watchlist MATCH/DUMP contract and Core implementation update — 2026-11-09
+
+Original contract recovered from Ground-Zerro/HydraRoute commit 7fb556ec493adda131f3e8f97106226751b59528. Core source now implements a Core-owned Unix socket under the private state directory, MATCH/DUMP line protocol, lowest-rank-wins suffix matching, four-client cap, bounded input/output, pipelining, half-close, DUMP streaming, GeoSite Domain/Full expansion, and loopback-only status API. The Rules UI reports readiness and partial coverage.
+
+The implementation uses /var/lib/hydraroute/state/watchlist.sock (0600), never /var/run/hrneo.sock. GeoSite Plain/Regex and Xray keyword/regexp patterns are excluded from concrete K keys and counted in the partial-coverage status. See research/2026-11-09-HRNEO-WATCHLIST-API-CONTRACT.md and research/2026-11-09-HRNEO-WATCHLIST-IMPLEMENTATION.md.

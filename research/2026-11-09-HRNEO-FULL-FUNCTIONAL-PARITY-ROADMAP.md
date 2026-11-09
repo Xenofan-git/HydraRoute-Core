@@ -112,3 +112,17 @@
 
 ### Deployment boundary
 All changes remain source/CI only. No NanoPi Core runtime deployment/restart and no changes to Keenetic, HRNeo/Entware, 3x-ui/Xray, Tailscale, system DNS, host routes, firewall, iptables/nftables or conntrack.
+
+
+## Watchlist implementation update — 2026-11-09 17:05 MSK
+
+- Added Core-owned Unix socket protocol under the private state directory: /var/lib/hydraroute/state/watchlist.sock, mode 0600. It does not collide with original /var/run/hrneo.sock.
+- Implemented MATCH/DUMP line protocol, four-client cap, 512-byte request buffer, 253-byte MATCH name limit, 8192-byte buffered DUMP, pipelining, CRLF, half-close, incomplete final-line handling and per-client streaming isolation.
+- MATCH removes one trailing dot, lowercases, checks exact + parent suffixes and chooses lowest numeric rank. Replies preserve OK target rank key, NO, ERR name, ERR command, ERR busy.
+- DUMP emits T/K/END records. Targets follow first enabled rule appearance; profile actions map to stable profile IDs, direct to DIRECT, block to BLOCK. IP-only targets appear in T but IP/CIDR entries are not K records.
+- Snapshot updates only after successful config prepare/apply; the snapshot is immutable per request/DUMP. Socket is closed when routing is disabled or Core API shuts down.
+- GeoSite protobuf parser expands only Domain/Full entries, as original Watchlist does; explicit domain/full keys are normalized and deduplicated by first insertion. keyword/regexp and GeoSite Plain/Regex are counted as excluded, and /v1/watchlist/status reports partial coverage.
+- Rules UI displays Watchlist readiness, target/key counts, socket path and partial coverage warning.
+- Actual NanoPi ARM64 Xray geosite.dat parser probe: youtube=178 keys, category-ads-all=904, geolocation-!cn=25006, ext:geosite.dat:youtube=178. This probe ran from a temporary ARM64 binary under /tmp and was removed; no Core service was deployed.
+- Unit/API tests and race tests passed on VPS; full CI #191/#192 pending.
+

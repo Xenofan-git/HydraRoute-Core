@@ -32,6 +32,7 @@ import (
 	"hydraroute.local/core/internal/service"
 	"hydraroute.local/core/internal/state"
 	"hydraroute.local/core/internal/ui"
+	hrwatchlist "hydraroute.local/core/internal/watchlist"
 	"hydraroute.local/core/internal/xrayapi"
 )
 
@@ -83,6 +84,14 @@ type Server struct {
 	probeMu             sync.RWMutex
 	probeSaveMu         sync.Mutex
 	probeCache          map[string]map[string]xrayapi.OutboundStatus
+	watchlistMu         sync.Mutex
+	watchlist           *hrwatchlist.Server
+	watchlistPath       string
+	watchlistErr        string
+	watchlistTargets    int
+	watchlistKeys       int
+	watchlistPartial    bool
+	watchlistExcluded   int
 	observatoryInterval int
 	l7Settings          compiler.L7SniffingConfig
 	mux                 *http.ServeMux
@@ -145,12 +154,16 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/interfaces", s.interfaces)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/geodata/status", s.geoDataStatus)
+	s.mux.HandleFunc("/v1/watchlist/status", s.watchlistStatus)
 	s.mux.HandleFunc("/v1/l7/settings", s.l7SettingsHandler)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
 	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
 	s.mux.HandleFunc("/v1/dns/check", s.dnsCheck)
 	s.mux.Handle("/", ui.Handler())
+	if s.supervisor != nil && s.supervisor.Status().Configured {
+		s.syncWatchlist()
+	}
 	return s
 }
 
@@ -170,6 +183,7 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	if ip == nil || !ip.IsLoopback() {
 		return fmt.Errorf("API listen address must be a literal loopback IP")
 	}
+	defer s.closeWatchlist()
 	if s.dns != nil && s.dns.Config().Enabled {
 		if err := s.dns.Start(); err != nil {
 			return fmt.Errorf("start saved DNS service: %w", err)
@@ -199,6 +213,7 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		return err
 	case <-ctx.Done():
+		s.closeWatchlist()
 		if s.dns != nil {
 			_ = s.dns.Stop()
 		}
@@ -345,6 +360,7 @@ func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusInternalServerError, "cannot save routing config")
 					return
 				}
+				s.syncWatchlist()
 				writeJSON(w, http.StatusOK, map[string]any{"routing": cfg, "status": "saved"})
 				return
 			}
@@ -1639,6 +1655,7 @@ func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targe
 			return nil, fmt.Errorf("new Xray startup failed; previous config restored: %w", startErr)
 		}
 	}
+	s.syncWatchlist()
 	return map[string]any{"status": "prepared", "profiles": result.ProfileCount, "nodes": result.NodeCount, "bytes": len(result.Config), "runtime": s.supervisor.Status()}, nil
 }
 
@@ -2332,4 +2349,120 @@ func (s *Server) observatorySettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		methodNotAllowed(w)
 	}
+}
+
+func (s *Server) syncWatchlist() {
+	s.watchlistMu.Lock()
+	defer s.watchlistMu.Unlock()
+	fail := func(err error) {
+		s.watchlistErr = err.Error()
+		if s.watchlist != nil {
+			_ = s.watchlist.Close()
+			s.watchlist = nil
+		}
+		s.watchlistPath = ""
+		s.watchlistTargets = 0
+		s.watchlistKeys = 0
+		s.watchlistPartial = false
+		s.watchlistExcluded = 0
+	}
+	if s.routingStore == nil {
+		fail(fmt.Errorf("shared routing store is not configured"))
+		return
+	}
+	cfg, found, err := s.routingStore.Load()
+	if err != nil {
+		fail(fmt.Errorf("cannot load routing snapshot"))
+		return
+	}
+	if !found || !cfg.Enabled {
+		if s.watchlist != nil {
+			_ = s.watchlist.Close()
+			s.watchlist = nil
+		}
+		s.watchlistPath = ""
+		s.watchlistErr = ""
+		s.watchlistTargets = 0
+		s.watchlistKeys = 0
+		s.watchlistPartial = false
+		s.watchlistExcluded = 0
+		return
+	}
+	if s.supervisor == nil || !s.supervisor.Status().Configured {
+		fail(fmt.Errorf("shared routing runtime is not configured"))
+		return
+	}
+	snapshot, err := hrwatchlist.Build(cfg, os.Getenv("XRAY_LOCATION_ASSET"))
+	if err != nil {
+		fail(fmt.Errorf("cannot build watchlist snapshot: %w", err))
+		return
+	}
+	if s.stateDir == "" {
+		fail(fmt.Errorf("watchlist state directory is not configured"))
+		return
+	}
+	if err := os.MkdirAll(s.stateDir, 0700); err != nil {
+		fail(fmt.Errorf("cannot create watchlist state directory"))
+		return
+	}
+	info, err := os.Lstat(s.stateDir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+		fail(fmt.Errorf("watchlist state directory must be private and not a symlink"))
+		return
+	}
+	path := filepath.Join(s.stateDir, "watchlist.sock")
+	if s.watchlist == nil {
+		s.watchlist, err = hrwatchlist.Listen(path, snapshot)
+		if err != nil {
+			fail(fmt.Errorf("cannot create local watchlist socket: %w", err))
+			return
+		}
+	} else {
+		s.watchlist.Update(snapshot)
+	}
+	s.watchlistPath = path
+	s.watchlistErr = ""
+	s.watchlistTargets = len(snapshot.Targets())
+	s.watchlistKeys = len(snapshot.Entries())
+	s.watchlistPartial = snapshot.Partial()
+	s.watchlistExcluded = snapshot.ExcludedPatterns
+}
+
+func (s *Server) closeWatchlist() {
+	s.watchlistMu.Lock()
+	defer s.watchlistMu.Unlock()
+	if s.watchlist != nil {
+		_ = s.watchlist.Close()
+		s.watchlist = nil
+	}
+	s.watchlistPath = ""
+	s.watchlistTargets = 0
+	s.watchlistKeys = 0
+	s.watchlistPartial = false
+	s.watchlistExcluded = 0
+}
+
+func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	s.watchlistMu.Lock()
+	status := map[string]any{
+		"ready":             s.watchlist != nil,
+		"path":              s.watchlistPath,
+		"targets":           s.watchlistTargets,
+		"keys":              s.watchlistKeys,
+		"partial":           s.watchlistPartial,
+		"excluded_patterns": s.watchlistExcluded,
+	}
+	if s.watchlistErr != "" {
+		status["error"] = s.watchlistErr
+	}
+	s.watchlistMu.Unlock()
+	writeJSON(w, http.StatusOK, status)
 }
