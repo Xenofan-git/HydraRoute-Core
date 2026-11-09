@@ -28,6 +28,9 @@ func OutboundTag(profileID, key string) string {
 }
 
 func Compile(req CompileRequest) ([]byte, error) {
+	if req.L7Sniffing.Enabled && !req.L7Sniffing.HTTP && !req.L7Sniffing.TLS && !req.L7Sniffing.QUIC {
+		return nil, fmt.Errorf("L7 sniffing is enabled but no protocol is selected")
+	}
 	profiles := append([]Profile(nil), req.Profiles...)
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
 
@@ -143,10 +146,12 @@ func Compile(req CompileRequest) ([]byte, error) {
 
 		inTag := "hr_in_" + p.ID
 		balTag := "hr_bal_" + p.ID
-		inbounds = append(inbounds, map[string]any{
+		profileInbound := map[string]any{
 			"tag": inTag, "listen": listen, "port": p.Port, "protocol": "socks",
 			"settings": map[string]any{"auth": "noauth", "udp": true},
-		})
+		}
+		applyL7Sniffing(profileInbound, req.L7Sniffing)
+		inbounds = append(inbounds, profileInbound)
 		rules = append(rules, map[string]any{
 			"type": "field", "inboundTag": []string{inTag}, "balancerTag": balTag,
 		})
@@ -185,10 +190,12 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("shared routing exceeds 256 rules")
 			}
 			sharedTag := "hr_shared_in"
-			inbounds = append(inbounds, map[string]any{
+			sharedInbound := map[string]any{
 				"tag": sharedTag, "listen": listen, "port": routing.Port, "protocol": "socks",
 				"settings": map[string]any{"auth": "noauth", "udp": true},
-			})
+			}
+			applyL7Sniffing(sharedInbound, req.L7Sniffing)
+			inbounds = append(inbounds, sharedInbound)
 			seenRuleIDs := map[string]bool{}
 			for i, rule := range routing.Rules {
 				if !rule.Enabled {
@@ -292,6 +299,29 @@ func Compile(req CompileRequest) ([]byte, error) {
 		}
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+func applyL7Sniffing(inbound map[string]any, settings L7SniffingConfig) {
+	if !settings.Enabled {
+		return
+	}
+	destOverride := make([]string, 0, 3)
+	if settings.HTTP {
+		destOverride = append(destOverride, "http")
+	}
+	if settings.TLS {
+		destOverride = append(destOverride, "tls")
+	}
+	if settings.QUIC {
+		destOverride = append(destOverride, "quic")
+	}
+	if len(destOverride) == 0 {
+		return
+	}
+	inbound["sniffing"] = map[string]any{
+		"enabled": true, "destOverride": destOverride,
+		"metadataOnly": false, "routeOnly": true,
+	}
 }
 
 func observatoryProbeInterval(seconds, subjects int) string {

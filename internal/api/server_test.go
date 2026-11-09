@@ -1170,6 +1170,55 @@ func TestObservatorySettingsPersistAndValidate(t *testing.T) {
 	}
 }
 
+func TestL7SettingsPersistAndApplyOnlyToCoreInbounds(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/l7/settings", `{"enabled":true,"http":false,"tls":true,"quic":true}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(filepath.Join(dir, "l7", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("settings mode=%o", info.Mode().Perm())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), dir)
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localGet("/v1/l7/settings"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"enabled":true`) || !strings.Contains(rr.Body.String(), `"tls":true`) {
+		t.Fatalf("reload status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	request := `{"profiles":[{"id":"l7","enabled":true,"port":16241,"nodes":[{"key":"node","outbound":{"protocol":"freedom"}}]}]}`
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localPost("/v1/config", request))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("config status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	config, err := reloaded.supervisor.SnapshotConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(config, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	inbounds := decoded["inbounds"].([]any)
+	sniffing := inbounds[0].(map[string]any)["sniffing"].(map[string]any)
+	selected := sniffing["destOverride"].([]any)
+	if len(selected) != 2 || selected[0] != "tls" || selected[1] != "quic" || sniffing["routeOnly"] != true {
+		t.Fatalf("persisted L7 selection was not applied: %#v", sniffing)
+	}
+	invalid := `{"enabled":true,"http":false,"tls":false,"quic":false}`
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localPut("/v1/l7/settings", invalid))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("empty enabled L7 selection status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestIsFreshObservatoryProbeUsesStrictTimestampBoundary(t *testing.T) {
 	if isFreshObservatoryProbe(1762680000, 1762680000) {
 		t.Fatal("same-second/old result must not be treated as fresh")

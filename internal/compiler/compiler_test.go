@@ -225,6 +225,57 @@ func TestValidateMatchValueRejectsExternalGeodataPathTraversal(t *testing.T) {
 	}
 }
 
+func TestL7SniffingIsLimitedToCoreSOCKSInbounds(t *testing.T) {
+	got, err := Compile(CompileRequest{
+		Profiles:   []Profile{{ID: "l7", Enabled: true, Port: 23410, Nodes: []Node{node("node", "vless")}}},
+		Routing:    &RoutingConfig{Enabled: true, Port: 23411, DefaultAction: "block"},
+		L7Sniffing: L7SniffingConfig{Enabled: true, HTTP: true, TLS: true, QUIC: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	inbounds := cfg["inbounds"].([]any)
+	if len(inbounds) != 3 {
+		t.Fatalf("expected profile, shared and private API inbounds, got %d", len(inbounds))
+	}
+	for _, index := range []int{0, 1} {
+		in := inbounds[index].(map[string]any)
+		sniffing, ok := in["sniffing"].(map[string]any)
+		if !ok || sniffing["enabled"] != true || sniffing["routeOnly"] != true || sniffing["metadataOnly"] != false {
+			t.Fatalf("Core SOCKS inbound %d missing route-only sniffing: %#v", index, in)
+		}
+		if got := sniffing["destOverride"].([]any); len(got) != 3 || got[0] != "http" || got[1] != "tls" || got[2] != "quic" {
+			t.Fatalf("unexpected L7 protocol selection: %#v", got)
+		}
+	}
+	if _, exists := inbounds[2].(map[string]any)["sniffing"]; exists {
+		t.Fatal("private Xray API inbound must not have user traffic sniffing enabled")
+	}
+}
+
+func TestL7SniffingCanSelectProtocolsAndRejectEmptySelection(t *testing.T) {
+	base := CompileRequest{
+		Profiles:   []Profile{{ID: "l7", Enabled: true, Port: 23412, Nodes: []Node{node("node", "vless")}}},
+		L7Sniffing: L7SniffingConfig{Enabled: true, TLS: true},
+	}
+	got, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := decode(t, got)["inbounds"].([]any)[0].(map[string]any)
+	sniffing := in["sniffing"].(map[string]any)
+	selected := sniffing["destOverride"].([]any)
+	if len(selected) != 1 || selected[0] != "tls" {
+		t.Fatalf("disabled protocol sniffers leaked into config: %#v", selected)
+	}
+	base.L7Sniffing.HTTP = false
+	base.L7Sniffing.TLS = false
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "no protocol is selected") {
+		t.Fatalf("expected empty enabled L7 selection to be rejected, got %v", err)
+	}
+}
+
 func TestSharedSOCKSRejectsUnsafeFallbackAndInvalidTargets(t *testing.T) {
 	base := CompileRequest{
 		Profiles: []Profile{{ID: "ok", Enabled: true, Port: 23101, Nodes: []Node{node("n1", "vless")}}},

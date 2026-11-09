@@ -14,6 +14,7 @@ let savedSelection;
 let savedRouting;
 let savedRefresh;
 let savedObservatorySettings = { probe_interval_seconds: 30 };
+let savedL7Settings = { enabled: false, http: true, tls: true, quic: true };
 
 const profiles = [{
   id: 'foreign', source_id: 'providerA', enabled: true,
@@ -94,6 +95,8 @@ before(async () => {
       if (url.pathname === '/v1/observatory/settings' && req.method === 'GET') return json(res, 200, savedObservatorySettings);
       if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, savedObservatorySettings); }
       if (url.pathname === '/v1/geodata/status' && req.method === 'GET') return json(res, 200, { ready: true, assets: [{ name: 'geoip.dat', available: true, size: 3312784, sha256: 'a'.repeat(64) }, { name: 'geosite.dat', available: true, size: 7554929, sha256: 'b'.repeat(64) }] });
+      if (url.pathname === '/v1/l7/settings' && req.method === 'GET') return json(res, 200, savedL7Settings);
+      if (url.pathname === '/v1/l7/settings' && req.method === 'PUT') { savedL7Settings = await readBody(req); return json(res, 200, savedL7Settings); }
       if (url.pathname === '/v1/profiles/ping' && req.method === 'GET') {
         const keys = preview.nodes.map(n => JSON.stringify(n.key));
         const at = Math.floor(Date.now() / 1000) + 1;
@@ -260,6 +263,25 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     assert.deepEqual(savedRouting.rules[0].values, [
       'domain:one.example', 'domain:two.example', 'domain:three.example',
     ]);
+  } finally {
+    await page.close();
+  }
+});
+
+test('L7 sniffing settings save the selected proxy-ingress protocols', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('[data-page="settings"]').click();
+    await page.getByRole('heading', { name: 'L7-анализ' }).waitFor();
+    await page.locator('#l7Enabled').check();
+    await page.locator('#l7HTTP').uncheck();
+    await page.locator('#l7TLS').check();
+    await page.locator('#l7QUIC').check();
+    await page.locator('#saveL7Settings').click();
+    await page.getByText('Настройки L7 сохранены').waitFor();
+    assert.deepEqual(savedL7Settings, { enabled: true, http: false, tls: true, quic: true });
   } finally {
     await page.close();
   }

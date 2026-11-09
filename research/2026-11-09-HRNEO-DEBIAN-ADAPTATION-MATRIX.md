@@ -35,7 +35,7 @@ The target is functional parity at the hrcore panel and proxy-control plane, not
 | PolicyOrder | Preserve ordered first-match rule compilation | Partial |
 | GeoIP / GeoSite databases | Managed Xray geodata assets and UI rule types | Pending |
 | DNS capture / dynamic IP sets | Optional SmartDNS sidecar and local resolver groups | Pending |
-| L7 HTTP/TLS/QUIC classification | Xray sniffing for proxied connections | Pending |
+| L7 HTTP/TLS/QUIC classification | Opt-in Xray inbound sniffing on Core SOCKS5 only; no NFLOG/firewall capture | Partial; API/UI/compiler wired, functional traffic tests pending |
 | DirectRoute / ForceInterface | Per-profile outbound socket interface selection | Partial |
 | GlobalRouting | No safe host-level equivalent under current constraints | Not ported |
 | ConntrackFlush | Not applicable to independent SOCKS sessions | Not ported |

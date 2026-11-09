@@ -57,6 +57,13 @@ type RoutingRule struct {
 
 // DNSConfig connects only the managed HydraRoute Xray process to the local
 // Core DNS service. It never changes the host resolver configuration.
+type L7SniffingConfig struct {
+	Enabled bool `json:"enabled"`
+	HTTP    bool `json:"http"`
+	TLS     bool `json:"tls"`
+	QUIC    bool `json:"quic"`
+}
+
 type DNSConfig struct {
 	Enabled bool   `json:"enabled"`
 	Listen  string `json:"listen"`
@@ -64,8 +71,9 @@ type DNSConfig struct {
 }
 
 type CompileRequest struct {
-	Profiles                        []Profile      `json:"profiles"`
-	Routing                         *RoutingConfig `json:"routing,omitempty"`
-	DNS                             *DNSConfig     `json:"dns,omitempty"`
-	ObservatoryProbeIntervalSeconds int            `json:"observatory_probe_interval_seconds,omitempty"`
+	Profiles                        []Profile        `json:"profiles"`
+	Routing                         *RoutingConfig   `json:"routing,omitempty"`
+	DNS                             *DNSConfig       `json:"dns,omitempty"`
+	L7Sniffing                      L7SniffingConfig `json:"l7_sniffing,omitempty"`
+	ObservatoryProbeIntervalSeconds int              `json:"observatory_probe_interval_seconds,omitempty"`
 }

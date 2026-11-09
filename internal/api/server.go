@@ -84,6 +84,7 @@ type Server struct {
 	probeSaveMu         sync.Mutex
 	probeCache          map[string]map[string]xrayapi.OutboundStatus
 	observatoryInterval int
+	l7Settings          compiler.L7SniffingConfig
 	mux                 *http.ServeMux
 }
 
@@ -105,10 +106,11 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if opts.RetryMax < opts.RetryMin {
 		opts.RetryMax = opts.RetryMin
 	}
-	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, mux: http.NewServeMux()}
+	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
 	if stateDir != "" {
 		s.loadProbeCache()
 		s.loadObservatorySettings()
+		s.loadL7Settings()
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
 		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
@@ -143,6 +145,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/interfaces", s.interfaces)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/geodata/status", s.geoDataStatus)
+	s.mux.HandleFunc("/v1/l7/settings", s.l7SettingsHandler)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
 	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
@@ -410,6 +413,7 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.DNS = s.coreDNSConfig()
+	req.L7Sniffing = s.l7Settings
 	req.ObservatoryProbeIntervalSeconds = s.observatoryInterval
 	compiled, err := compiler.Compile(req)
 	if err != nil {
@@ -446,6 +450,7 @@ func (s *Server) compileSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.DNS = s.coreDNSConfig()
+	req.L7Sniffing = s.l7Settings
 	req.ObservatoryProbeIntervalSeconds = s.observatoryInterval
 	if s.routingStore != nil {
 		if routing, found, err := s.routingStore.Load(); err != nil {
@@ -1565,7 +1570,7 @@ func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targe
 			routing = &storedRouting
 		}
 	}
-	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs, Routing: routing, DNS: s.coreDNSConfig(), ObservatoryProbeIntervalSeconds: s.observatoryInterval}, s.stateDir)
+	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs, Routing: routing, DNS: s.coreDNSConfig(), L7Sniffing: s.l7Settings, ObservatoryProbeIntervalSeconds: s.observatoryInterval}, s.stateDir)
 	if err != nil {
 		return nil, err
 	}
@@ -2146,6 +2151,95 @@ func (s *Server) dnsCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"status": "Разрешён", "addresses": ips})
+}
+
+func (s *Server) loadL7Settings() {
+	path := filepath.Join(s.stateDir, "l7", "settings.json")
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 4096 {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var saved compiler.L7SniffingConfig
+	if json.Unmarshal(data, &saved) != nil || (saved.Enabled && !saved.HTTP && !saved.TLS && !saved.QUIC) {
+		return
+	}
+	s.l7Settings = saved
+}
+
+func (s *Server) l7SettingsHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		s.opMu.Lock()
+		settings := s.l7Settings
+		s.opMu.Unlock()
+		writeJSON(w, http.StatusOK, settings)
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var req compiler.L7SniffingConfig
+		if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid L7 settings")
+			return
+		}
+		if req.Enabled && !req.HTTP && !req.TLS && !req.QUIC {
+			writeError(w, http.StatusUnprocessableEntity, "select at least one L7 protocol")
+			return
+		}
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
+		if s.stateDir == "" {
+			writeError(w, http.StatusServiceUnavailable, "state directory is not configured")
+			return
+		}
+		dir := filepath.Join(s.stateDir, "l7")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot create L7 state directory")
+			return
+		}
+		if err := os.Chmod(dir, 0700); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot secure L7 state directory")
+			return
+		}
+		data, _ := json.Marshal(req)
+		tmp, err := os.CreateTemp(dir, ".settings-*.json")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot save L7 settings")
+			return
+		}
+		name := tmp.Name()
+		defer os.Remove(name)
+		if err = tmp.Chmod(0600); err == nil {
+			_, err = tmp.Write(data)
+		}
+		if err == nil {
+			err = tmp.Sync()
+		}
+		closeErr := tmp.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			err = os.Rename(name, filepath.Join(dir, "settings.json"))
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot persist L7 settings")
+			return
+		}
+		s.l7Settings = req
+		writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "settings": req, "applies": "next configuration build", "scope": "Core SOCKS5 inbounds only"})
+	default:
+		methodNotAllowed(w)
+	}
 }
 
 type observatorySettings struct {

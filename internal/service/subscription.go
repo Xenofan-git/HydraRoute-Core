@@ -40,15 +40,16 @@ type ProfileRequest struct {
 }
 
 type SubscriptionRequest struct {
-	Source                          string                  `json:"source,omitempty"`
-	Profile                         ProfileInput            `json:"profile,omitempty"`
-	Links                           []string                `json:"links,omitempty"`
-	Subscription                    string                  `json:"subscription,omitempty"`
-	SubscriptionURL                 string                  `json:"subscription_url,omitempty"`
-	Profiles                        []ProfileRequest        `json:"profiles,omitempty"`
-	Routing                         *compiler.RoutingConfig `json:"-"`
-	DNS                             *compiler.DNSConfig     `json:"-"`
-	ObservatoryProbeIntervalSeconds int                     `json:"-"`
+	Source                          string                    `json:"source,omitempty"`
+	Profile                         ProfileInput              `json:"profile,omitempty"`
+	Links                           []string                  `json:"links,omitempty"`
+	Subscription                    string                    `json:"subscription,omitempty"`
+	SubscriptionURL                 string                    `json:"subscription_url,omitempty"`
+	Profiles                        []ProfileRequest          `json:"profiles,omitempty"`
+	Routing                         *compiler.RoutingConfig   `json:"-"`
+	DNS                             *compiler.DNSConfig       `json:"-"`
+	L7Sniffing                      compiler.L7SniffingConfig `json:"-"`
+	ObservatoryProbeIntervalSeconds int                       `json:"-"`
 }
 
 type CompileResult struct {
@@ -338,7 +339,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 	if len(failures) > 0 {
 		return CompileResult{}, &RefreshError{Failures: failures}
 	}
-	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles, Routing: req.Routing, DNS: req.DNS, ObservatoryProbeIntervalSeconds: req.ObservatoryProbeIntervalSeconds})
+	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles, Routing: req.Routing, DNS: req.DNS, L7Sniffing: req.L7Sniffing, ObservatoryProbeIntervalSeconds: req.ObservatoryProbeIntervalSeconds})
 	if err != nil {
 		return CompileResult{}, err
 	}
