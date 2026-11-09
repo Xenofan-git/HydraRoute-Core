@@ -1,215 +1,263 @@
-E©è©¬Öù¬‘è-j)}İ¾zâÛ'zÛ¬zºè¢×±Š×(uíÛÛœİ\ÜÙ\H™\]Z\™J	Û›ÙN˜\ÜÙ\ÜİšXİ	ÊNÂ˜ÛÛœİœÈH™\]Z\™J	Û›ÙN™œÉÊNÂ˜ÛÛœİH™\]Z\™J	Û›ÙNš	ÊNÂ˜ÛÛœİ]H™\]Z\™J	Û›ÙNœ]	ÊNÂ˜ÛÛœİÈY\‹™Y›Ü™K\İHH™\]Z\™J	Û›ÙN\İ	ÊNÂ˜ÛÛœİÈÚ›ÛZ][HHH™\]Z\™J	Ü^]ÜšYÚ	ÊNÂ‚˜ÛÛœİ›ÛİH]œ™\ÛÛ™J×Ù\›˜[YK	Ë‹‹Ë‹‰ÊNÂ˜ÛÛœİİ]XÑ\ˆH]š›Ú[Š›Ûİ	Ú[\›˜[İZKÜİ]XÉÊNÂ›]Ù\™\Â›]œ›İÜÙ\Â›]˜\ÙUT“Â›]Ø]™YÙ[Xİ[ÛÂ›]Ø]™Y›İ][™ÎÂ›]Ø]™Y™Yœ™\ÚÂ‚˜ÛÛœİ›Ùš[\ÈHŞÂˆYˆ	Ù›Ü™ZYÛ‰ËÛİ\˜ÙWÚYˆ	Ü›İšY\IË[˜X›YˆYKˆ\İ[ˆ	ÌLËŒŒŒIËÜˆMŒLİ˜]YŞNˆ	ÛX\İ[™ÉËWØ\\ÜÎˆßKİ]›İ[™Ú[\™˜XÙNˆ	ÉËŸKÂˆYˆ	İÜœ™[	ËÛİ\˜ÙWÚYˆ	Ü›İšY\‰Ë[˜X›YˆYKˆ\İ[ˆ	ÌLËŒŒŒIËÜˆMŒLKİ˜]YŞNˆ	Ü˜[™ÛIËWØ\\ÜÎˆßKİ]›İ[™Ú[\™˜XÙNˆ	ÉËŸWNÂ˜ÛÛœİ›İ][™ÈHÂˆ[˜X›Yˆ˜[ÙK\İ[ˆ	ÌLËŒŒŒIËÜˆMŒˆY˜][ØXİ[Ûˆ	Ø›ØÚÉËY˜][Ü›Ùš[WÚYˆ	ÉËˆ[\ÎˆŞÂˆYˆ	Ü[KLIË˜[YNˆ	ÔØ[\IË[˜X›YˆYKX]Úİ\Nˆ	ÙÛXZ[‰Ëˆ˜[Y\ÎˆÉÙÛXZ[›Û™^[\I×KXİ[Ûˆ	Ù\™Xİ	Ë›Ùš[WÚYˆ	ÉËˆKÂˆYˆ	Ü[KL‰Ë˜[YNˆ	ÔÙXÛÛ™	Ë[˜X›YˆYKX]Úİ\Nˆ	ÙÛXZ[‰Ëˆ˜[Y\ÎˆÉÙÛXZ[œÙXÛÛ™™^[\I×KXİ[Ûˆ	Ø›ØÚÉË›Ùš[WÚYˆ	ÉËˆWKŸNÂ˜ÛÛœİ™]šY]ÈHÂˆ›Ùš[WÚYˆ	Ù›Ü™ZYÛ‰ËÛİ\˜ÙWÚYˆ	Ü›İšY\IËXÚ×Û[ÙNˆ	Ø]]ÉËˆ›Ù\ÎˆÂˆÈ˜[YNˆ	Ğ[IËÙ^NˆÈÛİ\˜ÙNˆ	Ü›İšY\IË˜[YNˆ	Ğ[IËˆKXÚÙYˆYK^ÛYYˆ˜[ÙHKˆÈ˜[YNˆ	Ğ™]IËÙ^NˆÈÛİ\˜ÙNˆ	Ü›İšY\IË˜[YNˆ	Ğ™]IËˆKXÚÙYˆYK^ÛYYˆ˜[ÙHKˆKˆZ\ÜÚ[™×ÜXÚÙYˆŞÈÛİ\˜ÙNˆ	Ü›İšY\IË˜[YNˆ	ÑÛÛ™IËˆWKˆZ\ÜÚ[™×Ù^ÛYYˆ×KŸNÂ‚™[˜İ[ÛˆœÛÛŠ™\Ëİ]\Ë˜[YJHÂˆ™\ËÜš]RXY
-İ]\ËÂˆ	ĞÛÛ[U\IÎˆ	Ø\XØ][Û‹ÚœÛÛÈÚ\œÙ]]]‹N	Ëˆ	ĞØXÚKPÛÛ›Û	Îˆ	Û›Ë\İÜ™IËˆJNÂˆ™\Ë™[™
-”ÓÓ‹œİš[™ÚYJ˜[YJJNÂŸB‚™[˜İ[Ûˆ™XY›ÙJ™\JHÂˆ™]\›ˆ™]È›ÛZ\ÙJ
-™\ÛÛ™K™Z™Xİ
-HOˆÂˆ]›ÙHH	ÉÎÂˆ™\KœÙ][˜ÛÙ[™Ê	İ]	ÊNÂˆ™\K›ÛŠ	Ù]IËÚ[šÈOˆÈ›ÙH
-ÏHÚ[šÎÈJNÂˆ™\K›ÛŠ	Ù[™	Ë
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const http = require('node:http');
+const path = require('node:path');
+const { after, before, test } = require('node:test');
+const { chromium } = require('playwright');
 
-HOˆÂˆHÈ™\ÛÛ™J›ÙHÈ”ÓÓ‹œ\œÙJ›ÙJHˆßJNÈBˆØ]Ú
-\œ›ÜŠHÈ™Z™Xİ
-\œ›ÜŠNÈBˆJNÂˆ™\K›ÛŠ	Ù\œ›Ü‰Ë™Z™Xİ
-NÂˆJNÂŸB‚˜™Y›Ü™J\Ş[˜È
+const root = path.resolve(__dirname, '../..');
+const staticDir = path.join(root, 'internal/ui/static');
+let server;
+let browser;
+let baseURL;
+let savedSelection;
+let savedRouting;
+let savedRefresh;
 
-HOˆÂˆÙ\™\ˆH˜Ü™X]TÙ\™\Š\Ş[˜È
-™\K™\ÊHOˆÂˆÛÛœİ\›H™]ÈT“
-™\K\›	Ú‹ËÌLËŒŒŒIÊNÂˆHÂˆYˆ
-\›œ]˜[YHOOH	ËÚX[‰ÊH™]\›ˆœÛÛŠ™\ËŒÈİ]\Îˆ	ÛÚÉÈJNÂˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ[[YIÊH™]\›ˆœÛÛŠ™\ËŒÈ[›š[™Îˆ˜[ÙKÛÛ™šYİ\™Yˆ˜[ÙHJNÂˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ›Ùš[\ÉÈ	‰ˆ™\K›Y]ÙOOH	ÑÑU	ÊH™]\›ˆœÛÛŠ™\ËŒÈ›Ùš[\ÈJNÂˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ›Ùš[\ÉÈ	‰ˆ™\K›Y]ÙOOH	ÔU	ÊHÂˆÛÛœİ\]HH]ØZ]™XY›ÙJ™\JNÂˆÛÛœİ›Ùš[HH›Ùš[\Ë™š[™
-][HOˆ][KšYOOH\]KšY
-NÂˆYˆ
-\›Ùš[JH™]\›ˆœÛÛŠ™\ËÈ\œ›Üˆ	Ü›Ùš[H›İ›İ[™	ÈJNÂˆØš™Xİ˜\ÜÚYÛŠ›Ùš[K\]JNÂˆ™]\›ˆœÛÛŠ™\ËŒÈİ]\Îˆ	İ\]Y	Ë›Ùš[WÚYˆ›Ùš[KšYJNÂˆBˆYˆ
-\›œ]˜[YHOOH	ËİŒKÚ[\™˜XÙ\ÉÈ	‰ˆ™\K›Y]ÙOOH	ÑÑU	ÊH™]\›ˆœÛÛŠ™\ËŒÂˆY˜][Ú[\™˜XÙNˆ	Ù]	Ë[\™˜XÙ\ÎˆÂˆÈ˜[YNˆ	İÙÌ	ËØ]YÛÜNˆ	Õ”‰Ë\ˆYHKˆÈ˜[YNˆ	Ù]	ËØ]YÛÜNˆ	ô&4/t`´-t`4/t-t`‰Ë\ˆYHKˆÈ˜[YNˆ	ØœŒ	ËØ]YÛÜNˆ	ô'´`t`´,4.ôc4/t/´-IË\ˆ˜[ÙHKˆKˆJNÂˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ›İ][™ÉÈ	‰ˆ™\K›Y]ÙOOH	ÑÑU	ÊH™]\›ˆœÛÛŠ™\ËŒÈ›İ][™ËÛÛ™šYİ\™Yˆ˜[ÙHJNÂˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ™Yœ™\ÚÜİ]\ÉÈ	‰ˆ™\K›Y]ÙOOH	ÑÑU	ÊH™]\›ˆœÛÛŠ™\ËŒØ]™Y™Yœ™\ÚÈ[˜X›Yˆ˜[ÙK[\˜[ÜÙXÛÛ™Îˆ[›š[™Îˆ˜[ÙKÛÛœÙXİ]]™WÙ˜Z[\™\ÎˆJNÂˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ™Yœ™\ÚÜİ]\ÉÈ	‰ˆ™\K›Y]ÙOOH	ÔU	ÊHÈØ]™Y™Yœ™\ÚH]ØZ]™XY›ÙJ™\JNÈ™]\›ˆœÛÛŠ™\ËŒÈİ]\Îˆ	ÜØ]™Y	ÈJNÈBˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ›Ùš[\ËÜ™]šY]ÉÈ	‰ˆ™\K›Y]ÙOOH	ÔÔÕ	ÊH™]\›ˆœÛÛŠ™\ËŒ™]šY]ÊNÂˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜÙ[Xİ[ÛœÉÈ	‰ˆ™\K›Y]ÙOOH	ÔU	ÊHÂˆØ]™YÙ[Xİ[ÛˆH]ØZ]™XY›ÙJ™\JNÂˆ™]\›ˆœÛÛŠ™\ËŒÈİ]\Îˆ	ÜØ]™Y	Ë›Ùš[WÚYˆØ]™YÙ[Xİ[Û‹šYJNÂˆBˆYˆ
-\›œ]˜[YHOOH	ËİŒKÜ›İ][™ÉÈ	‰ˆ™\K›Y]ÙOOH	ÔU	ÊHÂˆØ]™Y›İ][™ÈH]ØZ]™XY›ÙJ™\JNÂˆØš™Xİ˜\ÜÚYÛŠ›İ][™ËØ]™Y›İ][™ÊNÂˆ™]\›ˆœÛÛŠ™\ËŒÈİ]\Îˆ	ÜØ]™Y	ÈJNÂˆBˆYˆ
-™\K›Y]ÙOOH	ÑÑU	ÊH™]\›ˆœÛÛŠ™\ËKÈ\œ›Üˆ	ÛY]Ù›İ[İÙY	ÈJNÂˆÛÛœİ\ÜÙ]H\›œ]˜[YHOOH	ËÉÈÈ	Ú[™^š[	Èˆ\›œ]˜[YKœÛXÙJJNÂˆYˆ
-VÉÚ[™^š[	Ë	Ø\šœÉË	Ø\˜ÜÜÉ×Kš[˜ÛY\Ê\ÜÙ]
-JH™]\›ˆœÛÛŠ™\ËÈ\œ›Üˆ	Û›İ›İ[™	ÈJNÂˆÛÛœİ›ÙHHœËœ™XYš[TŞ[˜Ê]š›Ú[Šİ]XÑ\‹\ÜÙ]
-JNÂˆÛÛœİ\HH\ÜÙ]™[™ÕÚ]
-	ËšœÉÊHÈ	İ^Ú˜]˜\ØÜš\ÈÚ\œÙ]]]‹N	Âˆˆ\ÜÙ]™[™ÕÚ]
-	Ë˜ÜÜÉÊHÈ	İ^ØÜÜÎÈÚ\œÙ]]]‹N	Èˆ	İ^Ú[ÈÚ\œÙ]]]‹N	ÎÂˆ™\ËÜš]RXY
-ŒÂˆ	ĞÛÛ[U\IÎˆ\Kˆ	ĞØXÚKPÛÛ›Û	Îˆ	Û›Ë\İÜ™IËˆ	ÖPÛÛ[U\KSÜ[ÛœÉÎˆ	Û›ÜÛšY™‰Ëˆ	ÖQœ˜[YKSÜ[ÛœÉÎˆ	ÑS–IËˆ	Ô™Y™\œ™\‹TÛXŞIÎˆ	Û›Ë\™Y™\œ™\‰Ëˆ	ĞÛÛ[TÙXİ\š]KTÛXŞIÎˆ™Y˜][\Ü˜È	ÜÙ[‰ÎÈØÜš\\Ü˜È	ÜÙ[‰ÎÈİ[K\Ü˜È	ÜÙ[‰È	İ[œØY™KZ[›[™IÎÈ[YË\Ü˜È	ÜÙ[‰È]NÈÛÛ›™Xİ\Ü˜È	ÜÙ[‰ÎÈØš™Xİ\Ü˜È	Û›Û™IÎÈ˜\ÙK]\šH	Û›Û™IÎÈœ˜[YKX[˜Ù\İÜœÈ	Û›Û™IÈ‹ˆJNÂˆ™\Ë™[™
-›ÙJNÂˆHØ]Ú
-\œ›ÜŠHÂˆœÛÛŠ™\ËLÈ\œ›Üˆ\œ›Ü‹›Y\ÜØYÙHJNÂˆBˆJNÂˆ]ØZ]™]È›ÛZ\ÙJ™\ÛÛ™HOˆÙ\™\‹›\İ[Š	ÌLËŒŒŒIË™\ÛÛ™JJNÂˆ˜\ÙUT“H‹ËÌLËŒŒŒN‰ÜÙ\™\‹˜Y™\ÜÊ
-KœÜXÂˆœ›İÜÙ\ˆH]ØZ]Ú›ÛZ][K›][˜Ú
-ÈXY\ÜÎˆYHJNÂŸJNÂ‚˜Y\Š\Ş[˜È
+const profiles = [{
+  id: 'foreign', source_id: 'providerA', enabled: true,
+  listen: '127.0.0.1', port: 16090, strategy: 'leastPing', dpi_bypass: {}, outbound_interface: '',
+}, {
+  id: 'torrent', source_id: 'providerB', enabled: true,
+  listen: '127.0.0.1', port: 16091, strategy: 'random', dpi_bypass: {}, outbound_interface: '',
+}];
+const routing = {
+  enabled: false, listen: '127.0.0.1', port: 16080,
+  default_action: 'block', default_profile_id: '',
+  rules: [{
+    id: 'rule-1', name: 'Sample', enabled: true, match_type: 'domain',
+    values: ['domain:old.example'], action: 'direct', profile_id: '',
+  }, {
+    id: 'rule-2', name: 'Second', enabled: true, match_type: 'domain',
+    values: ['domain:second.example'], action: 'block', profile_id: '',
+  }],
+};
+const preview = {
+  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto',
+  nodes: [
+    { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: true, excluded: false },
+    { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: true, excluded: false },
+  ],
+  missing_picked: [{ source: 'providerA', name: 'Gone', nth: 0 }],
+  missing_excluded: [],
+};
 
-HOˆÂˆYˆ
-œ›İÜÙ\ŠH]ØZ]œ›İÜÙ\‹˜ÛÜÙJ
-NÂˆYˆ
-Ù\™\ŠH]ØZ]™]È›ÛZ\ÙJ™\ÛÛ™HOˆÙ\™\‹˜ÛÜÙJ™\ÛÛ™JJNÂŸJNÂ‚‚\İ
-	Ô\ÜÚX[ˆY[HÜ[œÈÛˆ[\È[™[\ÈØ[ˆ™H™[Ü™\™YH˜YÙÚ[™ÉË\Ş[˜È
+function json(res, status, value) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify(value));
+}
 
-HOˆÂˆÛÛœİYÙHH]ØZ]œ›İÜÙ\‹›™]ÔYÙJ
-NÂˆHÂˆ]ØZ]YÙK™ÛİÊ˜\ÙUT“
-NÂˆ]ØZ]YÙK™Ù]U^
-	ĞTH4/ô/´-4.´.ôc´aôdt/IÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™Y\\]X[
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); }
+      catch (error) { reject(error); }
+    });
+    req.on('error', reject);
+  });
+}
 
-]ØZ]YÙK›ØØ]ÜŠ	Ë›˜]‹Z][IÊK˜[^ÛÛ[Ê
-JK›X\
-Oˆœ™\XÙJ×–×—ÓWJËİK	ÉÊKš[J
-JKÉô'ô`4,4,´.4.ô,	Ë	ô(t-t`´c	Ë	Ñ”ÉË	ÒY˜IË	ô&4/ta4/‰Ë	ô't,4`t`´`4/´.t.´.	Ë	ô$´bôat/´-	×JNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	ÈÜYÙU]IÊK^ÛÛ[
+before(async () => {
+  server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    try {
+      if (url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
+      if (url.pathname === '/v1/runtime') return json(res, 200, { running: false, configured: false });
+      if (url.pathname === '/v1/profiles' && req.method === 'GET') return json(res, 200, { profiles });
+      if (url.pathname === '/v1/profiles' && req.method === 'PUT') {
+        const update = await readBody(req);
+        const profile = profiles.find(item => item.id === update.id);
+        if (!profile) return json(res, 404, { error: 'profile not found' });
+        Object.assign(profile, update);
+        return json(res, 200, { status: 'updated', profile_id: profile.id });
+      }
+      if (url.pathname === '/v1/interfaces' && req.method === 'GET') return json(res, 200, {
+        default_interface: 'eth0', interfaces: [
+          { name: 'wg0', category: 'VPN', up: true },
+          { name: 'eth0', category: 'Ğ˜Ğ½Ñ‚ĞµÑ€Ğ½ĞµÑ‚', up: true },
+          { name: 'br0', category: 'ĞÑÑ‚Ğ°Ğ»ÑŒĞ½Ğ¾Ğµ', up: false },
+        ],
+      });
+      if (url.pathname === '/v1/routing' && req.method === 'GET') return json(res, 200, { routing, configured: false });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'GET') return json(res, 200, savedRefresh || { enabled: false, interval_seconds: 86400, running: false, consecutive_failures: 0 });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'PUT') { savedRefresh = await readBody(req); return json(res, 200, { status: 'saved' }); }
+      if (url.pathname === '/v1/profiles/preview' && req.method === 'POST') return json(res, 200, preview);
+      if (url.pathname === '/v1/selections' && req.method === 'PUT') {
+        savedSelection = await readBody(req);
+        return json(res, 200, { status: 'saved', profile_id: savedSelection.id });
+      }
+      if (url.pathname === '/v1/routing' && req.method === 'PUT') {
+        savedRouting = await readBody(req);
+        Object.assign(routing, savedRouting);
+        return json(res, 200, { status: 'saved' });
+      }
+      if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' });
+      const asset = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+      if (!['index.html', 'app.js', 'app.css'].includes(asset)) return json(res, 404, { error: 'not found' });
+      const body = fs.readFileSync(path.join(staticDir, asset));
+      const type = asset.endsWith('.js') ? 'text/javascript; charset=utf-8'
+        : asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8';
+      res.writeHead(200, {
+        'Content-Type': type,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'no-referrer',
+        'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      res.end(body);
+    } catch (error) {
+      json(res, 500, { error: error.message });
+    }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  baseURL = `http://127.0.0.1:${server.address().port}`;
+  browser = await chromium.launch({ headless: true });
+});
 
-K	ô'ô`4,4,´.4.ô,	ÊNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	Ëœ[KXØ\™Ù]K\[WIÊK˜Ûİ[
+after(async () => {
+  if (browser) await browser.close();
+  if (server) await new Promise(resolve => server.close(resolve));
+});
 
-KŠNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	Ëœ[KY˜YËZ[™IÊK˜Ûİ[
 
-KŠNÂˆHš[˜[HÈ]ØZ]YÙK˜ÛÜÙJ
-NÈBŸJNÂ‚\İ
-	ÜİXœØÜš\[Ûˆ[Ù[İ\ÜÈÙ[XİX[X[X[›ÙHÙ[Xİ[Û‹š[\œÈ[™Ø]™IË\Ş[˜È
+test('Russian menu opens on Rules and rules can be reordered by dragging', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡Ñ‘Ğ½').waitFor();
+    assert.deepEqual((await page.locator('.nav-item').allTextContents()).map(x => x.replace(/^[^\p{L}]+/u, '').trim()), ['ĞŸÑ€Ğ°Ğ²Ğ¸Ğ»Ğ°','Ğ¡ĞµÑ‚ÑŒ','DNS','Hydra','Ğ˜Ğ½Ñ„Ğ¾','ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸','Ğ’Ñ‹Ñ…Ğ¾Ğ´']);
+    assert.equal(await page.locator('#pageTitle').textContent(), 'ĞŸÑ€Ğ°Ğ²Ğ¸Ğ»Ğ°');
+    assert.equal(await page.locator('.rule-card[data-rule]').count(), 2);
+    assert.equal(await page.locator('.rule-drag-handle').count(), 2);
+  } finally { await page.close(); }
+});
 
-HOˆÂˆØ]™YÙ[Xİ[ÛˆH[™Yš[™YÂˆØ]™Y™Yœ™\ÚH[™Yš[™YÂˆÛÛœİYÙHH]ØZ]œ›İÜÙ\‹›™]ÔYÙJ
-NÂˆHÂˆ]ØZ]YÙK™ÛİÊ˜\ÙUT“
-NÂˆ]ØZ]YÙK™Ù]U^
-	ĞTH4/ô/´-4.´.ôc´aôdt/IÊKØZ]›ÜŠ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ë›˜]‹Z][VÙ]K\YÙOHšY˜H—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÖÙ]K\™]šY]Ë\Ù\™\œÏH™›Ü™ZYÛˆ—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]T›ÛJ	ÚXY[™ÉËÈ˜[YNˆ	ô(t-t`4,´-t`4bÎˆ›Ü™ZYÛ‰ÈJKØZ]›ÜŠ
-NÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	ËœİXœØÜš\[Û‹[›ÙK\›İÉÊK˜Ûİ[
+test('subscription modal supports select-all, manual node selection, filters and save', async () => {
+  savedSelection = undefined;
+  savedRefresh = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡Ñ‘Ğ½').waitFor();
+    await page.locator('.nav-item[data-page="hydra"]').click();
+    await page.locator('[data-preview-servers="foreign"]').click();
+    await page.getByRole('heading', { name: 'Ğ¡ĞµÑ€Ğ²ĞµÑ€Ñ‹: foreign' }).waitFor();
+    assert.equal(await page.locator('.subscription-node-row').count(), 2);
+    assert.equal(await page.locator('.pick-node:checked').count(), 2);
+    await page.locator('.pick-node').nth(0).uncheck();
+    assert.equal(await page.locator('.pick-node').nth(0).isChecked(), false);
+    assert.equal(await page.locator('.pick-node').nth(1).isChecked(), true);
+    await page.locator('#subscriptionSearch').fill('Alpha');
+    assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
+    await page.locator('#subscriptionSearch').fill('');
+    await page.locator('[data-drop-missing="picked:0"]').click();
+    await page.locator('#autoUpdateSubscription').check();
+    await page.locator('#refreshHours').fill('24');
+    await page.locator('#saveSubscription').click();
+    await page.getByText('ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸ Ğ¿Ğ¾Ğ´Ğ¿Ğ¸ÑĞºĞ¸ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹').waitFor();
+    assert.equal(savedSelection.pick_mode, 'manual');
+    assert.deepEqual(savedSelection.picked, [{ source: 'providerA', name: 'Beta', nth: 0 }]);
+    assert.deepEqual(savedSelection.excluded, []);
+    assert.equal(savedRefresh.enabled, true);
+    assert.equal(savedRefresh.interval_seconds, 86400);
+  } finally { await page.close(); }
+});
 
-KŠNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	ËœXÚË[›ÙN˜ÚXÚÙY	ÊK˜Ûİ[
+test('subscription modal permits deliberately empty server pool', async () => {
+  savedSelection = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡Ñ‘Ğ½').waitFor();
+    await page.locator('.nav-item[data-page="hydra"]').click();
+    await page.locator('[data-preview-servers="foreign"]').click();
+    await page.locator('#pickAllNodes').uncheck();
+    assert.equal(await page.locator('.pick-node:checked').count(), 0);
+    await page.locator('#saveSubscription').click();
+    await page.getByText('ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸ Ğ¿Ğ¾Ğ´Ğ¿Ğ¸ÑĞºĞ¸ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹').waitFor();
+    assert.deepEqual(savedSelection.picked, []);
+    assert.equal(savedSelection.pick_mode, 'manual');
+  } finally { await page.close(); }
+});
 
-KŠNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ËœXÚË[›ÙIÊK›
-
-K[˜ÚXÚÊ
-NÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	ËœXÚË[›ÙIÊK›
-
-Kš\ĞÚXÚÙY
+test('HRNeo navigation order and draggable routing rules are preserved', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡Ñ‘Ğ½').waitFor();
+    const nav = await page.locator('.nav-list .nav-item').allTextContents();
+    assert.deepEqual(nav.map(x => x.replace(/^[^\p{L}]+/u, '').trim()), ['ĞŸÑ€Ğ°Ğ²Ğ¸Ğ»Ğ°', 'Ğ¡ĞµÑ‚ÑŒ', 'DNS', 'Hydra', 'Ğ˜Ğ½Ñ„Ğ¾', 'ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸', 'Ğ’Ñ‹Ñ…Ğ¾Ğ´']);
+    assert.equal(await page.locator('.nav-item[data-page="rules"]').getAttribute('class').then(v => v.includes('active')), true);
+    assert.equal(await page.locator('.rule-card').count(), 2);
+    await page.locator('[data-drag-rule="0"]').dragTo(page.locator('.rule-card').nth(1));
+    assert.equal((await page.locator('.rule-card').first().locator('.rule-name-text').textContent()).trim(), 'Second');
+    await page.locator('#saveRouting').click();
+    await page.getByText('ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸ Ğ¼Ğ°Ñ€ÑˆÑ€ÑƒÑ‚Ğ¸Ğ·Ğ°Ñ†Ğ¸Ğ¸ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹ Ğ¸ Ğ¿Ñ€Ğ¸Ğ¼ĞµĞ½ĞµĞ½Ñ‹').waitFor();
+    assert.deepEqual(savedRouting.rules.map(rule => rule.name), ['Second', 'Sample']);
+  } finally {
+    await page.close();
+  }
+});
 
-K˜[ÙJNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	ËœXÚË[›ÙIÊK›
-JKš\ĞÚXÚÙY
+test('routing editor splits CRLF, LF and comma-separated values before saving', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡Ñ‘Ğ½').waitFor();
+    await page.locator('.nav-item[data-page="rules"]').click();
+    await page.locator('[data-edit-rule="0"]').click();
+    await page.locator('.rule-values').fill('domain:one.example\r\ndomain:two.example,domain:three.example');
+    await page.locator('#ruleEditorForm button[type="submit"]').click();
+    await page.locator('#saveRouting').click();
+    await page.getByText('ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸ Ğ¼Ğ°Ñ€ÑˆÑ€ÑƒÑ‚Ğ¸Ğ·Ğ°Ñ†Ğ¸Ğ¸ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹ Ğ¸ Ğ¿Ñ€Ğ¸Ğ¼ĞµĞ½ĞµĞ½Ñ‹').waitFor();
+    assert.deepEqual(savedRouting.rules[0].values, [
+      'domain:one.example', 'domain:two.example', 'domain:three.example',
+    ]);
+  } finally {
+    await page.close();
+  }
+});
 
-KYJNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜİXœØÜš\[Û”ÙX\˜Ú	ÊK™š[
-	Ğ[IÊNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	ËœİXœØÜš\[Û‹[›ÙK\›İÎš\ÚX›IÊK˜Ûİ[
+test('connection settings persist independently per profile: DPI, balancing and outgoing interface', async () => {
+  profiles.forEach(p => { p.strategy = p.id === 'torrent' ? 'random' : 'leastPing'; p.dpi_bypass = {}; p.outbound_interface = ''; });
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡Ñ‘Ğ½').waitFor();
+    await page.locator('.nav-item[data-page="network"]').click();
+    const card = page.locator('.connection-card').filter({ hasText: 'foreign' });
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-dpi]').click();
+    await page.getByText('Ğ¨ÑƒĞ¼Ğ¾Ğ²Ğ¾Ğ¹ Ñ‚Ñ€Ğ°Ñ„Ğ¸Ğº').waitFor();
+    await page.locator('.connection-option-panel [name="noise_traffic"]').check();
+    await page.locator('.connection-option-panel [name="random_tls_fingerprint"]').check();
+    await page.locator('[data-option-save]').click();
+    await page.getByText('ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸ Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡ĞµĞ½Ğ¸Ñ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹').waitFor();
+    assert.deepEqual(profiles[0].dpi_bypass, { noise_traffic: true, tls_fragmentation: false, random_tls_fingerprint: true });
+    assert.deepEqual(profiles[1].dpi_bypass, {});
 
-KJNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜİXœØÜš\[Û”ÙX\˜Ú	ÊK™š[
-	ÉÊNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÖÙ]KY›Ü[Z\ÜÚ[™ÏHœXÚÙYŒ—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈØ]]Õ\]TİXœØÜš\[Û‰ÊK˜ÚXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜ™Yœ™\Úİ\œÉÊK™š[
-	Ì	ÊNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜØ]™TİXœØÜš\[Û‰ÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô't,4`t`´`4/´.t.´.4/ô/´-4/ô.4`t.´.4`t/´at`4,4/t-t/tbÉÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™\]X[
-Ø]™YÙ[Xİ[Û‹œXÚ×Û[ÙK	ÛX[X[	ÊNÂˆ\ÜÙ\™Y\\]X[
-Ø]™YÙ[Xİ[Û‹œXÚÙYŞÈÛİ\˜ÙNˆ	Ü›İšY\IË˜[YNˆ	Ğ™]IËˆWJNÂˆ\ÜÙ\™Y\\]X[
-Ø]™YÙ[Xİ[Û‹™^ÛYY×JNÂˆ\ÜÙ\™\]X[
-Ø]™Y™Yœ™\Ú™[˜X›YYJNÂˆ\ÜÙ\™\]X[
-Ø]™Y™Yœ™\Úš[\˜[ÜÙXÛÛ™Ë
-NÂˆHš[˜[HÈ]ØZ]YÙK˜ÛÜÙJ
-NÈBŸJNÂ‚\İ
-	ÜİXœØÜš\[Ûˆ[Ù[\›Z]È[X™\˜][H[\HÙ\™\ˆÛÛ	Ë\Ş[˜È
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-balance]').click();
+    await page.locator('.connection-option-panel [value="roundRobin"]').check();
+    await page.getByText('ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸ Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡ĞµĞ½Ğ¸Ñ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹').waitFor();
+    assert.equal(profiles[0].strategy, 'roundRobin');
+    assert.equal(profiles[1].strategy, 'random');
 
-HOˆÂˆØ]™YÙ[Xİ[ÛˆH[™Yš[™YÂˆÛÛœİYÙHH]ØZ]œ›İÜÙ\‹›™]ÔYÙJ
-NÂˆHÂˆ]ØZ]YÙK™ÛİÊ˜\ÙUT“
-NÂˆ]ØZ]YÙK™Ù]U^
-	ĞTH4/ô/´-4.´.ôc´aôdt/IÊKØZ]›ÜŠ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ë›˜]‹Z][VÙ]K\YÙOHšY˜H—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÖÙ]K\™]šY]Ë\Ù\™\œÏH™›Ü™ZYÛˆ—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜXÚĞ[›Ù\ÉÊK[˜ÚXÚÊ
-NÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	ËœXÚË[›ÙN˜ÚXÚÙY	ÊK˜Ûİ[
-
-K
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜØ]™TİXœØÜš\[Û‰ÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô't,4`t`´`4/´.t.´.4/ô/´-4/ô.4`t.´.4`t/´at`4,4/t-t/tbÉÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™Y\\]X[
-Ø]™YÙ[Xİ[Û‹œXÚÙY×JNÂˆ\ÜÙ\™\]X[
-Ø]™YÙ[Xİ[Û‹œXÚ×Û[ÙK	ÛX[X[	ÊNÂˆHš[˜[HÈ]ØZ]YÙK˜ÛÜÙJ
-NÈBŸJNÂ‚\İ
-	Ò“™[È˜]šYØ][ÛˆÜ™\ˆ[™˜YÙØX›H›İ][™È[\È\™H™\Ù\™Y	Ë\Ş[˜È
-
-HOˆÂˆØ]™Y›İ][™ÈH[™Yš[™YÂˆÛÛœİYÙHH]ØZ]œ›İÜÙ\‹›™]ÔYÙJ
-NÂˆHÂˆ]ØZ]YÙK™ÛİÊ˜\ÙUT“
-NÂˆ]ØZ]YÙK™Ù]U^
-	ĞTH4/ô/´-4.´.ôc´aôdt/IÊKØZ]›ÜŠ
-NÂˆÛÛœİ˜]ˆH]ØZ]YÙK›ØØ]ÜŠ	Ë›˜]‹[\İ›˜]‹Z][IÊK˜[^ÛÛ[Ê
-NÂˆ\ÜÙ\™Y\\]X[
-˜]‹›X\
-Oˆœ™\XÙJ×–×—ÓWJËİK	ÉÊKš[J
-JKÉô'ô`4,4,´.4.ô,	Ë	ô(t-t`´c	Ë	Ñ”ÉË	ÒY˜IË	ô&4/ta4/‰Ë	ô't,4`t`´`4/´.t.´.	Ë	ô$´bôat/´-	×JNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	Ë›˜]‹Z][VÙ]K\YÙOHœ[\È—IÊK™Ù]]šX]J	ØÛ\ÜÉÊK[ŠˆOˆ‹š[˜ÛY\Ê	ØXİ]™IÊJKYJNÂˆ\ÜÙ\™\]X[
-]ØZ]YÙK›ØØ]ÜŠ	Ëœ[KXØ\™	ÊK˜Ûİ[
-
-KŠNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÖÙ]KY˜YË\[OHŒ—IÊK™˜YÕÊYÙK›ØØ]ÜŠ	Ëœ[KXØ\™	ÊK›
-JJNÂˆ\ÜÙ\™\]X[
-
-]ØZ]YÙK›ØØ]ÜŠ	Ëœ[KXØ\™	ÊK™š\œİ
-
-K›ØØ]ÜŠ	Ëœ[K[˜[YK]^	ÊK^ÛÛ[
-
-JKš[J
-K	ÔÙXÛÛ™	ÊNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜØ]™T›İ][™ÉÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô't,4`t`´`4/´.t.´.4/4,4`4b4`4`ô`´.4-ô,4a´.4.4`t/´at`4,4/t-t/tbÈ4.4/ô`4.4/4-t/t-t/tbÉÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™Y\\]X[
-Ø]™Y›İ][™Ëœ[\Ë›X\
-[HOˆ[K›˜[YJKÉÔÙXÛÛ™	Ë	ÔØ[\I×JNÂˆHš[˜[HÂˆ]ØZ]YÙK˜ÛÜÙJ
-NÂˆBŸJNÂ‚\İ
-	Ü›İ][™ÈY]ÜˆÜ]ÈÔ“‹ˆ[™ÛÛ[XK\Ù\\˜]Y˜[Y\È™Y›Ü™HØ]š[™ÉË\Ş[˜È
-
-HOˆÂˆØ]™Y›İ][™ÈH[™Yš[™YÂˆÛÛœİYÙHH]ØZ]œ›İÜÙ\‹›™]ÔYÙJ
-NÂˆHÂˆ]ØZ]YÙK™ÛİÊ˜\ÙUT“
-NÂˆ]ØZ]YÙK™Ù]U^
-	ĞTH4/ô/´-4.´.ôc´aôdt/IÊKØZ]›ÜŠ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ë›˜]‹Z][VÙ]K\YÙOHœ[\È—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÖÙ]KYY]\[OHŒ—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ëœ[K]˜[Y\ÉÊK™š[
-	ÙÛXZ[›Û™K™^[\W—™ÛXZ[ÛË™^[\KÛXZ[™YK™^[\IÊNÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜ[QY]Ü‘›Ü›H]Û–İ\OHœİX›Z]—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÈÜØ]™T›İ][™ÉÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô't,4`t`´`4/´.t.´.4/4,4`4b4`4`ô`´.4-ô,4a´.4.4`t/´at`4,4/t-t/tbÈ4.4/ô`4.4/4-t/t-t/tbÉÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™Y\\]X[
-Ø]™Y›İ][™Ëœ[\ÖÌK˜[Y\ËÂˆ	ÙÛXZ[›Û™K™^[\IË	ÙÛXZ[ÛË™^[\IË	ÙÛXZ[™YK™^[\IËˆJNÂˆHš[˜[HÂˆ]ØZ]YÙK˜ÛÜÙJ
-NÂˆBŸJNÂ‚\İ
-	ØÛÛ›™Xİ[ÛˆÙ][™ÜÈ\œÚ\İ[™\[™[H\ˆ›Ùš[NˆK˜[[˜Ú[™È[™İ]ÛÚ[™È[\™˜XÙIË\Ş[˜È
-
-HOˆÂˆ›Ùš[\Ë™›Ü‘XXÚ
-OˆÈœİ˜]YŞHHšYOOH	İÜœ™[	ÈÈ	Ü˜[™ÛIÈˆ	ÛX\İ[™ÉÎÈ™WØ\\ÜÈHßNÈ›İ]›İ[™Ú[\™˜XÙHH	ÉÎÈJNÂˆÛÛœİYÙHH]ØZ]œ›İÜÙ\‹›™]ÔYÙJ
-NÂˆHÂˆ]ØZ]YÙK™ÛİÊ˜\ÙUT“
-NÂˆ]ØZ]YÙK™Ù]U^
-	ĞTH4/ô/´-4.´.ôc´aôdt/IÊKØZ]›ÜŠ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ë›˜]‹Z][VÙ]K\YÙOH›™]ÛÜšÈ—IÊK˜ÛXÚÊ
-NÂˆÛÛœİØ\™HYÙK›ØØ]ÜŠ	Ë˜ÛÛ›™Xİ[Û‹XØ\™	ÊK™š[\ŠÈ\Õ^ˆ	Ù›Ü™ZYÛ‰ÈJNÂˆ]ØZ]Ø\™›ØØ]ÜŠ	ÖÙ]KXÛÛ›™Xİ[Û‹[Y[WIÊK˜ÛXÚÊ
-NÂˆ]ØZ]Ø\™›ØØ]ÜŠ	ÖÙ]K[Y[KYWIÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô*4`ô/4/´,´/´.H4`´`4,4a4.4.‰ÊKØZ]›ÜŠ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ë˜ÛÛ›™Xİ[Û‹[Ü[Û‹\[™[Û˜[YOH››Ú\ÙWİ˜Y™šXÈ—IÊK˜ÚXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ë˜ÛÛ›™Xİ[Û‹[Ü[Û‹\[™[Û˜[YOHœ˜[™ÛWİ×Ùš[™Ù\œš[—IÊK˜ÚXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÖÙ]K[Ü[Û‹\Ø]™WIÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô't,4`t`´`4/´.t.´.4/ô/´-4.´.ôc´aô-t/t.4cÈ4`t/´at`4,4/t-t/tbÉÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™Y\\]X[
-›Ùš[\ÖÌK™WØ\\ÜËÈ›Ú\ÙWİ˜Y™šXÎˆYK×Ùœ˜YÛY[][Ûˆ˜[ÙK˜[™ÛWİ×Ùš[™Ù\œš[ˆYHJNÂˆ\ÜÙ\™Y\\]X[
-›Ùš[\ÖÌWK™WØ\\ÜËßJNÂ‚ˆ]ØZ]Ø\™›ØØ]ÜŠ	ÖÙ]KXÛÛ›™Xİ[Û‹[Y[WIÊK˜ÛXÚÊ
-NÂˆ]ØZ]Ø\™›ØØ]ÜŠ	ÖÙ]K[Y[KX˜[[˜ÙWIÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	Ë˜ÛÛ›™Xİ[Û‹[Ü[Û‹\[™[İ˜[YOHœ›İ[™›Øš[ˆ—IÊK˜ÚXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô't,4`t`´`4/´.t.´.4/ô/´-4.´.ôc´aô-t/t.4cÈ4`t/´at`4,4/t-t/tbÉÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™\]X[
-›Ùš[\ÖÌKœİ˜]YŞK	Ü›İ[™›Øš[‰ÊNÂˆ\ÜÙ\™\]X[
-›Ùš[\ÖÌWKœİ˜]YŞK	Ü˜[™ÛIÊNÂ‚ˆ]ØZ]Ø\™›ØØ]ÜŠ	ÖÙ]KXÛÛ›™Xİ[Û‹[Y[WIÊK˜ÛXÚÊ
-NÂˆ]ØZ]Ø\™›ØØ]ÜŠ	ÖÙ]K[Y[KZ[\™˜XÙWIÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	İÙÌ	ÊKØZ]›ÜŠ
-NÂˆ]ØZ]YÙK›ØØ]ÜŠ	ÖÙ]KZ[\™˜XÙK]˜[YOHÙÌ—IÊK˜ÛXÚÊ
-NÂˆ]ØZ]YÙK™Ù]U^
-	ô't,4`t`´`4/´.t.´.4/ô/´-4.´.ôc´aô-t/t.4cÈ4`t/´at`4,4/t-t/tbÉÊKØZ]›ÜŠ
-NÂˆ\ÜÙ\™\]X[
-›Ùš[\ÖÌK›İ]›İ[™Ú[\™˜XÙK	İÙÌ	ÊNÂˆ\ÜÙ\™\]X[
-›Ùš[\ÖÌWK›İ]›İ[™Ú[\™˜XÙK	ÉÊNÂˆHš[˜[HÈ]ØZ]YÙK˜ÛÜÙJ
-NÈBŸJNÂ
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-interface]').click();
+    await page.getByText('wg0').waitFor();
+    await page.locator('[data-interface-value="wg0"]').click();
+    await page.getByText('ĞĞ°ÑÑ‚Ñ€Ğ¾Ğ¹ĞºĞ¸ Ğ¿Ğ¾Ğ´ĞºĞ»ÑÑ‡ĞµĞ½Ğ¸Ñ ÑĞ¾Ñ…Ñ€Ğ°Ğ½ĞµĞ½Ñ‹').waitFor();
+    assert.equal(profiles[0].outbound_interface, 'wg0');
+    assert.equal(profiles[1].outbound_interface, '');
+  } finally { await page.close(); }
+});
