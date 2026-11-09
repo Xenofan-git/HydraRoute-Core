@@ -33,7 +33,7 @@ CI workflow was extended to:
 3. Run HTTP Host + TLS SNI E2E.
 4. Run QUIC SNI E2E through Core SOCKS UDP.
 
-CI run #183 validates the new integration steps. Record its final status before claiming QUIC success.
+CI #186 completed successfully: Go tests, generated Xray config validation, pinned aioquic QUIC E2E, HTTP/TLS E2E, go vet, Playwright dashboard tests, and static Linux ARM64/AMD64 builds all passed.
 
 ## Existing CI
 

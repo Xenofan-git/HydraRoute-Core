@@ -88,3 +88,27 @@
 - Core уже имеет профили, подписки/парсеры, Xray compiler/runtime, shared SOCKS routing, DNS package, interface settings и базовый UI/API.
 - Работа над полным subscription/server-picker parity продолжается; текущие изменения ещё не перенесены в GitHub и не развёрнуты на NanoPi.
 - Остальные группы выше являются планом полного функционального паритета, а не уже реализованными функциями.
+
+
+## Progress update — 2026-11-09 16:40 MSK
+
+### Completed and validated in this phase
+- GeoIP/GeoSite readiness endpoint and Rules UI card; safe fixed-file validation, symlink rejection, file size limits, inode check and SHA-256 metadata.
+- Hardened external GeoSite references to accept only safe `.dat` basenames and valid tags; path traversal and absolute paths rejected.
+- Actual NanoPi Xray 26.10.31 ARM64 accepted tested GeoSite tags `youtube`, `google`, `category-ads-all`, `category-ru`, `geolocation-!cn`, `netflix`, `telegram`, `discord`; GeoIP tags `ru`, `cn`, `private`, `!cn`; external `ext:geosite.dat:youtube`. `geosite:!cn` is invalid; use `geosite:geolocation-!cn`.
+- Opt-in HTTP/TLS/QUIC sniffing applies only to Core user SOCKS inbounds with routeOnly=true. Private Xray API inbound is excluded.
+- Actual NanoPi ARM64 loopback E2E passed for HTTP Host and TLS SNI: blocked host routed to BLOCK; allowed host routed DIRECT.
+- GitHub runner QUIC SNI E2E passed over SOCKS5 UDP ASSOCIATE with pinned aioquic 1.7.2 and Xray 26.10.31. HTTP/TLS E2E also passed in the same CI.
+- HRNeo navigation restored to «Сеть».
+- CI #186 passed Go tests, generated Xray config validation, HTTP/TLS/QUIC E2E, go vet, Playwright, and static AMD64/ARM64 builds. CI #185 push build matrix was still completing at update time.
+
+### Remaining work / next priorities
+1. Complete the exact original HRNeo Watchlist MATCH/DUMP API semantics and implement a local Core equivalent with loopback-only access and tests.
+2. Structured event journal and log/event streaming with bounded storage and no secret leakage.
+3. Read-only health/system metrics and data-plane readiness, keeping installed/enabled/running/ready/healthy as distinct states.
+4. DNS resolver parity using optional loopback-only SmartDNS sidecar; no system DNS/resolv.conf mutations.
+5. Complete FQDN/Geo list management, rule import/export and controlled geodata update/rollback.
+6. Phobos/WireGuard lifecycle only after parser, allocator, rollback and safety contracts are fully tested.
+
+### Deployment boundary
+All changes remain source/CI only. No NanoPi Core runtime deployment/restart and no changes to Keenetic, HRNeo/Entware, 3x-ui/Xray, Tailscale, system DNS, host routes, firewall, iptables/nftables or conntrack.
