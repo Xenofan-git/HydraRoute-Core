@@ -14,7 +14,7 @@
 - Server picker refreshes live status while open without re-rendering the modal or wiping unsaved form fields. Added clear unavailable-state messaging.
 - Set a conservative 30-second default and added a persisted global Observatory interval control (5–3600 seconds) with runtime reconfiguration.
 - Updated manual-selection regression tests to assert that excluded outbounds are neither compiled nor observed.
-- Validation: local `go test -count=1 ./...`, `go vet ./...` and `git diff --check` passed. Browser/Playwright validation is performed by GitHub Actions; runs #161–#166 exposed and corrected UI/test-fixture issues, run #167 is the current validation.
+- Validation: local `go test -count=1 ./...`, `go vet ./...` and `git diff --check` passed. GitHub Actions runs #169 and #170 passed formatting, JavaScript syntax, Go tests, Xray routing-config validation, go vet, Playwright browser tests, and static Linux ARM64/AMD64 builds.
 - Not deployed to NanoPi: its live Core runtime currently reports unconfigured/stopped, and the active Foreign subscription previously failed parsing. No live VPN, route, firewall, DNS, or service changes were made.
 
 ### Observatory parity — interval configuration (VPS source, not deployed)
@@ -27,6 +27,7 @@
 - The setting is used on the next Core config build; changing it does not forcibly restart a running Xray process.
 - Tests cover interval distribution, the 100 ms floor, persistence, invalid values, and the original URL.
 - No live HRNeo/Keenetic configuration or NanoPi runtime was changed. Source changes are committed to draft PR #2 but are not merged or deployed.
+- Added `research/2026-11-09-HRNEO-DEBIAN-ADAPTATION-MATRIX.md` and `research/2026-11-09-HRWEB-ACTIVE-OUTBOUND-INDEX-MAPPING.md`; the latter confirms HRweb outbound tag indices while preserving the distinction between candidate target and live connection.
 - Adjusted the manual Observatory stream timeout to honor the configured global cycle (up to 3600 seconds plus startup margin), with SSE keepalives. The UI now aborts the stream when the picker closes or selection is saved.
 - Serialized cache writes and bounded the in-memory/on-disk cache to the newest 4096 measurements to avoid stale concurrent snapshots and unbounded growth.
 
