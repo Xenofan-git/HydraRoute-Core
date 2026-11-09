@@ -49,6 +49,22 @@ jobs:
           unzip -q "$xray_zip" -d "$RUNNER_TEMP/xray"
           go run ./cmd/hrcore -input internal/compiler/testdata/shared-routing.json -output "$RUNNER_TEMP/shared-routing.json"
           (cd "$RUNNER_TEMP/xray" && XRAY_LOCATION_ASSET="$RUNNER_TEMP/xray" ./xray run -test -config "$RUNNER_TEMP/shared-routing.json")
+      - name: Set up Python for L7 integration tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned QUIC test dependency
+        run: python -m pip install --disable-pip-version-check --no-cache-dir -r tests/integration/requirements-quic.txt
+      - name: Test HTTP Host and TLS SNI routing through Core SOCKS
+        env:
+          XRAY_BINARY: ${{ runner.temp }}/xray/xray
+          XRAY_LOCATION_ASSET: ${{ runner.temp }}/xray
+        run: python tests/integration/l7_proxy_sniffing.py
+      - name: Test QUIC SNI routing through Core SOCKS UDP
+        env:
+          XRAY_BINARY: ${{ runner.temp }}/xray/xray
+          XRAY_LOCATION_ASSET: ${{ runner.temp }}/xray
+        run: python tests/integration/l7_quic_sni.py
       - name: Run go vet
         run: go vet ./...
       - name: Set up Node.js for browser tests
