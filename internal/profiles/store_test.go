@@ -11,7 +11,7 @@ import (
 func TestEncryptedProfileStoreRoundTripAndMetadataRedaction(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	store := NewStore(dir)
-	p := Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16140, Strategy: "leastPing", SubscriptionURL: "https://provider.example/sub?token=SECRET-TOKEN"}
+	p := Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16140, Strategy: "roundRobin", OutboundInterface: "eth0", DPIBypass: DPIBypass{NoiseTraffic: true, TLSFragmentation: true}, SubscriptionURL: "https://provider.example/sub?token=SECRET-TOKEN"}
 	if err := store.Save(p); err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestEncryptedProfileStoreRoundTripAndMetadataRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SubscriptionURL != p.SubscriptionURL || got.Port != p.Port {
+	if got.SubscriptionURL != p.SubscriptionURL || got.Port != p.Port || got.Strategy != p.Strategy || got.OutboundInterface != p.OutboundInterface || got.DPIBypass != p.DPIBypass {
 		t.Fatalf("got=%+v", got)
 	}
 	blob, err := os.ReadFile(filepath.Join(dir, "foreign.profile"))
@@ -41,7 +41,7 @@ func TestEncryptedProfileStoreRoundTripAndMetadataRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].Input != "url" {
+	if len(list) != 1 || list[0].Input != "url" || list[0].Strategy != p.Strategy || list[0].OutboundInterface != p.OutboundInterface || list[0].DPIBypass != p.DPIBypass {
 		t.Fatalf("metadata=%+v", list)
 	}
 	meta, _ := json.Marshal(list)
@@ -115,5 +115,26 @@ func TestProfileStoreRejectsPermissiveDirectoryAndSymlink(t *testing.T) {
 	}
 	if err := NewStore(link).Save(Profile{ID: "p", SourceID: "s", Links: []string{"vless://x"}}); err == nil {
 		t.Fatal("expected symlink directory rejection")
+	}
+}
+
+func TestAutoUpdateRequiresURLAndBoundedInterval(t *testing.T) {
+	base := Profile{ID: "auto", SourceID: "source", Enabled: true, Port: 16000, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#node"}, AutoUpdateEnabled: true, AutoUpdateInterval: 1440}
+	if err := Validate(base); err == nil {
+		t.Fatal("auto-update without URL should be rejected")
+	}
+	base.Links = nil
+	base.SubscriptionURL = "https://provider.example/sub"
+	base.AutoUpdateInterval = 4
+	if err := Validate(base); err == nil {
+		t.Fatal("interval under five minutes should be rejected")
+	}
+	base.AutoUpdateInterval = 10081
+	if err := Validate(base); err == nil {
+		t.Fatal("interval over seven days should be rejected")
+	}
+	base.AutoUpdateInterval = 1440
+	if err := Validate(base); err != nil {
+		t.Fatalf("valid per-profile schedule rejected: %v", err)
 	}
 }

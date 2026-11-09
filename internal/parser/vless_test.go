@@ -167,7 +167,7 @@ func TestParsedVLESSFeedsProfileCompiler(t *testing.T) {
 		t.Fatal(err)
 	}
 	outbounds := decoded["outbounds"].([]any)
-	if len(outbounds) != 3 {
+	if len(outbounds) != 4 {
 		t.Fatalf("expected direct, block and one VLESS outbound; got %d", len(outbounds))
 	}
 	if outbounds[2].(map[string]any)["protocol"] != "vless" {
@@ -211,5 +211,24 @@ func TestParseVLESSMissingNameUsesCredentialSafeHostFallback(t *testing.T) {
 	}
 	if strings.Contains(servers[0].Name, uuid1) {
 		t.Fatal("fallback name leaked UUID")
+	}
+}
+
+func TestParsedServerKeepsFragmentlessReferenceURIInMemoryOnly(t *testing.T) {
+	raw := "vless://" + uuid1 + "@edge.example:443?security=tls&sni=front.example#Display%20Name"
+	servers, err := ParseVLESSLinks("source", []string{raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "vless://" + uuid1 + "@edge.example:443?security=tls&sni=front.example"
+	if servers[0].ReferenceURI != want {
+		t.Fatalf("reference URI=%q, want %q", servers[0].ReferenceURI, want)
+	}
+	encoded, err := json.Marshal(servers[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "ReferenceURI") || strings.Contains(string(encoded), "Display%20Name") || strings.Contains(string(encoded), want) {
+		t.Fatalf("secret-bearing reference URI crossed JSON boundary: %s", encoded)
 	}
 }

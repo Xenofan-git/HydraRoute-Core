@@ -5,15 +5,17 @@ import "encoding/json"
 // Profile is an independent proxy interface. Empty Picked means automatic mode:
 // every supported pool member not listed in Excluded is eligible.
 type Profile struct {
-	ID                string   `json:"id"`
-	Enabled           bool     `json:"enabled"`
-	Listen            string   `json:"listen,omitempty"`
-	Port              uint16   `json:"port"`
-	Strategy          string   `json:"strategy"`
-	OutboundInterface string   `json:"outbound_interface,omitempty"`
-	Nodes             []Node   `json:"nodes"`
-	Picked            []string `json:"picked,omitempty"`
-	Excluded          []string `json:"excluded,omitempty"`
+	ID                string    `json:"id"`
+	Enabled           bool      `json:"enabled"`
+	Listen            string    `json:"listen,omitempty"`
+	Port              uint16    `json:"port"`
+	Strategy          string    `json:"strategy"`
+	OutboundInterface string    `json:"outbound_interface,omitempty"`
+	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
+	Nodes             []Node    `json:"nodes"`
+	Picked            []string  `json:"picked,omitempty"`
+	Excluded          []string  `json:"excluded,omitempty"`
+	ManualSelection   bool      `json:"manual_selection,omitempty"`
 }
 
 // Node contains a stable identity and a validated Xray outbound object.
@@ -33,15 +35,12 @@ type DPIBypass struct {
 }
 
 type RoutingConfig struct {
-	Enabled           bool          `json:"enabled"`
-	Listen            string        `json:"listen,omitempty"`
-	Port              uint16        `json:"port"`
-	DefaultAction     string        `json:"default_action"`
-	DefaultProfileID  string        `json:"default_profile_id,omitempty"`
-	Rules             []RoutingRule `json:"rules,omitempty"`
-	DPIBypass         DPIBypass     `json:"dpi_bypass,omitempty"`
-	BalancingStrategy string        `json:"balancing_strategy,omitempty"`
-	OutboundInterface string        `json:"outbound_interface,omitempty"`
+	Enabled          bool          `json:"enabled"`
+	Listen           string        `json:"listen,omitempty"`
+	Port             uint16        `json:"port"`
+	DefaultAction    string        `json:"default_action"`
+	DefaultProfileID string        `json:"default_profile_id,omitempty"`
+	Rules            []RoutingRule `json:"rules,omitempty"`
 }
 
 // RoutingRule is evaluated in slice order; the first matching rule wins.
@@ -58,6 +57,13 @@ type RoutingRule struct {
 
 // DNSConfig connects only the managed HydraRoute Xray process to the local
 // Core DNS service. It never changes the host resolver configuration.
+type L7SniffingConfig struct {
+	Enabled bool `json:"enabled"`
+	HTTP    bool `json:"http"`
+	TLS     bool `json:"tls"`
+	QUIC    bool `json:"quic"`
+}
+
 type DNSConfig struct {
 	Enabled bool   `json:"enabled"`
 	Listen  string `json:"listen"`
@@ -65,7 +71,9 @@ type DNSConfig struct {
 }
 
 type CompileRequest struct {
-	Profiles []Profile      `json:"profiles"`
-	Routing  *RoutingConfig `json:"routing,omitempty"`
-	DNS      *DNSConfig     `json:"dns,omitempty"`
+	Profiles                        []Profile        `json:"profiles"`
+	Routing                         *RoutingConfig   `json:"routing,omitempty"`
+	DNS                             *DNSConfig       `json:"dns,omitempty"`
+	L7Sniffing                      L7SniffingConfig `json:"l7_sniffing,omitempty"`
+	ObservatoryProbeIntervalSeconds int              `json:"observatory_probe_interval_seconds,omitempty"`
 }

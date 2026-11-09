@@ -24,6 +24,9 @@ type ParsedServer struct {
 	Key      ServerKey       `json:"key"`
 	Name     string          `json:"name"`
 	Outbound json.RawMessage `json:"outbound"`
+	// ReferenceURI is the original share URI without its display-name fragment.
+	// It is secret-bearing and must never cross API or persistence boundaries.
+	ReferenceURI string `json:"-"`
 }
 
 // CompilerKey encodes the public ServerKey tuple without exposing credentials.
@@ -53,9 +56,10 @@ func ParseVLESSLinks(source string, links []string) ([]ParsedServer, error) {
 		nth := counts[parsed.name]
 		counts[parsed.name] = nth + 1
 		out = append(out, ParsedServer{
-			Key:      ServerKey{Source: source, Name: parsed.name, Nth: nth},
-			Name:     parsed.name,
-			Outbound: parsed.outbound,
+			Key:          ServerKey{Source: source, Name: parsed.name, Nth: nth},
+			Name:         parsed.name,
+			Outbound:     parsed.outbound,
+			ReferenceURI: parsed.uri,
 		})
 	}
 	return out, nil
@@ -64,6 +68,7 @@ func ParseVLESSLinks(source string, links []string) ([]ParsedServer, error) {
 type parsedVLESS struct {
 	name     string
 	outbound json.RawMessage
+	uri      string
 }
 
 func parseVLESS(raw string) (parsedVLESS, error) {
@@ -242,7 +247,7 @@ func parseVLESS(raw string) (parsedVLESS, error) {
 	if name == "" {
 		name = net.JoinHostPort(host, strconv.Itoa(port))
 	}
-	return parsedVLESS{name: name, outbound: encoded}, nil
+	return parsedVLESS{name: name, outbound: encoded, uri: referenceURI(raw)}, nil
 }
 
 func validServerHost(host string) bool {
@@ -304,4 +309,12 @@ func splitCSV(values []string) []string {
 func (s ParsedServer) Fingerprint() string {
 	h := sha256.Sum256(s.Outbound)
 	return hex.EncodeToString(h[:])
+}
+
+// referenceURI preserves the provider URI identity while ignoring its display fragment.
+// It is intentionally held only in memory because it may contain credentials.
+func referenceURI(raw string) string {
+	raw = strings.TrimSpace(raw)
+	uri, _, _ := strings.Cut(raw, "#")
+	return uri
 }

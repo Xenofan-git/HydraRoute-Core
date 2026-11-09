@@ -16,12 +16,16 @@ The project keeps subscription profiles isolated: each enabled profile receives 
 - **Xray configuration compiler** — generates profile-specific SOCKS5 inbounds, outbounds, balancers, routing rules, and observability settings.
 - **Load balancing** — supports random, round-robin, and least-ping strategies.
 - **Encrypted profile storage** — subscription source data is encrypted at rest using AES-256-GCM.
+- **HRNeo-style subscription manager** — per-profile server selection, select-all/clear-all, offline exclusion, keyword keep/exclude filters, automatic refresh interval, and Save/Cancel.
+- **Live server measurements** — separate ICMP echo and per-outbound Xray Observatory delay/status, streamed to the dashboard; stale or unavailable measurements are never presented as fresh.
+- **Per-profile refresh scheduling** — each URL subscription has its own auto-update toggle and interval; cached subscription bodies are encrypted with the profile and reused between due refreshes.
 - **Selection persistence** — stores manual/automatic node selection and exclusions without persisting raw subscription credentials in selection state.
 - **Embedded web dashboard** — responsive Midnight + Violet interface with dark/light themes, profile cards, shared SOCKS5 routing editor, and runtime controls.
 - **Shared SOCKS5 routing** — optional dedicated inbound with ordered domain/IP rules, profile/DIRECT/BLOCK actions, and an explicit default route.
-- **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, and selection operations.
+- **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, selection operations, GeoIP/GeoSite readiness, and Watchlist status.
+- **HRNeo-compatible Watchlist** — Core-owned Unix socket with MATCH/DUMP line protocol, rank-based suffix matching, bounded DUMP streaming, and a read-only status endpoint. GeoSite Domain/Full keys are expanded from the installed data file; non-enumerable patterns are reported as partial coverage.
 - **Runtime supervision** — validates candidate configurations with Xray before activation and preserves the last known-good configuration on refresh failures.
-- **Scheduled refresh** — optional refresh scheduler with capped exponential retry; disabled unless configured.
+- **Scheduled refresh** — independent per-profile schedules with capped exponential retry; disabled unless configured.
 - **ARM64 and AMD64 builds** — cross-compilation for Linux ARM64/AArch64 and AMD64.
 
 ## Architecture
@@ -134,13 +138,22 @@ HydraRoute Core is designed to coexist with other proxy clients. Integrating its
 
 ## Management API
 
-The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory. Each profile card has a **Серверы** action: it opens a per-profile picker with automatic/manual pool modes, individual Picked/Excluded flags, and explicit handling of server identities that disappeared from the latest subscription.
+The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory. Each profile card has a **Серверы** action: it opens the HRNeo-style subscription manager. Selection is stored separately from keep/exclude filters, so changing filters does not destroy manual picks. Direct/manual links bypass subscription filters. URL subscription bodies are cached inside the encrypted profile store; per-profile auto-refresh fetches only due sources and uses cached bodies for the rest. The original two measurement columns are kept distinct: ICMP echo is a host-level reachability test, while proxy delay and `offline` state come from the running Xray Observatory.
 
+- GET /v1/geodata/status — inspect the fixed GeoIP/GeoSite assets, sizes and SHA-256.
+- GET /v1/watchlist/status — inspect the local MATCH/DUMP socket and partial-coverage counters.
+- The Core Watchlist socket is created only after a shared routing configuration has been successfully prepared. Its path is /var/lib/hydraroute/state/watchlist.sock (mode 0600); it never reuses HRNeo's /var/run/hrneo.sock.
+- MATCH <name> removes one trailing dot, lowercases, checks exact and parent suffixes, and chooses the lowest numeric rank. DUMP streams T, K, and END records. Targets map to Core profile IDs, DIRECT, or BLOCK; IP-only targets may appear in T, but IP/CIDR entries are not domain K records.
+- GeoSite Domain/Full records are expanded; GeoSite Plain/Regex and Xray keyword/regexp patterns are not enumerable concrete keys and are reported as partial coverage by /v1/watchlist/status.
 - `GET /v1/profiles` — list profile metadata.
 - `POST /v1/profiles` and `DELETE /v1/profiles` — create and delete profiles.
 - `POST /v1/profiles/refresh` — compile stored subscriptions and prepare the Xray configuration.
-- `POST /v1/profiles/preview` — fetch and parse one stored profile for the dashboard server picker; returns credential-free server identities and saved selection flags only.
-- `GET /v1/selections?profile_id=<id>` and `PUT /v1/selections` — read and persist per-profile automatic/manual server selection and exclusions. Missing server identities are retained for review; manual selection fails closed if no selected node remains.
+- `POST /v1/profiles/preview` — prepare the credential-free server list, per-profile filters, selection state, and auto-refresh settings for the subscription manager.
+- `PUT /v1/profiles` — update profile settings, filters, auto-refresh schedule, and manual Picked/Excluded selection together; the runtime configuration is validated before activation.
+- `POST /v1/profiles/refresh` — refresh all subscriptions, or only the selected profile when `profile_id` is supplied.
+- `GET /v1/observatory/status?profile_id=<id>` — read real Xray Observatory results for the selected profile.
+- `GET /v1/profiles/ping?profile_id=<id>` — Server-Sent Events stream matching HRweb's `proxy.pingServers` interaction: `links`, separate per-node `echo` (ICMP) and `ping` (Xray proxy delay/alive) events, then `done`. The Xray Observatory API exposes status retrieval but no force-probe RPC, so this stream waits for the next real observation cycle; it does not fabricate results or restart Xray.
+- `GET /v1/selections?profile_id=<id>` and `PUT /v1/selections` — retained for backwards compatibility. The dashboard now saves profile filters and selection together through `PUT /v1/profiles`. Missing server identities are retained for review; an empty manual pool is supported and omits that profile's balancer.
 - `GET /v1/routing` and `PUT /v1/routing` — read, validate, persist, and apply shared SOCKS5 routing rules.
 - `GET /v1/runtime` and `POST /v1/runtime` — inspect and control the managed Xray process.
 - `GET /v1/refresh/status` — inspect scheduled refresh status.
@@ -164,4 +177,4 @@ No license has been added yet. Until a license is published, the source is not g
 
 ### Dashboard browser tests
 
-The CI test job runs Playwright against the embedded dashboard assets with a local API fixture. It exercises manual server selection, mutually exclusive Picked/Excluded state, retention and explicit removal of missing server identities, empty manual-pool rejection, and CR/LF/comma parsing in the routing editor. The browser is Chromium headless; the test fixture does not start Xray or modify host networking.
+The CI test job runs Playwright against the embedded dashboard assets with a local API fixture. It exercises the subscription manager, streamed echo/proxy ping events, offline exclusion, keyword filtering without losing manual picks, per-profile auto-refresh settings, and empty manual-pool handling. The browser is Chromium headless; the test fixture does not start Xray or modify host networking.

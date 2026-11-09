@@ -12,10 +12,16 @@ let browser;
 let baseURL;
 let savedSelection;
 let savedRouting;
+let savedRefresh;
+let savedObservatorySettings = { probe_interval_seconds: 30 };
+let savedL7Settings = { enabled: false, http: true, tls: true, quic: true };
 
 const profiles = [{
   id: 'foreign', source_id: 'providerA', enabled: true,
-  listen: '127.0.0.1', port: 16090, strategy: 'leastPing',
+  listen: '127.0.0.1', port: 16090, strategy: 'leastPing', dpi_bypass: {}, outbound_interface: '',
+}, {
+  id: 'torrent', source_id: 'providerB', enabled: true,
+  listen: '127.0.0.1', port: 16091, strategy: 'random', dpi_bypass: {}, outbound_interface: '',
 }];
 const routing = {
   enabled: false, listen: '127.0.0.1', port: 16080,
@@ -29,10 +35,10 @@ const routing = {
   }],
 };
 const preview = {
-  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto',
+  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto', auto_update_available: true, auto_update_enabled: false, auto_update_interval: 1440, filter_available: true, filter_keep: '', filter_exclude: '',
   nodes: [
-    { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: false, excluded: false },
-    { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: false, excluded: false },
+    { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: true, excluded: false },
+    { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: true, excluded: false },
   ],
   missing_picked: [{ source: 'providerA', name: 'Gone', nth: 0 }],
   missing_excluded: [],
@@ -65,14 +71,44 @@ before(async () => {
     try {
       if (url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
       if (url.pathname === '/v1/runtime') return json(res, 200, { running: false, configured: false });
-      if (url.pathname === '/v1/network/interfaces') return json(res, 200, { interfaces: [{ name: 'wg0', category: 'vpn', kind: 'VPN / туннель', up: true, addresses: ['10.0.0.2/32'] }, { name: 'eth0', category: 'internet', kind: 'Физическая сеть', up: true, addresses: ['192.0.2.2/24'] }] });
       if (url.pathname === '/v1/profiles' && req.method === 'GET') return json(res, 200, { profiles });
+      if (url.pathname === '/v1/profiles' && req.method === 'PUT') {
+        const update = await readBody(req);
+        const profile = profiles.find(item => item.id === update.id);
+        if (!profile) return json(res, 404, { error: 'profile not found' });
+        Object.assign(profile, update);
+        savedSelection = update;
+        return json(res, 200, { status: 'updated', profile_id: profile.id });
+      }
+      if (url.pathname === '/v1/interfaces' && req.method === 'GET') return json(res, 200, {
+        default_interface: 'eth0', interfaces: [
+          { name: 'wg0', category: 'VPN', up: true },
+          { name: 'eth0', category: 'Интернет', up: true },
+          { name: 'br0', category: 'Остальное', up: false },
+        ],
+      });
       if (url.pathname === '/v1/routing' && req.method === 'GET') return json(res, 200, { routing, configured: false });
-      if (url.pathname === '/v1/refresh/status') return json(res, 200, { enabled: false, running: false, consecutive_failures: 0 });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'GET') return json(res, 200, savedRefresh || { enabled: false, interval_seconds: 86400, running: false, consecutive_failures: 0 });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'PUT') { savedRefresh = await readBody(req); return json(res, 200, { status: 'saved' }); }
       if (url.pathname === '/v1/profiles/preview' && req.method === 'POST') return json(res, 200, preview);
-      if (url.pathname === '/v1/selections' && req.method === 'PUT') {
-        savedSelection = await readBody(req);
-        return json(res, 200, { status: 'saved', profile_id: savedSelection.id });
+      if (url.pathname === '/v1/observatory/status' && req.method === 'GET') return json(res, 200, { available: false, statuses: {} });
+      if (url.pathname === '/v1/observatory/settings' && req.method === 'GET') return json(res, 200, savedObservatorySettings);
+      if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, savedObservatorySettings); }
+      if (url.pathname === '/v1/geodata/status' && req.method === 'GET') return json(res, 200, { ready: true, assets: [{ name: 'geoip.dat', available: true, size: 3312784, sha256: 'a'.repeat(64) }, { name: 'geosite.dat', available: true, size: 7554929, sha256: 'b'.repeat(64) }] });
+      if (url.pathname === '/v1/watchlist/status' && req.method === 'GET') return json(res, 200, { ready: true, path: '/var/lib/hydraroute/state/watchlist.sock', targets: 3, keys: 178, partial: true, excluded_patterns: 12 });
+      if (url.pathname === '/v1/l7/settings' && req.method === 'GET') return json(res, 200, savedL7Settings);
+      if (url.pathname === '/v1/l7/settings' && req.method === 'PUT') { savedL7Settings = await readBody(req); return json(res, 200, savedL7Settings); }
+      if (url.pathname === '/v1/profiles/ping' && req.method === 'GET') {
+        const keys = preview.nodes.map(n => JSON.stringify(n.key));
+        const at = Math.floor(Date.now() / 1000) + 1;
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write('data: ' + JSON.stringify({ links: keys }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[0], echo: { delay: 3 } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[1], echo: { delay: 5 } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[0], ping: { alive: false, delay: 0, at } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[1], ping: { alive: true, delay: 42, at } }) + '\n\n');
+        res.end('data: ' + JSON.stringify({ done: true }) + '\n\n');
+        return;
       }
       if (url.pathname === '/v1/routing' && req.method === 'PUT') {
         savedRouting = await readBody(req);
@@ -109,19 +145,87 @@ after(async () => {
 });
 
 
+test('rules page displays local Watchlist readiness and partial coverage', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.getByRole('heading', { name: 'Watchlist MATCH / DUMP' }).waitFor();
+    await page.getByText('Активен', { exact: true }).waitFor();
+    await page.getByText(/Частичный список: 12/).waitFor();
+  } finally {
+    await page.close();
+  }
+});
+
+test('rules page displays GeoIP and GeoSite asset readiness', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.getByRole('heading', { name: 'Геоданные Xray' }).waitFor();
+    await page.getByText('GeoIP', { exact: true }).waitFor();
+    await page.getByText('GeoSite', { exact: true }).waitFor();
+    await page.getByText('Доступны', { exact: true }).waitFor();
+  } finally {
+    await page.close();
+  }
+});
+
 test('Russian menu opens on Rules and rules can be reordered by dragging', async () => {
   const page = await browser.newPage();
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
-    assert.deepEqual(await page.locator('.nav-item').allTextContents(), ['▦Правила','♧Сеть','◎DNS','☷Hydra','ⓘИнфо','⚙Настройки','⇥Выход']);
+    assert.deepEqual((await page.locator('.nav-item').allTextContents()).map(x => x.replace(/^[^\p{L}]+/u, '').trim()), ['Правила','Сеть','DNS','Hydra','Инфо','Настройки','Выход']);
     assert.equal(await page.locator('#pageTitle').textContent(), 'Правила');
     assert.equal(await page.locator('.rule-card[data-rule]').count(), 2);
     assert.equal(await page.locator('.rule-drag-handle').count(), 2);
   } finally { await page.close(); }
 });
 
-test('server picker supports manual selection, exclusions and forgotten missing nodes', async () => {
+test('subscription modal supports select-all, manual node selection, filters and save', async () => {
+  savedSelection = undefined;
+  savedRefresh = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="hydra"]').click();
+    await page.locator('[data-preview-servers="foreign"]').click();
+    await page.getByRole('heading', { name: 'Серверы: foreign' }).waitFor();
+    assert.equal(await page.locator('.subscription-node-row').count(), 2);
+    assert.equal(await page.locator('.pick-node:checked').count(), 2);
+    await page.locator('#probeSubscription').click();
+    await page.getByText('42 ms').waitFor();
+    assert.match(await page.locator('.node-ping').nth(0).textContent(), /3 ms/);
+    assert.match(await page.locator('.node-delay').nth(1).textContent(), /42 ms/);
+    await page.locator('#excludeOffline').check();
+    assert.equal(await page.locator('.pick-node').nth(0).isChecked(), false);
+    assert.equal(await page.locator('.pick-node').nth(1).isChecked(), true);
+    await page.locator('#subscriptionSearch').fill('Alpha');
+    assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
+    await page.locator('#subscriptionSearch').fill('');
+    await page.locator('[data-sub-tab="filters"]').click();
+    await page.locator('#filterInclude').fill('Beta');
+    await page.locator('#applySubscriptionFilters').click();
+    assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
+    await page.locator('[data-drop-missing="picked:0"]').click();
+    await page.locator('[data-sub-tab="update"]').click();
+    await page.locator('#autoUpdateSubscription').check();
+    await page.locator('#refreshHours').fill('24');
+    await page.locator('#saveSubscription').click();
+    await page.getByText('Настройки подписки сохранены и конфигурация применена').waitFor();
+    assert.equal(savedSelection.pick_mode, 'manual');
+    assert.deepEqual(savedSelection.picked, [{ source: 'providerA', name: 'Beta', nth: 0 }]);
+    assert.deepEqual(savedSelection.excluded, [{ source: 'providerA', name: 'Alpha', nth: 0 }]);
+    assert.equal(savedSelection.auto_update_enabled, true);
+    assert.equal(savedSelection.auto_update_interval, 1440);
+    assert.equal(savedSelection.filter_keep, 'Beta');
+  } finally { await page.close(); }
+});
+
+test('subscription modal permits deliberately empty server pool', async () => {
   savedSelection = undefined;
   const page = await browser.newPage();
   try {
@@ -129,46 +233,13 @@ test('server picker supports manual selection, exclusions and forgotten missing 
     await page.getByText('API подключён').waitFor();
     await page.locator('.nav-item[data-page="hydra"]').click();
     await page.locator('[data-preview-servers="foreign"]').click();
-    await page.getByRole('heading', { name: 'Профиль foreign' }).waitFor();
-    assert.equal(await page.locator('.server-card').count(), 2);
-    assert.equal(await page.locator('[data-drop-missing="picked:0"]').count(), 1);
-
-    await page.locator('#pickMode').selectOption('manual');
-    assert.equal(await page.locator('.pick-node:checked').count(), 2);
-    await page.locator('.exclude-node').nth(0).check();
-    assert.equal(await page.locator('.pick-node').nth(0).isChecked(), false);
-    assert.equal(await page.locator('.pick-node').nth(1).isChecked(), true);
-    await page.locator('[data-drop-missing="picked:0"]').click();
-    assert.equal(await page.locator('[data-drop-missing]').count(), 0);
-
-    await page.locator('#saveSelection').click();
-    await page.getByText(/Выбор серверов сохранён/).waitFor();
+    await page.locator('#pickAllNodes').uncheck();
+    assert.equal(await page.locator('.pick-node:checked').count(), 0);
+    await page.locator('#saveSubscription').click();
+    await page.getByText('Настройки подписки сохранены').waitFor();
+    assert.deepEqual(savedSelection.picked, []);
     assert.equal(savedSelection.pick_mode, 'manual');
-    assert.deepEqual(savedSelection.picked, [{ source: 'providerA', name: 'Beta', nth: 0 }]);
-    assert.deepEqual(savedSelection.excluded, [{ source: 'providerA', name: 'Alpha', nth: 0 }]);
-  } finally {
-    await page.close();
-  }
-});
-
-test('manual mode refuses an empty pool', async () => {
-  const page = await browser.newPage();
-  try {
-    await page.goto(baseURL);
-    await page.getByText('API подключён').waitFor();
-    await page.locator('.nav-item[data-page="hydra"]').click();
-    await page.locator('[data-preview-servers="foreign"]').click();
-    await page.locator('#pickMode').selectOption('manual');
-    await page.locator('[data-drop-missing="picked:0"]').click();
-    await page.locator('.pick-node').nth(0).uncheck();
-    await page.locator('.pick-node').nth(1).uncheck();
-    savedSelection = undefined;
-    await page.locator('#saveSelection').click();
-    await page.getByText('Для ручного режима выберите хотя бы один сервер').waitFor();
-    assert.equal(savedSelection, undefined);
-  } finally {
-    await page.close();
-  }
+  } finally { await page.close(); }
 });
 
 test('HRNeo navigation order and draggable routing rules are preserved', async () => {
@@ -178,7 +249,7 @@ test('HRNeo navigation order and draggable routing rules are preserved', async (
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
     const nav = await page.locator('.nav-list .nav-item').allTextContents();
-    assert.deepEqual(nav.map(x => x.trim()), ['▦Правила', '♧Сеть', '◎DNS', '☷Hydra', 'ⓘИнфо', '⚙Настройки', '⇥Выход']);
+    assert.deepEqual(nav.map(x => x.replace(/^[^\p{L}]+/u, '').trim()), ['Правила', 'Сеть', 'DNS', 'Hydra', 'Инфо', 'Настройки', 'Выход']);
     assert.equal(await page.locator('.nav-item[data-page="rules"]').getAttribute('class').then(v => v.includes('active')), true);
     assert.equal(await page.locator('.rule-card').count(), 2);
     await page.locator('[data-drag-rule="0"]').dragTo(page.locator('.rule-card').nth(1));
@@ -210,61 +281,75 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     await page.close();
   }
 });
-test('balancing selector opens on hover and persists exactly one of three modes', async () => {
-  savedRouting = undefined;
+
+test('L7 sniffing settings save the selected proxy-ingress protocols', async () => {
   const page = await browser.newPage();
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
-    await page.locator('.nav-item[data-page="network"]').click();
-    await page.locator('#balanceToggle').hover();
-    await page.locator('#balanceOptions').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('input[name="balancingStrategy"]:checked').inputValue(), 'leastPing');
-    await page.locator('input[name="balancingStrategy"][value="random"]').check();
-    await page.waitForFunction(() => window.document.querySelector('#balanceCurrent')?.textContent === 'Случайный сервер');
-    await page.waitForFunction(() => window.document.querySelector('input[name="balancingStrategy"][value="random"]')?.disabled === false);
-    assert.equal(savedRouting.balancing_strategy, 'random');
-    assert.equal(await page.locator('input[name="balancingStrategy"]:checked').count(), 1);
-    await page.locator('input[name="balancingStrategy"][value="roundRobin"]').check();
-    await page.waitForFunction(() => window.document.querySelector('#balanceCurrent')?.textContent === 'По кругу');
-    assert.equal(savedRouting.balancing_strategy, 'roundRobin');
-    assert.equal(await page.locator('input[name="balancingStrategy"]:checked').count(), 1);
-  } finally { await page.close(); }
+    await page.locator('[data-page="settings"]').click();
+    await page.getByRole('heading', { name: 'L7-анализ' }).waitFor();
+    await page.locator('#l7Enabled').check();
+    await page.locator('#l7HTTP').uncheck();
+    await page.locator('#l7TLS').check();
+    await page.locator('#l7QUIC').check();
+    await page.locator('#saveL7Settings').click();
+    await page.getByText('Настройки L7 сохранены').waitFor();
+    assert.deepEqual(savedL7Settings, { enabled: true, http: false, tls: true, quic: true });
+  } finally {
+    await page.close();
+  }
 });
 
-test('DPI bypass options open as a side popover and persist each independent toggle', async () => {
-  savedRouting = undefined;
+test('Observatory interval loads and persists through its settings API', async () => {
   const page = await browser.newPage();
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
-    await page.locator('.nav-item[data-page="network"]').click();
-    await page.locator('#dpiBypassToggle').hover();
-    await page.locator('#dpiOptions').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('#dpiCount').textContent(), '0 из 3');
-    for (const [id, checked] of [['dpiNoise', true], ['dpiFragment', true], ['dpiFingerprint', false]]) {
-      const response = page.waitForResponse(r => r.url().endsWith('/v1/routing') && r.request().method() === 'PUT');
-      if (checked) await page.locator('#' + id).check(); else await page.locator('#' + id).uncheck();
-      await response;
-    }
-    assert.equal(await page.locator('#dpiCount').textContent(), '2 из 3');
-    assert.deepEqual(savedRouting.dpi_bypass, { noise_traffic: true, tls_fragmentation: true, random_tls_fingerprint: false });
-  } finally { await page.close(); }
+    await page.locator('[data-page="settings"]').click();
+    const interval = page.locator('#observatoryProbeInterval');
+    await interval.waitFor();
+    assert.equal(await interval.inputValue(), '30');
+    await interval.fill('120');
+    await page.locator('#saveObservatorySettings').click();
+    await page.getByText('Интервал Observatory сохранён').waitFor();
+    assert.equal(savedObservatorySettings.probe_interval_seconds, 120);
+  } finally {
+    await page.close();
+  }
 });
 
-test('outgoing interface picker discovers Linux interfaces and persists a selected binding', async () => {
-  savedRouting = undefined;
+test('connection settings persist independently per profile: DPI, balancing and outgoing interface', async () => {
+  profiles.forEach(p => { p.strategy = p.id === 'torrent' ? 'random' : 'leastPing'; p.dpi_bypass = {}; p.outbound_interface = ''; });
   const page = await browser.newPage();
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
     await page.locator('.nav-item[data-page="network"]').click();
-    await page.locator('#outgoingInterfaceToggle').hover();
-    await page.locator('#outgoingPicker').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('#interfaceCountVpn').textContent(), '1');
-    await page.locator('[data-interface-category="vpn"]').click();
-    await page.locator('[data-interface-select="wg0"]').click();
-    await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
-    assert.equal(savedRouting.outbound_interface, 'wg0');
+    const card = page.locator('.connection-card').filter({ hasText: 'foreign' });
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-dpi]').click();
+    await page.getByText('Шумовой трафик').waitFor();
+    await page.locator('.connection-option-panel [name="noise_traffic"]').check();
+    await page.locator('.connection-option-panel [name="random_tls_fingerprint"]').check();
+    await page.locator('[data-option-save]').click();
+    await page.getByText('Настройки подключения сохранены').waitFor();
+    assert.deepEqual(profiles[0].dpi_bypass, { noise_traffic: true, tls_fragmentation: false, random_tls_fingerprint: true });
+    assert.deepEqual(profiles[1].dpi_bypass, {});
+
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-balance]').click();
+    await page.locator('.connection-option-panel [value="roundRobin"]').check();
+    await page.getByText('Настройки подключения сохранены').waitFor();
+    assert.equal(profiles[0].strategy, 'roundRobin');
+    assert.equal(profiles[1].strategy, 'random');
+
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-interface]').click();
+    await page.getByText('wg0').waitFor();
+    await page.locator('[data-interface-value="wg0"]').click();
+    await page.getByText('Настройки подключения сохранены').waitFor();
+    assert.equal(profiles[0].outbound_interface, 'wg0');
+    assert.equal(profiles[1].outbound_interface, '');
   } finally { await page.close(); }
 });

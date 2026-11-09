@@ -15,12 +15,22 @@ import (
 var profileIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
 var ruleIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,48}$`)
 var domainNamePattern = regexp.MustCompile(`^(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\.?$`)
-var geoTagPattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,96}$`)
+var geoTagPattern = regexp.MustCompile(`^[A-Za-z0-9_.@!-]{1,96}$`)
+var geoDataFilePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,123}\.dat$`)
 var allowedStrategies = map[string]bool{"random": true, "roundRobin": true, "leastPing": true}
 
 // Compile builds one aggregate Xray configuration. Profile inbounds remain
 // isolated; the optional shared inbound has its own ordered routing table.
+// OutboundTag returns the deterministic Xray tag assigned to a profile node.
+func OutboundTag(profileID, key string) string {
+	h := sha256.Sum256([]byte(profileID + "\x00" + key))
+	return "hr_" + profileID + "_" + hex.EncodeToString(h[:6])
+}
+
 func Compile(req CompileRequest) ([]byte, error) {
+	if req.L7Sniffing.Enabled && !req.L7Sniffing.HTTP && !req.L7Sniffing.TLS && !req.L7Sniffing.QUIC {
+		return nil, fmt.Errorf("L7 sniffing is enabled but no protocol is selected")
+	}
 	profiles := append([]Profile(nil), req.Profiles...)
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
 
@@ -35,18 +45,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 	rules := make([]any, 0)
 	balancers := make([]any, 0)
 	allOutboundTags := make([]string, 0)
-	var dpiBypass DPIBypass
-	sharedStrategy := ""
-	if req.Routing != nil {
-		dpiBypass = req.Routing.DPIBypass
-		sharedStrategy = req.Routing.BalancingStrategy
-		if sharedStrategy == "" {
-			sharedStrategy = "leastPing"
-		}
-		if sharedStrategy != "" && !allowedStrategies[sharedStrategy] {
-			return nil, fmt.Errorf("unsupported shared balancing strategy %q", sharedStrategy)
-		}
-	}
 
 	for _, p := range profiles {
 		if !p.Enabled {
@@ -59,7 +57,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 			return nil, fmt.Errorf("duplicate profile id %q", p.ID)
 		}
 		seenIDs[p.ID] = true
-		enabledProfiles[p.ID] = true
 		if p.Port < 1024 {
 			return nil, fmt.Errorf("profile %s: port %d is outside allowed range 1024-65535", p.ID, p.Port)
 		}
@@ -76,9 +73,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 			return nil, fmt.Errorf("profile %s: SOCKS listen address %q is not loopback", p.ID, listen)
 		}
 		strategy := p.Strategy
-		if sharedStrategy != "" {
-			strategy = sharedStrategy
-		}
 		if strategy == "" {
 			strategy = "leastPing"
 		}
@@ -99,9 +93,8 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s: duplicate node key %q", p.ID, n.Key)
 			}
 			nodeKeys[n.Key] = true
-			if excluded[n.Key] || (len(picked) > 0 && !picked[n.Key]) {
-				continue
-			}
+			// Validate every parsed node, but emit only eligible pool members as
+			// Xray outbounds and Observatory subjects.
 			var outbound map[string]any
 			if len(n.Outbound) == 0 || json.Unmarshal(n.Outbound, &outbound) != nil || outbound == nil {
 				return nil, fmt.Errorf("profile %s node %q: outbound must be a JSON object", p.ID, n.Key)
@@ -109,18 +102,27 @@ func Compile(req CompileRequest) ([]byte, error) {
 			if _, ok := outbound["protocol"]; !ok {
 				return nil, fmt.Errorf("profile %s node %q: outbound protocol is missing", p.ID, n.Key)
 			}
-			applyDPIBypass(outbound, dpiBypass)
-			iface := p.OutboundInterface
-			if iface == "" && req.Routing != nil {
-				iface = req.Routing.OutboundInterface
-			}
-			if iface != "" {
-				if err := applyOutboundInterface(outbound, iface); err != nil {
-					return nil, fmt.Errorf("profile %s node %q: %w", p.ID, n.Key, err)
+			applyDPIBypass(outbound, p.DPIBypass)
+			if p.OutboundInterface != "" {
+				if !regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,64}$`).MatchString(p.OutboundInterface) {
+					return nil, fmt.Errorf("profile %s: invalid outbound interface name", p.ID)
 				}
+				stream, _ := outbound["streamSettings"].(map[string]any)
+				if stream == nil {
+					stream = map[string]any{}
+					outbound["streamSettings"] = stream
+				}
+				sockopt, _ := stream["sockopt"].(map[string]any)
+				if sockopt == nil {
+					sockopt = map[string]any{}
+					stream["sockopt"] = sockopt
+				}
+				sockopt["interface"] = p.OutboundInterface
 			}
-			h := sha256.Sum256([]byte(p.ID + "\x00" + n.Key))
-			tag := "hr_" + p.ID + "_" + hex.EncodeToString(h[:6])
+			if excluded[n.Key] || ((p.ManualSelection || len(picked) > 0) && !picked[n.Key]) {
+				continue
+			}
+			tag := OutboundTag(p.ID, n.Key)
 			outbound["tag"] = tag
 			eligible = append(eligible, outbound)
 			selectors = append(selectors, tag)
@@ -134,17 +136,22 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s: node %q cannot be both picked and excluded", p.ID, key)
 			}
 		}
+		// Only eligible balancer members become Xray outbounds or Observatory
+		// subjects. Excluded and unselected nodes must not be probed.
+		outbounds = append(outbounds, eligible...)
 		if len(eligible) == 0 {
-			return nil, fmt.Errorf("profile %s: no eligible nodes after picked/excluded filtering", p.ID)
+			continue
 		}
+		enabledProfiles[p.ID] = true
 
 		inTag := "hr_in_" + p.ID
 		balTag := "hr_bal_" + p.ID
-		inbounds = append(inbounds, map[string]any{
+		profileInbound := map[string]any{
 			"tag": inTag, "listen": listen, "port": p.Port, "protocol": "socks",
 			"settings": map[string]any{"auth": "noauth", "udp": true},
-		})
-		outbounds = append(outbounds, eligible...)
+		}
+		applyL7Sniffing(profileInbound, req.L7Sniffing)
+		inbounds = append(inbounds, profileInbound)
 		rules = append(rules, map[string]any{
 			"type": "field", "inboundTag": []string{inTag}, "balancerTag": balTag,
 		})
@@ -183,10 +190,12 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("shared routing exceeds 256 rules")
 			}
 			sharedTag := "hr_shared_in"
-			inbounds = append(inbounds, map[string]any{
+			sharedInbound := map[string]any{
 				"tag": sharedTag, "listen": listen, "port": routing.Port, "protocol": "socks",
 				"settings": map[string]any{"auth": "noauth", "udp": true},
-			})
+			}
+			applyL7Sniffing(sharedInbound, req.L7Sniffing)
+			inbounds = append(inbounds, sharedInbound)
 			seenRuleIDs := map[string]bool{}
 			for i, rule := range routing.Rules {
 				if !rule.Enabled {
@@ -266,14 +275,67 @@ func Compile(req CompileRequest) ([]byte, error) {
 			"servers": []any{map[string]any{"address": listen, "port": req.DNS.Port}},
 		}
 	}
-	if len(inbounds) > 0 {
+	if len(allOutboundTags) > 0 {
+		// Private loopback-only gRPC endpoint for the managed process' Observatory.
+		// It is not exposed on LAN and does not install routes or alter the host firewall.
+		const apiPort = 16285
+		if owner, exists := seenPorts[apiPort]; exists {
+			return nil, fmt.Errorf("profile %s uses reserved Xray API port %d", owner, apiPort)
+		}
+		inbounds = append(inbounds, map[string]any{
+			"tag": "hr_api_in", "listen": "127.0.0.1", "port": apiPort, "protocol": "dokodemo-door",
+			"settings": map[string]any{"address": "127.0.0.1"},
+		})
+		outbounds = append(outbounds, map[string]any{"tag": "hr_api", "protocol": "freedom"})
+		rules = append([]any{map[string]any{"type": "field", "inboundTag": []string{"hr_api_in"}, "outboundTag": "hr_api"}}, rules...)
+		cfg["inbounds"] = inbounds
+		cfg["outbounds"] = outbounds
+		cfg["routing"] = map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers}
+		cfg["api"] = map[string]any{"tag": "hr_api", "services": []string{"ObservatoryService"}}
 		cfg["observatory"] = map[string]any{
 			"subjectSelector": allOutboundTags,
-			"probeUrl":        "https://www.gstatic.com/generate_204",
-			"probeInterval":   "180s",
+			"probeUrl":        "https://www.google.com/generate_204",
+			"probeInterval":   observatoryProbeInterval(req.ObservatoryProbeIntervalSeconds, len(allOutboundTags)),
 		}
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+func applyL7Sniffing(inbound map[string]any, settings L7SniffingConfig) {
+	if !settings.Enabled {
+		return
+	}
+	destOverride := make([]string, 0, 3)
+	if settings.HTTP {
+		destOverride = append(destOverride, "http")
+	}
+	if settings.TLS {
+		destOverride = append(destOverride, "tls")
+	}
+	if settings.QUIC {
+		destOverride = append(destOverride, "quic")
+	}
+	if len(destOverride) == 0 {
+		return
+	}
+	inbound["sniffing"] = map[string]any{
+		"enabled": true, "destOverride": destOverride,
+		"metadataOnly": false, "routeOnly": true,
+	}
+}
+
+func observatoryProbeInterval(seconds, subjects int) string {
+	if seconds < 5 || seconds > 3600 {
+		seconds = 30
+	}
+	if subjects < 1 {
+		subjects = 1
+	}
+	intervalMS := (seconds * 1000) / subjects
+	if intervalMS < 100 {
+		intervalMS = 100
+	}
+	return fmt.Sprintf("%dms", intervalMS)
 }
 
 func validateRouteTarget(action, profileID string, enabled map[string]bool) error {
@@ -328,8 +390,8 @@ func validateMatchValue(matchType, value string) error {
 			}
 		case strings.HasPrefix(value, "ext:"):
 			parts := strings.Split(value, ":")
-			if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
-				return fmt.Errorf("invalid external geosite reference %q", value)
+			if len(parts) != 3 || !geoDataFilePattern.MatchString(parts[1]) || !geoTagPattern.MatchString(parts[2]) {
+				return fmt.Errorf("invalid external geosite reference %q: expected ext:<basename>.dat:<tag>", value)
 			}
 		default:
 			return fmt.Errorf("domain values must use domain:, full:, keyword:, regexp:, geosite:, or ext: syntax")
@@ -359,25 +421,6 @@ func stringSet(items []string) map[string]bool {
 		}
 	}
 	return out
-}
-
-// applyOutboundInterface binds Xray first-hop sockets to a Linux interface only.
-func applyOutboundInterface(outbound map[string]any, iface string) error {
-	if len(iface) > 15 || strings.TrimSpace(iface) != iface || iface == "." || iface == ".." || strings.ContainsAny(iface, "/\x00") {
-		return fmt.Errorf("invalid outbound interface name %q", iface)
-	}
-	stream, ok := outbound["streamSettings"].(map[string]any)
-	if !ok {
-		stream = map[string]any{}
-		outbound["streamSettings"] = stream
-	}
-	sockopt, ok := stream["sockopt"].(map[string]any)
-	if !ok {
-		sockopt = map[string]any{}
-		stream["sockopt"] = sockopt
-	}
-	sockopt["interface"] = iface
-	return nil
 }
 
 // ValidateJSON checks that the compiler output remains valid JSON.
