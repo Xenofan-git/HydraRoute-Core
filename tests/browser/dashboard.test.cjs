@@ -13,6 +13,7 @@ let baseURL;
 let savedSelection;
 let savedRouting;
 let savedRefresh;
+let savedObservatorySettings = { probe_interval_seconds: 30 };
 
 const profiles = [{
   id: 'foreign', source_id: 'providerA', enabled: true,
@@ -90,6 +91,8 @@ before(async () => {
       if (url.pathname === '/v1/refresh/status' && req.method === 'PUT') { savedRefresh = await readBody(req); return json(res, 200, { status: 'saved' }); }
       if (url.pathname === '/v1/profiles/preview' && req.method === 'POST') return json(res, 200, preview);
       if (url.pathname === '/v1/observatory/status' && req.method === 'GET') return json(res, 200, { available: false, statuses: {} });
+      if (url.pathname === '/v1/observatory/settings' && req.method === 'GET') return json(res, 200, savedObservatorySettings);
+      if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, savedObservatorySettings); }
       if (url.pathname === '/v1/profiles/ping' && req.method === 'GET') {
         const keys = preview.nodes.map(n => JSON.stringify(n.key));
         const at = Math.floor(Date.now() / 1000) + 1;
@@ -241,6 +244,24 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     assert.deepEqual(savedRouting.rules[0].values, [
       'domain:one.example', 'domain:two.example', 'domain:three.example',
     ]);
+  } finally {
+    await page.close();
+  }
+});
+
+test('Observatory interval loads and persists through its settings API', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('[data-page="settings"]').click();
+    const interval = page.locator('#observatoryProbeInterval');
+    await interval.waitFor();
+    assert.equal(await interval.inputValue(), '30');
+    await interval.fill('120');
+    await page.locator('#saveObservatorySettings').click();
+    await page.getByText('Интервал Observatory сохранён').waitFor();
+    assert.equal(savedObservatorySettings.probe_interval_seconds, 120);
   } finally {
     await page.close();
   }
