@@ -122,3 +122,7 @@
 - 2026-11-09: Disassembled `prunePicked` and `pruneExcluded`: both prune persisted full `ServerKey` selections/exclusions against the current candidate inventory, removing stale identities rather than offline servers. `pick` builds selection from pool candidates and clears Picked for empty input. Tag encode/decode still needs exact semantic mapping.
 - 2026-11-09: Caller tracing confirms `outboundTag` is generated during `buildManagedConfig` for Xray outbound entries, while `ServerKey` remains the persisted selection identity. Runtime tag decoding must resolve through metadata candidates; do not conflate tags with ServerKey.
 - 2026-11-09: `activeBalancerLinks` retains only `Filtered=true` records and forms the balancer candidate relation; `activeBalancerServers` traverses this relation in stored order and resolves runtime tags against candidate metadata. Full inventory, filtered relation, pool, and manual exclusions are distinct views.
+
+### L7 end-to-end test result
+- Added `tests/integration/l7_proxy_sniffing.py`, a loopback-only SOCKS5/Xray test for HTTP Host and TLS SNI routing. Both protocols passed on VPS Xray 26.10.31 AMD64 and actual NanoPi Xray 26.10.31 ARM64. QUIC real-traffic validation remains pending.
+- GitHub Actions #179 passed Playwright and Linux ARM64/AMD64 static builds.
