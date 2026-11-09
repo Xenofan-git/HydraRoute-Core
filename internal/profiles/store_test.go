@@ -117,3 +117,24 @@ func TestProfileStoreRejectsPermissiveDirectoryAndSymlink(t *testing.T) {
 		t.Fatal("expected symlink directory rejection")
 	}
 }
+
+func TestAutoUpdateRequiresURLAndBoundedInterval(t *testing.T) {
+	base := Profile{ID: "auto", SourceID: "source", Enabled: true, Port: 16000, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#node"}, AutoUpdateEnabled: true, AutoUpdateInterval: 1440}
+	if err := Validate(base); err == nil {
+		t.Fatal("auto-update without URL should be rejected")
+	}
+	base.Links = nil
+	base.SubscriptionURL = "https://provider.example/sub"
+	base.AutoUpdateInterval = 4
+	if err := Validate(base); err == nil {
+		t.Fatal("interval under five minutes should be rejected")
+	}
+	base.AutoUpdateInterval = 10081
+	if err := Validate(base); err == nil {
+		t.Fatal("interval over seven days should be rejected")
+	}
+	base.AutoUpdateInterval = 1440
+	if err := Validate(base); err != nil {
+		t.Fatalf("valid per-profile schedule rejected: %v", err)
+	}
+}

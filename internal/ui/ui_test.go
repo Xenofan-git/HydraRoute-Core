@@ -2,6 +2,7 @@ package ui
 
 import (
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func TestDashboardIncludesPerProfileServerPickerWorkflow(t *testing.T) {
 	for _, required := range []string{
 		`data-preview-servers=`,
 		`/v1/profiles/preview`,
-		`/v1/selections`,
+		`/v1/profiles`,
 		`missing_picked`,
 		`missing_excluded`,
 		`pick_mode`,
@@ -44,6 +45,11 @@ func TestDashboardIncludesPerProfileServerPickerWorkflow(t *testing.T) {
 		`filterExclude`,
 		`autoUpdateSubscription`,
 		`/v1/refresh/status`,
+		`/v1/profiles/ping`,
+		`text/event-stream`,
+		`msg.echo`,
+		`msg.ping`,
+		`Поток опроса завершился до получения итогового события`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("dashboard server picker is missing %q", required)
@@ -76,5 +82,16 @@ func TestRoutingEditorSplitsMultilineValuesCorrectly(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("split result=%q, want %q", got, want)
 		}
+	}
+}
+
+func TestObservatoryUISeparatesStaleFromOffline(t *testing.T) {
+	data, err := os.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	if !strings.Contains(js, "st.stale?'устарело'") || !strings.Contains(js, "!s.stale&&!s.alive") || !strings.Contains(js, "!st.stale&&!st.alive") {
+		t.Fatal("UI must label stale measurements separately and exclude them from offline auto-selection")
 	}
 }

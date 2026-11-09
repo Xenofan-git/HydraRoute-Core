@@ -21,7 +21,7 @@ func ParseShadowsocksLinks(source string, links []string) ([]ParsedServer, error
 		}
 		nth := counts[p.name]
 		counts[p.name] = nth + 1
-		out = append(out, ParsedServer{Key: ServerKey{Source: source, Name: p.name, Nth: nth}, Name: p.name, Outbound: p.outbound})
+		out = append(out, ParsedServer{Key: ServerKey{Source: source, Name: p.name, Nth: nth}, Name: p.name, Outbound: p.outbound, ReferenceURI: p.uri})
 	}
 	return out, nil
 }
@@ -109,7 +109,7 @@ func parseShadowsocks(raw string) (parsedVLESS, error) {
 	if name == "" {
 		name = host + ":" + strconv.Itoa(port)
 	}
-	return parsedVLESS{name: name, outbound: encoded}, nil
+	return parsedVLESS{name: name, outbound: encoded, uri: referenceURI(raw)}, nil
 }
 
 func jsonMarshalOutbound(value any) ([]byte, error) {

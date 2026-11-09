@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
+	"hydraroute.local/core/internal/service"
+	"hydraroute.local/core/internal/state"
+	"hydraroute.local/core/internal/xrayapi"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -127,7 +131,7 @@ func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	if err := json.Unmarshal(config, &compiled); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(compiled["inbounds"].([]any)); got != 2 {
+	if got := len(compiled["inbounds"].([]any)); got != 3 {
 		t.Fatalf("expected profile and shared inbounds, got %d", got)
 	}
 	proxy := compiled["outbounds"].([]any)[2].(map[string]any)
@@ -137,7 +141,7 @@ func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 		t.Fatalf("DPI options were not applied to compiled proxy: %#v", mask)
 	}
 	rules := compiled["routing"].(map[string]any)["rules"].([]any)
-	if got := len(rules); got != 3 {
+	if got := len(rules); got != 4 {
 		t.Fatalf("expected profile, custom and default rules, got %d", got)
 	}
 	rr = httptest.NewRecorder()
@@ -460,7 +464,7 @@ func TestEncryptedProfileCRUDAndRefreshWorkflow(t *testing.T) {
 	}
 
 	// Persist a second, network-independent source for refresh.
-	storeProfile := profiles.Profile{ID: "local", SourceID: "providerB", Enabled: true, Port: 16151, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge"}}
+	storeProfile := profiles.Profile{ID: "local", SourceID: "providerB", Enabled: true, Port: 16151, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge", "vless://00000000-0000-4000-8000-000000000002@edge2.example:443#edge2"}}
 	if err := h.profileStore.Save(storeProfile); err != nil {
 		t.Fatal(err)
 	}
@@ -821,7 +825,7 @@ func TestProfileSettingsArePersistedPerProfileAndExposedWithoutSecrets(t *testin
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
 	for i, id := range []string{"alpha", "beta"} {
-		if err := h.profileStore.Save(profiles.Profile{ID: id, SourceID: "providerA", Enabled: true, Port: uint16(16180 + i), Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge"}}); err != nil {
+		if err := h.profileStore.Save(profiles.Profile{ID: id, SourceID: "providerA", Enabled: true, Port: uint16(16180 + i), Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge", "vless://00000000-0000-4000-8000-000000000002@edge2.example:443#edge2"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -930,5 +934,231 @@ func TestRefreshSettingsPersistAndUpdateRuntimeSchedule(t *testing.T) {
 	restarted := NewWithStateDir(apiSupervisor(t), stateDir)
 	if !restarted.refreshState.Enabled || restarted.refreshState.IntervalSeconds != 86400 || restarted.refreshOpts.RefreshInterval != 24*time.Hour {
 		t.Fatalf("settings were not restored: %+v", restarted.refreshState)
+	}
+}
+
+func TestObservatoryCachePersistsAcrossCoreRestart(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	h.probeCache["obs"] = map[string]xrayapi.OutboundStatus{
+		`{"source":"providerA","name":"edge"}`: {Tag: "hr_obs_test", Alive: true, DelayMS: 42, LastTryTime: 1762680000},
+	}
+	if err := h.saveProbeCache(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(stateDir, "observatory", "status.json"))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("cache file mode=%v err=%v", info, err)
+	}
+	restarted := NewWithStateDir(apiSupervisor(t), stateDir)
+	got := restarted.probeCache["obs"]
+	if len(got) != 1 || got[`{"source":"providerA","name":"edge"}`].DelayMS != 42 {
+		t.Fatalf("probe cache not restored: %#v", got)
+	}
+}
+
+func TestObservatoryStatusIsReadOnlyAndReportsUnavailableWhenRuntimeStopped(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), filepath.Join(t.TempDir(), "state"))
+	p := profiles.Profile{ID: "obs", SourceID: "providerA", Enabled: true, Port: 16200, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge"}}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/observatory/status?profile_id=obs"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["available"] != false {
+		t.Fatalf("stopped runtime must not fabricate Observatory status: %#v", got)
+	}
+}
+
+func TestProfileSettingsSaveFiltersAutoUpdateAndSelectionTogether(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	p := profiles.Profile{ID: "settings", SourceID: "providerA", Enabled: true, Port: 16210, SubscriptionURL: "https://provider.example/sub"}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"id":"settings","filter_keep":"LTE\nMoscow","filter_exclude":"trial","auto_update_enabled":true,"auto_update_interval":1440,"pick_mode":"manual","picked":[{"source":"providerA","name":"Node A"}],"excluded":[]}`
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/profiles", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	got, err := h.profileStore.Get("settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FilterKeep != "LTE\nMoscow" || got.FilterExclude != "trial" || !got.AutoUpdateEnabled || got.AutoUpdateInterval != 1440 {
+		t.Fatalf("profile settings=%+v", got)
+	}
+	selection, err := service.LoadSelection(stateDir, "settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.PickMode != "manual" || len(selection.Picked) != 1 || selection.Picked[0].Name != "Node A" {
+		t.Fatalf("selection=%+v", selection)
+	}
+}
+
+func TestScheduledRefreshUsesEncryptedCachedSubscriptionUntilItsIntervalIsDue(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	p := profiles.Profile{ID: "scheduled", SourceID: "providerA", Enabled: true, Port: 16211, SubscriptionURL: "https://provider.example/sub", CachedSubscription: "vless://00000000-0000-4000-8000-000000000001@edge.example:443#Cached", AutoUpdateEnabled: true, AutoUpdateInterval: 1440, LastSubscriptionUpdate: time.Now().Unix()}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	delay, ok := h.profileRefreshDelay()
+	if !ok || delay <= 0 || delay > 24*time.Hour {
+		t.Fatalf("scheduled delay=%v enabled=%v", delay, ok)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := h.refreshProfilesScheduledLocked(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["nodes"] != 1 {
+		t.Fatalf("scheduled cached compile=%v", result)
+	}
+	cached, err := h.profileStore.Get("scheduled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached.CachedSubscription != p.CachedSubscription || cached.LastSubscriptionUpdate != p.LastSubscriptionUpdate {
+		t.Fatalf("not-due source was fetched/changed: %+v", cached)
+	}
+}
+
+func TestProfilePingStreamKeepsICMPEchoAndProxyPingSeparate(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	p := profiles.Profile{ID: "ping", SourceID: "providerA", Enabled: true, Port: 16212, Links: []string{"vless://00000000-0000-4000-8000-000000000001@127.0.0.1:443#Loopback"}}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	r := localGet("/v1/profiles/ping?profile_id=ping")
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("content-type=%q", rr.Header().Get("Content-Type"))
+	}
+	body := rr.Body.String()
+	for _, part := range []string{`"links"`, `"echo":{}`, `"done":true`, `Xray не запущен`} {
+		if !strings.Contains(body, part) {
+			t.Fatalf("SSE response missing %q: %s", part, body)
+		}
+	}
+	if strings.Contains(body, `"echo":{"alive"`) || strings.Contains(body, `"ping":{"delay"`) && strings.Contains(body, `"echo":{"delay"`) {
+		t.Fatalf("ICMP echo and Xray ping were conflated: %s", body)
+	}
+}
+
+func TestObservatorySettingsPersistAndValidate(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/observatory/settings", `{"probe_interval_seconds":137}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(filepath.Join(dir, "observatory", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("settings mode=%o", info.Mode().Perm())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), dir)
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localGet("/v1/observatory/settings"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"probe_interval_seconds":137`) {
+		t.Fatalf("reload status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/observatory/settings", `{"probe_interval_seconds":3601}`))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid interval status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestIsFreshObservatoryProbeUsesStrictTimestampBoundary(t *testing.T) {
+	if isFreshObservatoryProbe(1762680000, 1762680000) {
+		t.Fatal("same-second/old result must not be treated as fresh")
+	}
+	if isFreshObservatoryProbe(1762679999, 1762680000) {
+		t.Fatal("older result must not be treated as fresh")
+	}
+	if !isFreshObservatoryProbe(1762680001, 1762680000) {
+		t.Fatal("newer result should be treated as fresh")
+	}
+}
+
+func TestCachedProbeStatusesRejectsDifferentOutboundGeneration(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	key := `{"source":"providerA","name":"edge"}`
+	h.probeCache["foreign"] = map[string]xrayapi.OutboundStatus{
+		key: {Tag: "old-generation-tag", Alive: true, DelayMS: 12, LastTryTime: 1762680000},
+	}
+	node := service.PreviewNode{}
+	if err := json.Unmarshal([]byte(key), &node.Key); err != nil {
+		t.Fatal(err)
+	}
+	got := h.cachedProbeStatuses("foreign", []service.PreviewNode{node})
+	if len(got) != 0 {
+		t.Fatalf("stale generation status leaked into current profile: %#v", got)
+	}
+	tag := compiler.OutboundTag("foreign", key)
+	h.probeCache["foreign"][key] = xrayapi.OutboundStatus{Tag: tag, Alive: false, LastTryTime: 1762680000}
+	got = h.cachedProbeStatuses("foreign", []service.PreviewNode{node})
+	if status, ok := got[key]; !ok || !status.Stale {
+		t.Fatalf("cached measurement must be explicitly stale: %#v", got)
+	}
+}
+
+func TestSameObservatoryStatusDetectsOnlyActualMeasurementChanges(t *testing.T) {
+	a := xrayapi.OutboundStatus{Tag: "hr_test", Alive: true, DelayMS: 23, LastTryTime: 1762680000, LastSeenTime: 1762680000}
+	if !sameObservatoryStatus(a, a) {
+		t.Fatal("identical status should compare equal")
+	}
+	b := a
+	b.DelayMS++
+	if sameObservatoryStatus(a, b) {
+		t.Fatal("changed delay should compare different")
+	}
+	b = a
+	b.LastSeenTime++
+	if sameObservatoryStatus(a, b) {
+		t.Fatal("changed last-seen time should compare different")
+	}
+}
+
+func TestEligiblePreviewNodeCountMatchesSelectionAndFilters(t *testing.T) {
+	key1 := parser.ServerKey{Source: "providerA", Name: "one"}
+	key2 := parser.ServerKey{Source: "providerA", Name: "two"}
+	key3 := parser.ServerKey{Source: "providerA", Name: "three"}
+	preview := service.ProfilePreview{Nodes: []service.PreviewNode{
+		{Key: key1, Picked: true},
+		{Key: key2, Picked: true, Excluded: true},
+		{Key: key3, Picked: true, Filtered: true},
+	}}
+	if got := eligiblePreviewNodeCount(preview, nil); got != 1 {
+		t.Fatalf("auto pool count=%d, want 1", got)
+	}
+	selection := &state.Profile{PickMode: "manual", Picked: []parser.ServerKey{key1, key2, key3}, Excluded: []parser.ServerKey{key2}}
+	if got := eligiblePreviewNodeCount(preview, selection); got != 1 {
+		t.Fatalf("manual pool count=%d, want 1", got)
+	}
+	selection = &state.Profile{PickMode: "manual", Picked: []parser.ServerKey{key1, key2}, Excluded: []parser.ServerKey{key2}}
+	if got := eligiblePreviewNodeCount(preview, selection); got != 1 {
+		t.Fatalf("manual subset pool count=%d, want 1", got)
 	}
 }

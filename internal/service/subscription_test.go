@@ -61,7 +61,7 @@ func TestCompileSubscriptionsIsolatesProfiles(t *testing.T) {
 	if err := json.Unmarshal(result.Config, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(cfg["inbounds"].([]any)); got != 2 {
+	if got := len(cfg["inbounds"].([]any)); got != 3 {
 		t.Fatalf("inbounds=%d", got)
 	}
 }
@@ -81,10 +81,10 @@ func TestCompileSubscriptionsAppliesSharedRouting(t *testing.T) {
 	if err := json.Unmarshal(result.Config, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg["inbounds"].([]any)) != 2 {
+	if len(cfg["inbounds"].([]any)) != 3 {
 		t.Fatalf("expected shared and profile inbounds, got %d", len(cfg["inbounds"].([]any)))
 	}
-	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 3 {
+	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 4 {
 		t.Fatal("expected profile, user and fallback rules")
 	}
 }
@@ -117,8 +117,12 @@ func TestPersistedSelectionAppliedAndManualFailsClosed(t *testing.T) {
 			vless++
 		}
 	}
-	if vless != 1 {
-		t.Fatalf("expected one selected VLESS outbound, got %d", vless)
+	if vless != 2 {
+		t.Fatalf("expected selected and excluded VLESS outbounds to remain observable, got %d", vless)
+	}
+	balancers := cfg["routing"].(map[string]any)["balancers"].([]any)
+	if len(balancers) != 1 || len(balancers[0].(map[string]any)["selector"].([]any)) != 1 {
+		t.Fatalf("excluded outbound leaked into the balancing pool: %#v", balancers)
 	}
 	_, err = CompileSubscriptions(context.Background(), SubscriptionRequest{Source: "providerA", Profile: ProfileInput{ID: "foreign", Enabled: true, Port: 16112}, Links: []string{"vless://00000000-0000-4000-8000-000000000001@other.example:443#other"}}, dir)
 	if err == nil {
@@ -162,5 +166,67 @@ func TestCompileSubscriptionsReportsAllSourceFailuresByProfile(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "unknown://") {
 		t.Fatal("source credentials/raw links must not appear in refresh errors")
+	}
+}
+
+func TestOriginalHRWebFilterSemantics(t *testing.T) {
+	cases := []struct {
+		name, keep, exclude string
+		want                bool
+	}{
+		{"keep substring, case insensitive", "\n # comment\n lTe \n", "", false},
+		{"keep mismatch", "Germany\n", "", true},
+		{"exclude wins", "LTE", "MOSCOW", true},
+		{"exclude substring", "", "mosc", true},
+		{"empty filters", "\n# ignored\n", "", false},
+		{"CRLF terms", "\r\n  Russia\r\n", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := serverFiltered("LTE - Moscow", tc.keep, tc.exclude, false); got != tc.want {
+				t.Fatalf("filtered=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPreviewAndCompileApplyFiltersWithoutConflatingManualExclusions(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	profile := profiles.Profile{ID: "filtered", SourceID: "providerA", Enabled: true, Port: 16180,
+		Subscription: "vless://00000000-0000-4000-8000-000000000001@one.example:443#LTE-Moscow\nvless://00000000-0000-4000-8000-000000000002@two.example:443#DE-Test", FilterKeep: "LTE\n#comment\n", FilterExclude: "trial\n"}
+	if err := profiles.NewStore(filepath.Join(stateDir, "profiles")).Save(profile); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := PreviewProfile(context.Background(), profile, stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Nodes) != 2 || !preview.Nodes[0].Picked || preview.Nodes[0].Filtered || !preview.Nodes[1].Filtered {
+		t.Fatalf("unexpected filtered preview: %+v", preview.Nodes)
+	}
+	result, err := CompileSubscriptions(context.Background(), SubscriptionRequest{Profiles: []ProfileRequest{{Source: profile.SourceID, Profile: ProfileInput{ID: profile.ID, Enabled: true, Port: profile.Port, FilterKeep: profile.FilterKeep, FilterExclude: profile.FilterExclude}, Subscription: profile.Subscription}}}, stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(result.Config, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if result.NodeCount != 1 || len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 1 {
+		t.Fatalf("filters did not constrain balancer pool: nodes=%d config=%s", result.NodeCount, result.Config)
+	}
+}
+
+func TestDirectLinksBypassSubscriptionFilters(t *testing.T) {
+	if serverFiltered("Manual direct link", "LTE", "Manual", true) {
+		t.Fatal("direct/manual links must bypass subscription filters")
+	}
+}
+
+func TestPreviewProfileCachedNeverFetchesRemoteSubscription(t *testing.T) {
+	profile := profiles.Profile{ID: "cached", SourceID: "providerA", Enabled: true, Port: 16162, SubscriptionURL: "http://127.0.0.1:1/subscription"}
+	_, err := PreviewProfileCached(context.Background(), profile, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "subscription cache is empty") {
+		t.Fatalf("expected cache-only preview to reject empty cache, got %v", err)
 	}
 }

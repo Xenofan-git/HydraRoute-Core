@@ -64,7 +64,8 @@ type DNSConfig struct {
 }
 
 type CompileRequest struct {
-	Profiles []Profile      `json:"profiles"`
-	Routing  *RoutingConfig `json:"routing,omitempty"`
-	DNS      *DNSConfig     `json:"dns,omitempty"`
+	Profiles                        []Profile      `json:"profiles"`
+	Routing                         *RoutingConfig `json:"routing,omitempty"`
+	DNS                             *DNSConfig     `json:"dns,omitempty"`
+	ObservatoryProbeIntervalSeconds int            `json:"observatory_probe_interval_seconds,omitempty"`
 }

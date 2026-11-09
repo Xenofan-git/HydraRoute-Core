@@ -20,6 +20,12 @@ var allowedStrategies = map[string]bool{"random": true, "roundRobin": true, "lea
 
 // Compile builds one aggregate Xray configuration. Profile inbounds remain
 // isolated; the optional shared inbound has its own ordered routing table.
+// OutboundTag returns the deterministic Xray tag assigned to a profile node.
+func OutboundTag(profileID, key string) string {
+	h := sha256.Sum256([]byte(profileID + "\x00" + key))
+	return "hr_" + profileID + "_" + hex.EncodeToString(h[:6])
+}
+
 func Compile(req CompileRequest) ([]byte, error) {
 	profiles := append([]Profile(nil), req.Profiles...)
 	sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
@@ -74,6 +80,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 		picked := stringSet(p.Picked)
 		nodeKeys := map[string]bool{}
 		eligible := make([]any, 0)
+		observed := make([]any, 0, len(p.Nodes))
 		selectors := make([]string, 0)
 		for _, n := range p.Nodes {
 			if strings.TrimSpace(n.Key) == "" {
@@ -83,9 +90,8 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s: duplicate node key %q", p.ID, n.Key)
 			}
 			nodeKeys[n.Key] = true
-			if excluded[n.Key] || ((p.ManualSelection || len(picked) > 0) && !picked[n.Key]) {
-				continue
-			}
+			// Keep every parsed node as an Xray outbound so Observatory can continue
+			// probing manually excluded/offline nodes and detect their recovery.
 			var outbound map[string]any
 			if len(n.Outbound) == 0 || json.Unmarshal(n.Outbound, &outbound) != nil || outbound == nil {
 				return nil, fmt.Errorf("profile %s node %q: outbound must be a JSON object", p.ID, n.Key)
@@ -110,12 +116,15 @@ func Compile(req CompileRequest) ([]byte, error) {
 				}
 				sockopt["interface"] = p.OutboundInterface
 			}
-			h := sha256.Sum256([]byte(p.ID + "\x00" + n.Key))
-			tag := "hr_" + p.ID + "_" + hex.EncodeToString(h[:6])
+			tag := OutboundTag(p.ID, n.Key)
 			outbound["tag"] = tag
+			observed = append(observed, outbound)
+			allOutboundTags = append(allOutboundTags, tag)
+			if excluded[n.Key] || ((p.ManualSelection || len(picked) > 0) && !picked[n.Key]) {
+				continue
+			}
 			eligible = append(eligible, outbound)
 			selectors = append(selectors, tag)
-			allOutboundTags = append(allOutboundTags, tag)
 		}
 		for key := range picked {
 			if !nodeKeys[key] {
@@ -125,9 +134,10 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s: node %q cannot be both picked and excluded", p.ID, key)
 			}
 		}
+		// Observability remains active even when every node is excluded from the
+		// balancing pool. The profile SOCKS inbound is created only for eligible nodes.
+		outbounds = append(outbounds, observed...)
 		if len(eligible) == 0 {
-			// An intentionally empty manual pool is valid: keep the profile out
-			// of Xray and let route validation reject references to it.
 			continue
 		}
 		enabledProfiles[p.ID] = true
@@ -138,7 +148,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 			"tag": inTag, "listen": listen, "port": p.Port, "protocol": "socks",
 			"settings": map[string]any{"auth": "noauth", "udp": true},
 		})
-		outbounds = append(outbounds, eligible...)
 		rules = append(rules, map[string]any{
 			"type": "field", "inboundTag": []string{inTag}, "balancerTag": balTag,
 		})
@@ -260,14 +269,44 @@ func Compile(req CompileRequest) ([]byte, error) {
 			"servers": []any{map[string]any{"address": listen, "port": req.DNS.Port}},
 		}
 	}
-	if len(inbounds) > 0 {
+	if len(allOutboundTags) > 0 {
+		// Private loopback-only gRPC endpoint for the managed process' Observatory.
+		// It is not exposed on LAN and does not install routes or alter the host firewall.
+		const apiPort = 16285
+		if owner, exists := seenPorts[apiPort]; exists {
+			return nil, fmt.Errorf("profile %s uses reserved Xray API port %d", owner, apiPort)
+		}
+		inbounds = append(inbounds, map[string]any{
+			"tag": "hr_api_in", "listen": "127.0.0.1", "port": apiPort, "protocol": "dokodemo-door",
+			"settings": map[string]any{"address": "127.0.0.1"},
+		})
+		outbounds = append(outbounds, map[string]any{"tag": "hr_api", "protocol": "freedom"})
+		rules = append([]any{map[string]any{"type": "field", "inboundTag": []string{"hr_api_in"}, "outboundTag": "hr_api"}}, rules...)
+		cfg["inbounds"] = inbounds
+		cfg["outbounds"] = outbounds
+		cfg["routing"] = map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers}
+		cfg["api"] = map[string]any{"tag": "hr_api", "services": []string{"ObservatoryService"}}
 		cfg["observatory"] = map[string]any{
 			"subjectSelector": allOutboundTags,
-			"probeUrl":        "https://www.gstatic.com/generate_204",
-			"probeInterval":   "180s",
+			"probeUrl":        "https://www.google.com/generate_204",
+			"probeInterval":   observatoryProbeInterval(req.ObservatoryProbeIntervalSeconds, len(allOutboundTags)),
 		}
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+func observatoryProbeInterval(seconds, subjects int) string {
+	if seconds < 5 || seconds > 3600 {
+		seconds = 30
+	}
+	if subjects < 1 {
+		subjects = 1
+	}
+	intervalMS := (seconds * 1000) / subjects
+	if intervalMS < 100 {
+		intervalMS = 100
+	}
+	return fmt.Sprintf("%dms", intervalMS)
 }
 
 func validateRouteTarget(action, profileID string, enabled map[string]bool) error {

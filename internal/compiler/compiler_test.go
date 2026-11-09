@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -32,22 +33,30 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 	}
 	cfg := decode(t, got)
 	ins := cfg["inbounds"].([]any)
-	if len(ins) != 2 {
-		t.Fatalf("want 2 inbounds, got %d", len(ins))
+	if len(ins) != 3 {
+		t.Fatalf("want 2 profile inbounds plus private API inbound, got %d", len(ins))
 	}
 	routing := cfg["routing"].(map[string]any)
 	rules := routing["rules"].([]any)
 	bals := routing["balancers"].([]any)
-	if len(rules) != 2 || len(bals) != 2 {
+	if len(rules) != 3 || len(bals) != 2 {
 		t.Fatalf("want two independent rules/balancers, got %d/%d", len(rules), len(bals))
 	}
 	outbounds := cfg["outbounds"].([]any)
-	if len(outbounds) != 5 {
-		t.Fatalf("want direct+block+3 eligible nodes, got %d", len(outbounds))
+	if len(outbounds) != 7 {
+		t.Fatalf("want direct+block+4 observed nodes plus private API outbound, got %d", len(outbounds))
+	}
+	api := cfg["api"].(map[string]any)
+	if api["tag"] != "hr_api" || api["services"].([]any)[0] != "ObservatoryService" {
+		t.Fatalf("private Observatory API not enabled: %#v", api)
 	}
 	obs := cfg["observatory"].(map[string]any)
-	if len(obs["subjectSelector"].([]any)) != 3 {
-		t.Fatal("observatory selector must include exactly eligible nodes")
+	if len(obs["subjectSelector"].([]any)) != 4 {
+		t.Fatal("observatory selector must include every node, including excluded nodes")
+	}
+	balSelector := bals[0].(map[string]any)["selector"].([]any)
+	if len(balSelector) != 1 {
+		t.Fatalf("balancer must still contain only eligible nodes: %#v", balSelector)
 	}
 	for _, raw := range ins {
 		in := raw.(map[string]any)
@@ -67,8 +76,8 @@ func TestEmptyPickedMeansAutomaticPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["outbounds"].([]any)) != 4 {
-		t.Fatalf("automatic pool should contain 2 nodes plus direct/block")
+	if len(cfg["outbounds"].([]any)) != 6 {
+		t.Fatalf("all 3 nodes must remain observable while 2 are in the pool")
 	}
 }
 
@@ -82,8 +91,8 @@ func TestPickedSubsetIsIndependentFromExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["outbounds"].([]any)) != 3 {
-		t.Fatalf("picked subset should contain one node plus direct/block")
+	if len(cfg["outbounds"].([]any)) != 6 {
+		t.Fatalf("all 3 nodes must remain observable while only one is picked")
 	}
 }
 
@@ -143,30 +152,30 @@ func TestCompileSharedSOCKSOrderedRulesAndExplicitDefault(t *testing.T) {
 	}
 	cfg := decode(t, got)
 	inbounds := cfg["inbounds"].([]any)
-	if len(inbounds) != 3 {
-		t.Fatalf("want 2 profile inbounds plus shared inbound, got %d", len(inbounds))
+	if len(inbounds) != 4 {
+		t.Fatalf("want 2 profile inbounds, shared inbound and private API inbound, got %d", len(inbounds))
 	}
 	routing := cfg["routing"].(map[string]any)
 	if routing["domainStrategy"] != "IPIfNonMatch" {
 		t.Fatalf("IP rules must enable IPIfNonMatch, got %v", routing["domainStrategy"])
 	}
 	rules := routing["rules"].([]any)
-	if len(rules) != 6 {
-		t.Fatalf("want 2 profile rules, 3 user rules and explicit fallback, got %d", len(rules))
+	if len(rules) != 7 {
+		t.Fatalf("want API rule, 2 profile rules, 3 user rules and explicit fallback, got %d", len(rules))
 	}
-	first := rules[2].(map[string]any)
+	first := rules[3].(map[string]any)
 	if first["inboundTag"].([]any)[0] != "hr_shared_in" || first["balancerTag"] != "hr_bal_youtube" {
 		t.Fatalf("first shared rule not bound to YouTube balancer: %#v", first)
 	}
-	second := rules[3].(map[string]any)
+	second := rules[4].(map[string]any)
 	if second["outboundTag"] != "direct" {
 		t.Fatalf("direct action not compiled correctly: %#v", second)
 	}
-	third := rules[4].(map[string]any)
+	third := rules[5].(map[string]any)
 	if third["outboundTag"] != "block" {
 		t.Fatalf("block action not compiled correctly: %#v", third)
 	}
-	fallback := rules[5].(map[string]any)
+	fallback := rules[6].(map[string]any)
 	if fallback["inboundTag"].([]any)[0] != "hr_shared_in" || fallback["balancerTag"] != "hr_bal_foreign" {
 		t.Fatalf("explicit default profile fallback missing: %#v", fallback)
 	}
@@ -212,10 +221,10 @@ func TestDisabledSharedRoutingPreservesDormantRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["inbounds"].([]any)) != 1 {
+	if len(cfg["inbounds"].([]any)) != 2 {
 		t.Fatalf("disabled shared routing must not emit an inbound")
 	}
-	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 1 {
+	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 2 {
 		t.Fatalf("disabled shared routing must not emit dormant rules")
 	}
 }
@@ -269,7 +278,7 @@ func TestCompileAppliesIndependentDPIBypassOptionsToProxyOutbounds(t *testing.T)
 	}
 	cfg := decode(t, got)
 	outbounds := cfg["outbounds"].([]any)
-	for _, raw := range outbounds[2:] {
+	for _, raw := range outbounds[2:4] {
 		out := raw.(map[string]any)
 		stream := out["streamSettings"].(map[string]any)
 		fm := stream["finalmask"].(map[string]any)
@@ -332,7 +341,96 @@ func TestManualEmptyPoolOmitsProfileWithoutCreatingEmptyBalancer(t *testing.T) {
 	if err := json.Unmarshal(config, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg["inbounds"].([]any)) != 0 || len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
-		t.Fatalf("empty manual pool unexpectedly emitted Xray profile: %s", config)
+	if len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
+		t.Fatalf("empty manual pool must not create an empty balancer: %s", config)
+	}
+	if len(cfg["inbounds"].([]any)) != 1 || cfg["api"] == nil || cfg["observatory"] == nil {
+		t.Fatalf("empty manual pool must retain the private Observatory API: %s", config)
+	}
+}
+
+func TestManagedObservatoryAPIReservesLoopbackPort(t *testing.T) {
+	_, err := Compile(CompileRequest{Profiles: []Profile{{ID: "conflict", Enabled: true, Port: 16285, Strategy: "leastPing", Nodes: []Node{{Key: "node", Outbound: json.RawMessage(`{"protocol":"freedom"}`)}}}}})
+	if err == nil || !strings.Contains(err.Error(), "reserved Xray API port") {
+		t.Fatalf("expected reserved Observatory API port error, got %v", err)
+	}
+}
+
+func TestAllNodesExcludedRemainObservableWithoutCreatingSOCKSInbound(t *testing.T) {
+	got, err := Compile(CompileRequest{Profiles: []Profile{{
+		ID: "offline", Enabled: true, Port: 23008,
+		Nodes:    []Node{node("n1", "vless"), node("n2", "vmess")},
+		Excluded: []string{"n1", "n2"}, ManualSelection: true,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	obs := cfg["observatory"].(map[string]any)
+	if len(obs["subjectSelector"].([]any)) != 2 {
+		t.Fatalf("expected both excluded nodes in Observatory: %#v", obs)
+	}
+	if len(cfg["inbounds"].([]any)) != 1 {
+		t.Fatalf("expected only private API inbound, got %#v", cfg["inbounds"])
+	}
+	if len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
+		t.Fatal("empty excluded pool must not create a balancer")
+	}
+}
+
+func TestCompileUsesConfiguredObservatoryIntervalAndOriginalProbeURL(t *testing.T) {
+	got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: 137, Profiles: []Profile{{ID: "obs", Enabled: true, Port: 23090, Nodes: []Node{node("n1", "vless")}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := decode(t, got)["observatory"].(map[string]any)
+	if obs["probeInterval"] != "137000ms" {
+		t.Fatalf("probeInterval=%v", obs["probeInterval"])
+	}
+	if obs["probeUrl"] != "https://www.google.com/generate_204" {
+		t.Fatalf("probeUrl=%v", obs["probeUrl"])
+	}
+}
+
+func TestCompileObservatoryIntervalFallsBackOutsideSupportedRange(t *testing.T) {
+	for _, value := range []int{0, 4, 3601} {
+		got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: value, Profiles: []Profile{{ID: "obs", Enabled: true, Port: 23091, Nodes: []Node{node("n1", "vless")}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs := decode(t, got)["observatory"].(map[string]any)
+		if obs["probeInterval"] != "30000ms" {
+			t.Fatalf("value %d: probeInterval=%v", value, obs["probeInterval"])
+		}
+	}
+}
+
+func TestObservatoryIntervalIsDistributedAcrossSubjects(t *testing.T) {
+	nodes := make([]Node, 104)
+	for i := range nodes {
+		nodes[i] = node(fmt.Sprintf("node-%03d", i), "vless")
+	}
+	got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: 1200, Profiles: []Profile{{ID: "many", Enabled: true, Port: 23092, Nodes: nodes}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := decode(t, got)["observatory"].(map[string]any)
+	if obs["probeInterval"] != "11538ms" {
+		t.Fatalf("probeInterval=%v, want 11538ms", obs["probeInterval"])
+	}
+}
+
+func TestObservatoryIntervalHasHundredMillisecondFloor(t *testing.T) {
+	nodes := make([]Node, 51)
+	for i := range nodes {
+		nodes[i] = node(fmt.Sprintf("node-%05d", i), "vless")
+	}
+	got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: 5, Profiles: []Profile{{ID: "floor", Enabled: true, Port: 23093, Nodes: nodes}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := decode(t, got)["observatory"].(map[string]any)
+	if obs["probeInterval"] != "100ms" {
+		t.Fatalf("probeInterval=%v, want 100ms", obs["probeInterval"])
 	}
 }

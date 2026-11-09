@@ -28,29 +28,40 @@ type DPIBypass struct {
 }
 
 type Profile struct {
-	ID                string    `json:"id"`
-	SourceID          string    `json:"source_id"`
-	Enabled           bool      `json:"enabled"`
-	Listen            string    `json:"listen,omitempty"`
-	Port              uint16    `json:"port"`
-	Strategy          string    `json:"strategy,omitempty"`
-	OutboundInterface string    `json:"outbound_interface,omitempty"`
-	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
-	Links             []string  `json:"links,omitempty"`
-	Subscription      string    `json:"subscription,omitempty"`
-	SubscriptionURL   string    `json:"subscription_url,omitempty"`
+	ID                     string    `json:"id"`
+	SourceID               string    `json:"source_id"`
+	Enabled                bool      `json:"enabled"`
+	Listen                 string    `json:"listen,omitempty"`
+	Port                   uint16    `json:"port"`
+	Strategy               string    `json:"strategy,omitempty"`
+	OutboundInterface      string    `json:"outbound_interface,omitempty"`
+	DPIBypass              DPIBypass `json:"dpi_bypass,omitempty"`
+	FilterKeep             string    `json:"filter_keep,omitempty"`
+	FilterExclude          string    `json:"filter_exclude,omitempty"`
+	AutoUpdateEnabled      bool      `json:"auto_update_enabled,omitempty"`
+	AutoUpdateInterval     int       `json:"auto_update_interval,omitempty"`
+	CachedSubscription     string    `json:"cached_subscription,omitempty"`
+	LastSubscriptionUpdate int64     `json:"last_subscription_update,omitempty"`
+	Links                  []string  `json:"links,omitempty"`
+	Subscription           string    `json:"subscription,omitempty"`
+	SubscriptionURL        string    `json:"subscription_url,omitempty"`
 }
 
 type Metadata struct {
-	ID                string    `json:"id"`
-	SourceID          string    `json:"source_id"`
-	Enabled           bool      `json:"enabled"`
-	Listen            string    `json:"listen,omitempty"`
-	Port              uint16    `json:"port"`
-	Strategy          string    `json:"strategy,omitempty"`
-	OutboundInterface string    `json:"outbound_interface,omitempty"`
-	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
-	Input             string    `json:"input"`
+	ID                     string    `json:"id"`
+	SourceID               string    `json:"source_id"`
+	Enabled                bool      `json:"enabled"`
+	Listen                 string    `json:"listen,omitempty"`
+	Port                   uint16    `json:"port"`
+	Strategy               string    `json:"strategy,omitempty"`
+	OutboundInterface      string    `json:"outbound_interface,omitempty"`
+	DPIBypass              DPIBypass `json:"dpi_bypass,omitempty"`
+	FilterKeep             string    `json:"filter_keep,omitempty"`
+	FilterExclude          string    `json:"filter_exclude,omitempty"`
+	AutoUpdateEnabled      bool      `json:"auto_update_enabled,omitempty"`
+	AutoUpdateInterval     int       `json:"auto_update_interval,omitempty"`
+	LastSubscriptionUpdate int64     `json:"last_subscription_update,omitempty"`
+	Input                  string    `json:"input"`
 }
 
 type Store struct{ dir string }
@@ -91,11 +102,17 @@ func Validate(p Profile) error {
 			return fmt.Errorf("invalid profile link")
 		}
 	}
-	if len(p.Subscription) > maxProfileBytes {
-		return fmt.Errorf("subscription body exceeds 8 MiB limit")
+	if len(p.Subscription) > maxProfileBytes || len(p.CachedSubscription) > maxProfileBytes {
+		return fmt.Errorf("subscription body or cache exceeds 8 MiB limit")
 	}
 	if len(p.SubscriptionURL) > 8192 {
 		return fmt.Errorf("subscription URL is too long")
+	}
+	if p.AutoUpdateInterval != 0 && (p.AutoUpdateInterval < 5 || p.AutoUpdateInterval > 10080) {
+		return fmt.Errorf("auto-update interval must be between 5 minutes and 7 days")
+	}
+	if p.AutoUpdateEnabled && p.SubscriptionURL == "" {
+		return fmt.Errorf("automatic update requires a subscription URL")
 	}
 	return nil
 }
@@ -300,7 +317,7 @@ func (s *Store) List() ([]Metadata, error) {
 		if p.SubscriptionURL != "" {
 			input = "url"
 		}
-		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: p.DPIBypass, Input: input})
+		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: p.DPIBypass, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval, LastSubscriptionUpdate: p.LastSubscriptionUpdate, Input: input})
 	}
 	return out, nil
 }

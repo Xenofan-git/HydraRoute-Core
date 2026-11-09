@@ -12,7 +12,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +30,7 @@ import (
 	"hydraroute.local/core/internal/service"
 	"hydraroute.local/core/internal/state"
 	"hydraroute.local/core/internal/ui"
+	"hydraroute.local/core/internal/xrayapi"
 )
 
 const maxRequestBytes = 8 << 20
@@ -50,17 +54,21 @@ type RefreshStatus struct {
 }
 
 type Server struct {
-	supervisor   *hrruntime.Supervisor
-	stateDir     string
-	profileStore *profiles.Store
-	routingStore *routeconfig.Store
-	dns          *dnsservice.Manager
-	opMu         sync.Mutex
-	refreshMu    sync.Mutex
-	refreshOpts  Options
-	refreshState RefreshStatus
-	refreshWake  chan struct{}
-	mux          *http.ServeMux
+	supervisor          *hrruntime.Supervisor
+	stateDir            string
+	profileStore        *profiles.Store
+	routingStore        *routeconfig.Store
+	dns                 *dnsservice.Manager
+	opMu                sync.Mutex
+	refreshMu           sync.Mutex
+	refreshOpts         Options
+	refreshState        RefreshStatus
+	refreshWake         chan struct{}
+	probeMu             sync.RWMutex
+	probeSaveMu         sync.Mutex
+	probeCache          map[string]map[string]xrayapi.OutboundStatus
+	observatoryInterval int
+	mux                 *http.ServeMux
 }
 
 func New(supervisor *hrruntime.Supervisor) *Server {
@@ -81,8 +89,10 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if opts.RetryMax < opts.RetryMin {
 		opts.RetryMax = opts.RetryMin
 	}
-	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), mux: http.NewServeMux()}
+	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, mux: http.NewServeMux()}
 	if stateDir != "" {
+		s.loadProbeCache()
+		s.loadObservatorySettings()
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
 		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
@@ -110,6 +120,9 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/profiles/preview", s.profilePreview)
 	s.mux.HandleFunc("/v1/profiles/test", s.profileTest)
 	s.mux.HandleFunc("/v1/refresh/status", s.refreshStatus)
+	s.mux.HandleFunc("/v1/observatory/status", s.observatoryStatus)
+	s.mux.HandleFunc("/v1/observatory/settings", s.observatorySettings)
+	s.mux.HandleFunc("/v1/profiles/ping", s.profilePingStream)
 	s.mux.HandleFunc("/v1/profiles", s.profileCollection)
 	s.mux.HandleFunc("/v1/interfaces", s.interfaces)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
@@ -263,7 +276,7 @@ func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
-		result, err := s.refreshProfilesLocked(ctx)
+		result, err := s.refreshProfilesCachedLocked(ctx)
 		if err != nil {
 			var rollbackErr error
 			if hadPrevious {
@@ -321,6 +334,7 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.DNS = s.coreDNSConfig()
+	req.ObservatoryProbeIntervalSeconds = s.observatoryInterval
 	compiled, err := compiler.Compile(req)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -356,6 +370,7 @@ func (s *Server) compileSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.DNS = s.coreDNSConfig()
+	req.ObservatoryProbeIntervalSeconds = s.observatoryInterval
 	if s.routingStore != nil {
 		if routing, found, err := s.routingStore.Load(); err != nil {
 			writeError(w, http.StatusInternalServerError, "cannot read routing config")
@@ -531,6 +546,43 @@ func validateOutboundInterface(name string) error {
 	return nil
 }
 
+func eligiblePreviewNodeCount(preview service.ProfilePreview, selection *state.Profile) int {
+	picked := make(map[string]bool)
+	excluded := make(map[string]bool)
+	if selection != nil {
+		for _, key := range selection.Picked {
+			b, _ := json.Marshal(key)
+			picked[string(b)] = true
+		}
+		for _, key := range selection.Excluded {
+			b, _ := json.Marshal(key)
+			excluded[string(b)] = true
+		}
+	}
+	count := 0
+	for _, node := range preview.Nodes {
+		if node.Filtered {
+			continue
+		}
+		b, _ := json.Marshal(node.Key)
+		key := string(b)
+		if selection == nil {
+			if node.Picked && !node.Excluded {
+				count++
+			}
+			continue
+		}
+		if excluded[key] {
+			continue
+		}
+		if selection.PickMode == "manual" && !picked[key] {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 	if s.profileStore == nil {
 		writeError(w, http.StatusServiceUnavailable, "profile store is not configured")
@@ -577,14 +629,21 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 		s.opMu.Lock()
 		defer s.opMu.Unlock()
 		var req struct {
-			ID                string              `json:"id"`
-			Enabled           *bool               `json:"enabled,omitempty"`
-			Port              *uint16             `json:"port,omitempty"`
-			Strategy          *string             `json:"strategy,omitempty"`
-			OutboundInterface *string             `json:"outbound_interface,omitempty"`
-			DPIBypass         *profiles.DPIBypass `json:"dpi_bypass,omitempty"`
+			ID                 string              `json:"id"`
+			Enabled            *bool               `json:"enabled,omitempty"`
+			Port               *uint16             `json:"port,omitempty"`
+			Strategy           *string             `json:"strategy,omitempty"`
+			OutboundInterface  *string             `json:"outbound_interface,omitempty"`
+			DPIBypass          *profiles.DPIBypass `json:"dpi_bypass,omitempty"`
+			FilterKeep         *string             `json:"filter_keep,omitempty"`
+			FilterExclude      *string             `json:"filter_exclude,omitempty"`
+			PickMode           *string             `json:"pick_mode,omitempty"`
+			Picked             *[]parser.ServerKey `json:"picked,omitempty"`
+			Excluded           *[]parser.ServerKey `json:"excluded,omitempty"`
+			AutoUpdateEnabled  *bool               `json:"auto_update_enabled,omitempty"`
+			AutoUpdateInterval *int                `json:"auto_update_interval,omitempty"`
 		}
-		if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+		if err := decodeStrictJSON(w, r, &req, 1<<20); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid profile update")
 			return
 		}
@@ -613,6 +672,18 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 		if req.DPIBypass != nil {
 			p.DPIBypass = *req.DPIBypass
 		}
+		if req.FilterKeep != nil {
+			p.FilterKeep = *req.FilterKeep
+		}
+		if req.FilterExclude != nil {
+			p.FilterExclude = *req.FilterExclude
+		}
+		if req.AutoUpdateEnabled != nil {
+			p.AutoUpdateEnabled = *req.AutoUpdateEnabled
+		}
+		if req.AutoUpdateInterval != nil {
+			p.AutoUpdateInterval = *req.AutoUpdateInterval
+		}
 		if err := profiles.Validate(p); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
@@ -621,18 +692,78 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "invalid profile port or balancing strategy")
 			return
 		}
+		selectionChanged := req.PickMode != nil || req.Picked != nil || req.Excluded != nil
+		var oldSelection state.Profile
+		var newSelection state.Profile
+		if selectionChanged {
+			oldSelection = state.Profile{ID: p.ID, SourceID: p.SourceID, PickMode: "auto"}
+			if saved, loadErr := service.LoadSelection(s.stateDir, p.ID); loadErr == nil {
+				oldSelection = saved
+			} else if !os.IsNotExist(loadErr) {
+				writeError(w, http.StatusInternalServerError, "cannot read previous selection")
+				return
+			}
+			newSelection = oldSelection
+			if req.PickMode != nil {
+				newSelection.PickMode = *req.PickMode
+			}
+			if req.Picked != nil {
+				newSelection.Picked = *req.Picked
+			}
+			if req.Excluded != nil {
+				newSelection.Excluded = *req.Excluded
+			}
+			if newSelection.PickMode == "" {
+				newSelection.PickMode = "auto"
+			}
+			if err := state.Validate(state.State{Version: state.CurrentVersion, Profiles: []state.Profile{newSelection}}); err != nil {
+				writeError(w, http.StatusUnprocessableEntity, "invalid server selection")
+				return
+			}
+		}
+		if req.Strategy != nil && *req.Strategy != previous.Strategy {
+			previewCtx, previewCancel := context.WithTimeout(r.Context(), 15*time.Second)
+			preview, previewErr := service.PreviewProfileCached(previewCtx, p, s.stateDir)
+			previewCancel()
+			if previewErr != nil {
+				writeError(w, http.StatusUnprocessableEntity, "refresh the profile before changing balancing strategy")
+				return
+			}
+			var selectionOverride *state.Profile
+			if selectionChanged {
+				selectionOverride = &newSelection
+			}
+			if eligiblePreviewNodeCount(preview, selectionOverride) < 2 {
+				writeError(w, http.StatusUnprocessableEntity, "balancing strategy can be changed only with at least two servers in the pool")
+				return
+			}
+		}
 		if err := s.profileStore.Save(p); err != nil {
 			writeError(w, http.StatusInternalServerError, "cannot save profile settings")
 			return
 		}
+		if selectionChanged {
+			if err := service.SaveSelection(s.stateDir, newSelection); err != nil {
+				_ = s.profileStore.Save(previous)
+				writeError(w, http.StatusUnprocessableEntity, "cannot save server selection")
+				return
+			}
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		if s.supervisor.Status().Configured {
-			if _, err := s.refreshProfilesLocked(ctx); err != nil {
+			if _, err := s.refreshProfilesCachedLocked(ctx); err != nil {
 				_ = s.profileStore.Save(previous)
+				if selectionChanged {
+					_ = service.SaveSelection(s.stateDir, oldSelection)
+				}
 				writeError(w, http.StatusUnprocessableEntity, "profile update was rolled back: "+err.Error())
 				return
 			}
+		}
+		select {
+		case s.refreshWake <- struct{}{}:
+		default:
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "profile_id": p.ID, "enabled": p.Enabled, "port": p.Port, "strategy": p.Strategy, "outbound_interface": p.OutboundInterface, "dpi_bypass": p.DPIBypass, "runtime": s.supervisor.Status()})
 	case http.MethodDelete:
@@ -676,8 +807,502 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// profileTest measures TCP reachability through one enabled profile SOCKS5
-// inbound. It never tests through the host's default route directly.
+type probeCacheFile struct {
+	Version  int                                          `json:"version"`
+	Profiles map[string]map[string]xrayapi.OutboundStatus `json:"profiles"`
+}
+
+func (s *Server) loadProbeCache() {
+	if s.stateDir == "" {
+		return
+	}
+	path := filepath.Join(s.stateDir, "observatory", "status.json")
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) > 4<<20 {
+		return
+	}
+	var saved probeCacheFile
+	if json.Unmarshal(data, &saved) != nil || saved.Version != 1 || saved.Profiles == nil {
+		return
+	}
+	for profileID, entries := range saved.Profiles {
+		if !profileIDPatternForCache(profileID) {
+			continue
+		}
+		clean := make(map[string]xrayapi.OutboundStatus)
+		for key, status := range entries {
+			if len(key) > 4096 || status.Tag == "" || status.LastTryTime <= 0 {
+				continue
+			}
+			clean[key] = status
+		}
+		if len(clean) > 0 {
+			s.probeCache[profileID] = clean
+		}
+	}
+}
+
+func profileIDPatternForCache(id string) bool {
+	if id == "" || len(id) > 32 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) saveProbeCache() error {
+	s.probeSaveMu.Lock()
+	defer s.probeSaveMu.Unlock()
+	if s.stateDir == "" {
+		return nil
+	}
+	type cacheEntry struct {
+		profile, key string
+		at           int64
+	}
+	s.probeMu.Lock()
+	entries := make([]cacheEntry, 0)
+	for profile, values := range s.probeCache {
+		for key, status := range values {
+			entries = append(entries, cacheEntry{profile, key, status.LastTryTime})
+		}
+	}
+	if len(entries) > 4096 {
+		sort.Slice(entries, func(i, j int) bool { return entries[i].at > entries[j].at })
+		keep := make(map[string]map[string]bool)
+		for _, entry := range entries[:4096] {
+			if keep[entry.profile] == nil {
+				keep[entry.profile] = make(map[string]bool)
+			}
+			keep[entry.profile][entry.key] = true
+		}
+		for profile, values := range s.probeCache {
+			for key := range values {
+				if !keep[profile][key] {
+					delete(values, key)
+				}
+			}
+			if len(values) == 0 {
+				delete(s.probeCache, profile)
+			}
+		}
+	}
+	profilesCopy := make(map[string]map[string]xrayapi.OutboundStatus, len(s.probeCache))
+	for id, values := range s.probeCache {
+		copied := make(map[string]xrayapi.OutboundStatus, len(values))
+		for key, status := range values {
+			copied[key] = status
+		}
+		profilesCopy[id] = copied
+	}
+	s.probeMu.Unlock()
+	dir := filepath.Join(s.stateDir, "observatory")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(probeCacheFile{Version: 1, Profiles: profilesCopy})
+	if err != nil {
+		return err
+	}
+	if len(data) > 4<<20 {
+		return fmt.Errorf("Observatory cache exceeds safe size limit")
+	}
+	tmp, err := os.CreateTemp(dir, ".status-*.json")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, filepath.Join(dir, "status.json"))
+}
+
+type observatoryStatusResponse struct {
+	ProfileID string                            `json:"profile_id"`
+	Available bool                              `json:"available"`
+	Refreshed bool                              `json:"refreshed"`
+	Statuses  map[string]xrayapi.OutboundStatus `json:"statuses"`
+	Error     string                            `json:"error,omitempty"`
+}
+
+func (s *Server) cachedProbeStatuses(profileID string, nodes []service.PreviewNode) map[string]xrayapi.OutboundStatus {
+	result := make(map[string]xrayapi.OutboundStatus)
+	s.probeMu.RLock()
+	defer s.probeMu.RUnlock()
+	for _, node := range nodes {
+		keyBytes, _ := json.Marshal(node.Key)
+		key := string(keyBytes)
+		if status, ok := s.probeCache[profileID][key]; ok && status.Tag == compiler.OutboundTag(profileID, key) {
+			status.Stale = true
+			result[key] = status
+		}
+	}
+	return result
+}
+
+func sameObservatoryStatus(a, b xrayapi.OutboundStatus) bool {
+	return a.Tag == b.Tag && a.Alive == b.Alive && a.DelayMS == b.DelayMS &&
+		a.LastError == b.LastError && a.LastTryTime == b.LastTryTime &&
+		a.LastSeenTime == b.LastSeenTime && a.HealthAverage == b.HealthAverage &&
+		a.HealthFail == b.HealthFail
+}
+
+func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string, since int64) (observatoryStatusResponse, error) {
+	if s.profileStore == nil {
+		return observatoryStatusResponse{}, fmt.Errorf("profile store is not configured")
+	}
+	profile, err := s.profileStore.Get(profileID)
+	if err != nil {
+		return observatoryStatusResponse{}, fmt.Errorf("profile not found")
+	}
+	preview, err := service.PreviewProfileCached(ctx, profile, s.stateDir)
+	if err != nil {
+		return observatoryStatusResponse{}, err
+	}
+	if !s.supervisor.Status().Running {
+		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, preview.Nodes), Error: "Xray is stopped; showing last known measurements"}, nil
+	}
+	items, err := xrayapi.GetOutboundStatus(ctx, xrayapi.DefaultAddress)
+	if err != nil {
+		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, preview.Nodes), Error: "Xray Observatory is unavailable; showing last known measurements"}, nil
+	}
+	byTag := make(map[string]xrayapi.OutboundStatus, len(items))
+	for _, item := range items {
+		byTag[item.Tag] = item
+	}
+	result := observatoryStatusResponse{ProfileID: profileID, Available: true, Refreshed: true, Statuses: make(map[string]xrayapi.OutboundStatus)}
+	s.probeMu.Lock()
+	cache := s.probeCache[profileID]
+	if cache == nil {
+		cache = make(map[string]xrayapi.OutboundStatus)
+		s.probeCache[profileID] = cache
+	}
+	cacheChanged := false
+	for _, node := range preview.Nodes {
+		keyBytes, _ := json.Marshal(node.Key)
+		key := string(keyBytes)
+		tag := compiler.OutboundTag(profileID, key)
+		item, ok := byTag[tag]
+		if ok && item.LastTryTime > 0 {
+			if old, exists := cache[key]; !exists || item.LastTryTime > old.LastTryTime ||
+				(item.LastTryTime == old.LastTryTime && !sameObservatoryStatus(item, old)) {
+				cache[key] = item
+				cacheChanged = true
+			}
+			result.Statuses[key] = cache[key]
+			if since > 0 && !isFreshObservatoryProbe(cache[key].LastTryTime, since) {
+				result.Refreshed = false
+			}
+			continue
+		}
+		if cached, exists := cache[key]; exists {
+			if cached.Tag == tag {
+				cached.Stale = true
+				result.Statuses[key] = cached
+				if since > 0 && !isFreshObservatoryProbe(cached.LastTryTime, since) && !node.Filtered {
+					result.Refreshed = false
+				}
+				continue
+			}
+			// Profile IDs can be reused with a different source/configuration. A
+			// cache entry from the old outbound tag must never leak into the new one.
+			delete(cache, key)
+			cacheChanged = true
+		}
+		if since > 0 && !node.Filtered {
+			result.Refreshed = false
+		}
+	}
+	s.probeMu.Unlock()
+	if cacheChanged {
+		_ = s.saveProbeCache()
+	}
+	return result, nil
+}
+
+func (s *Server) observatoryStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	profileID := r.URL.Query().Get("profile_id")
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	result, err := s.collectObservatoryStatus(ctx, profileID, 0)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+type pingStreamEvent struct {
+	Links []string       `json:"links,omitempty"`
+	Link  string         `json:"link,omitempty"`
+	Echo  map[string]any `json:"echo"`
+	Ping  map[string]any `json:"ping"`
+	Done  bool           `json:"done,omitempty"`
+	Error string         `json:"error,omitempty"`
+}
+
+var icmpTimePattern = regexp.MustCompile(`time[=<]([0-9]+(?:\.[0-9]+)?)\s*ms`)
+
+func publicProbeAddress(ctx context.Context, host string) (string, bool) {
+	public := func(ip net.IP) bool {
+		return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast() && !ip.IsUnspecified()
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String(), public(ip)
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return "", false
+	}
+	for _, item := range ips {
+		if !public(item.IP) {
+			return "", false
+		}
+	}
+	return ips[0].IP.String(), true
+}
+
+func isFreshObservatoryProbe(lastTryTime, startedAt int64) bool {
+	// Xray exposes LastTryTime as Unix seconds, so same-second updates cannot
+	// be distinguished from the pre-request value. Require a strictly newer
+	// timestamp rather than ever presenting an old measurement as fresh.
+	return lastTryTime > startedAt
+}
+
+func probeICMPEcho(ctx context.Context, host string) map[string]any {
+	binary, err := exec.LookPath("ping")
+	if err != nil {
+		return map[string]any{}
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer cancel()
+	target, ok := publicProbeAddress(checkCtx, host)
+	if !ok {
+		return map[string]any{}
+	}
+	out, err := exec.CommandContext(checkCtx, binary, "-n", "-c", "1", "-W", "1", target).CombinedOutput()
+	if err != nil {
+		return map[string]any{}
+	}
+	match := icmpTimePattern.FindSubmatch(out)
+	if len(match) < 2 {
+		return map[string]any{}
+	}
+	ms, err := strconv.ParseFloat(string(match[1]), 64)
+	if err != nil {
+		return map[string]any{}
+	}
+	return map[string]any{"delay": int64(ms + 0.5)}
+}
+
+// profilePingStream mirrors HRweb's proxy.pingServers event contract: ICMP
+// echo (host-to-server, outside Xray) and proxy delay (Xray Observatory) are
+// separate events and separate measurements. Observatory has no force-probe
+// RPC, so the stream waits for the next real configured observation cycle.
+func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	if s.profileStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "profile store is not configured")
+		return
+	}
+	profileID := r.URL.Query().Get("profile_id")
+	profile, err := s.profileStore.Get(profileID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "profile not found")
+		return
+	}
+	ctx := r.Context()
+	preview, err := service.PreviewProfileCached(ctx, profile, s.stateDir)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming is unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	send := func(event pingStreamEvent) bool {
+		data, e := json.Marshal(event)
+		if e != nil {
+			return false
+		}
+		if _, e = fmt.Fprintf(w, "data: %s\n\n", data); e != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	// Start the freshness window before ICMP work. On large subscriptions the
+	// bounded ICMP phase can take several seconds; starting afterward would
+	// discard perfectly fresh Xray probes completed while ICMP was running.
+	started := time.Now().Unix()
+	keys := make([]string, 0, len(preview.Nodes))
+	tags := make(map[string]string, len(preview.Nodes))
+	for _, node := range preview.Nodes {
+		keyBytes, _ := json.Marshal(node.Key)
+		key := string(keyBytes)
+		keys = append(keys, key)
+		// Probe all nodes, including excluded and filtered ones. Only the Xray
+		// balancer selection is restricted; otherwise offline nodes can never recover.
+		tags[key] = compiler.OutboundTag(profileID, key)
+	}
+	if !send(pingStreamEvent{Links: keys}) {
+		return
+	}
+	if len(keys) == 0 {
+		send(pingStreamEvent{Done: true})
+		return
+	}
+	// ICMP echo is independent of Xray and may be unavailable without ping/CAP_NET_RAW.
+	// Bound concurrent DNS lookups and ping processes: large subscriptions must not
+	// turn one UI action into an unbounded process burst.
+	type echoResult struct {
+		key  string
+		echo map[string]any
+	}
+	const maxConcurrentICMP = 8
+	for start := 0; start < len(preview.Nodes); start += maxConcurrentICMP {
+		end := start + maxConcurrentICMP
+		if end > len(preview.Nodes) {
+			end = len(preview.Nodes)
+		}
+		echoes := make(chan echoResult, end-start)
+		var wg sync.WaitGroup
+		for _, node := range preview.Nodes[start:end] {
+			keyBytes, _ := json.Marshal(node.Key)
+			key, host := string(keyBytes), node.Host
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				echoes <- echoResult{key, probeICMPEcho(ctx, host)}
+			}()
+		}
+		wg.Wait()
+		close(echoes)
+		for result := range echoes {
+			if ctx.Err() != nil {
+				return
+			}
+			if !send(pingStreamEvent{Link: result.key, Echo: result.echo}) {
+				return
+			}
+		}
+	}
+	if !s.supervisor.Status().Running {
+		send(pingStreamEvent{Done: true, Error: "Xray не запущен: прокси-задержка недоступна"})
+		return
+	}
+	// Xray has no force-probe RPC. Its interval is distributed across all
+	// subjects, so a full configured cycle may take up to the panel interval.
+	// Keep the stream alive and let the caller cancel it if the wait is unwanted.
+	s.opMu.Lock()
+	cycleSeconds := s.observatoryInterval
+	s.opMu.Unlock()
+	if cycleSeconds < 5 || cycleSeconds > 3600 {
+		cycleSeconds = 30
+	}
+	deadline := time.Now().Add(time.Duration(cycleSeconds+10) * time.Second)
+	sent := map[string]bool{}
+	poll := time.NewTicker(500 * time.Millisecond)
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer poll.Stop()
+	defer heartbeat.Stop()
+	for time.Now().Before(deadline) && len(sent) < len(tags) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-heartbeat.C:
+			if _, e := fmt.Fprint(w, ": keepalive\n\n"); e != nil {
+				return
+			}
+			flusher.Flush()
+		case <-poll.C:
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		items, probeErr := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
+		cancel()
+		if probeErr != nil {
+			continue
+		}
+		byTag := make(map[string]xrayapi.OutboundStatus, len(items))
+		for _, item := range items {
+			byTag[item.Tag] = item
+		}
+		for key, tag := range tags {
+			if sent[key] {
+				continue
+			}
+			item, found := byTag[tag]
+			if !found || !isFreshObservatoryProbe(item.LastTryTime, started) {
+				continue
+			}
+			sent[key] = true
+			ping := map[string]any{"alive": item.Alive, "delay": item.DelayMS, "at": item.LastTryTime}
+			cachedStatus := xrayapi.OutboundStatus{Tag: tag, Alive: item.Alive, DelayMS: item.DelayMS, LastTryTime: item.LastTryTime, LastSeenTime: item.LastSeenTime, LastError: item.LastError}
+			s.probeMu.Lock()
+			if s.probeCache[profileID] == nil {
+				s.probeCache[profileID] = make(map[string]xrayapi.OutboundStatus)
+			}
+			s.probeCache[profileID][key] = cachedStatus
+			s.probeMu.Unlock()
+			_ = s.saveProbeCache()
+			if !send(pingStreamEvent{Link: key, Ping: ping}) {
+				return
+			}
+		}
+	}
+	if len(sent) < len(tags) {
+		send(pingStreamEvent{Done: true, Error: "Не все узлы получили новый результат Observatory за отведённое время; показаны только свежие измерения"})
+		return
+	}
+	send(pingStreamEvent{Done: true})
+}
+
 func (s *Server) profileTest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -775,14 +1400,22 @@ func (s *Server) refreshProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	var req struct{}
+	var req struct {
+		ProfileID string `json:"profile_id"`
+	}
 	if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
-		writeError(w, http.StatusBadRequest, "refresh request must be an empty JSON object")
+		writeError(w, http.StatusBadRequest, "invalid refresh request")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	result, err := s.refreshProfilesLocked(ctx)
+	var result map[string]any
+	var err error
+	if req.ProfileID != "" {
+		result, err = s.refreshProfileLocked(ctx, req.ProfileID)
+	} else {
+		result, err = s.refreshProfilesLocked(ctx)
+	}
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -791,6 +1424,19 @@ func (s *Server) refreshProfiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, error) {
+	return s.refreshProfilesMode(ctx, true, "")
+}
+func (s *Server) refreshProfilesCachedLocked(ctx context.Context) (map[string]any, error) {
+	return s.refreshProfilesMode(ctx, false, "")
+}
+func (s *Server) refreshProfilesScheduledLocked(ctx context.Context) (map[string]any, error) {
+	return s.refreshProfilesMode(ctx, false, "")
+}
+func (s *Server) refreshProfileLocked(ctx context.Context, profileID string) (map[string]any, error) {
+	return s.refreshProfilesMode(ctx, false, profileID)
+}
+
+func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targetProfile string) (map[string]any, error) {
 	if s.profileStore == nil {
 		return nil, fmt.Errorf("profile store is not configured")
 	}
@@ -802,11 +1448,27 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 		return nil, fmt.Errorf("no profiles are stored")
 	}
 	inputs := make([]service.ProfileRequest, 0, len(stored))
+	nowUnix := time.Now().Unix()
 	for _, p := range stored {
 		if err := validateOutboundInterface(p.OutboundInterface); err != nil {
 			return nil, fmt.Errorf("profile %s: %w", p.ID, err)
 		}
-		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: compiler.DPIBypass{NoiseTraffic: p.DPIBypass.NoiseTraffic, TLSFragmentation: p.DPIBypass.TLSFragmentation, RandomTLSFingerprint: p.DPIBypass.RandomTLSFingerprint}}, Links: p.Links, Subscription: p.Subscription, SubscriptionURL: p.SubscriptionURL})
+		subscription := p.Subscription
+		if p.SubscriptionURL != "" {
+			due := forceFetch || p.ID == targetProfile || p.CachedSubscription == "" || (p.AutoUpdateEnabled && (p.LastSubscriptionUpdate == 0 || nowUnix-p.LastSubscriptionUpdate >= int64(p.AutoUpdateInterval*60)))
+			if due {
+				body, fetchErr := parser.FetchSubscription(ctx, p.SubscriptionURL)
+				if fetchErr != nil {
+					return nil, fmt.Errorf("profile %s subscription refresh failed: %w", p.ID, fetchErr)
+				}
+				p.CachedSubscription, p.LastSubscriptionUpdate = body, nowUnix
+				if saveErr := s.profileStore.Save(p); saveErr != nil {
+					return nil, fmt.Errorf("profile %s subscription cache could not be saved", p.ID)
+				}
+			}
+			subscription = p.CachedSubscription
+		}
+		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: compiler.DPIBypass{NoiseTraffic: p.DPIBypass.NoiseTraffic, TLSFragmentation: p.DPIBypass.TLSFragmentation, RandomTLSFingerprint: p.DPIBypass.RandomTLSFingerprint}, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval}, Links: p.Links, Subscription: subscription, SubscriptionURL: ""})
 	}
 	var routing *compiler.RoutingConfig
 	if s.routingStore != nil {
@@ -816,7 +1478,7 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 			routing = &storedRouting
 		}
 	}
-	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs, Routing: routing, DNS: s.coreDNSConfig()}, s.stateDir)
+	result, err := service.CompileSubscriptions(ctx, service.SubscriptionRequest{Profiles: inputs, Routing: routing, DNS: s.coreDNSConfig(), ObservatoryProbeIntervalSeconds: s.observatoryInterval}, s.stateDir)
 	if err != nil {
 		return nil, err
 	}
@@ -898,6 +1560,19 @@ func (s *Server) refreshStatus(w http.ResponseWriter, r *http.Request) {
 		s.refreshMu.Lock()
 		status := s.refreshState
 		s.refreshMu.Unlock()
+		if s.profileStore != nil {
+			if items, err := s.profileStore.ListProfiles(); err == nil {
+				for _, p := range items {
+					if p.AutoUpdateEnabled {
+						status.Enabled = true
+						seconds := int64(p.AutoUpdateInterval * 60)
+						if status.IntervalSeconds == 0 || seconds < status.IntervalSeconds {
+							status.IntervalSeconds = seconds
+						}
+					}
+				}
+			}
+		}
 		writeJSON(w, http.StatusOK, status)
 	case http.MethodPut:
 		if !validLocalJSONRequest(r) {
@@ -970,12 +1645,52 @@ func (s *Server) refreshStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) profileRefreshDelay() (time.Duration, bool) {
+	if s.profileStore == nil {
+		return 0, false
+	}
+	items, err := s.profileStore.ListProfiles()
+	if err != nil {
+		return 0, false
+	}
+	var earliest time.Duration
+	found := false
+	for _, p := range items {
+		if !p.AutoUpdateEnabled || p.SubscriptionURL == "" {
+			continue
+		}
+		interval := time.Duration(p.AutoUpdateInterval) * time.Minute
+		if interval < 5*time.Minute {
+			interval = 24 * time.Hour
+		}
+		delay := time.Duration(0)
+		if p.LastSubscriptionUpdate > 0 {
+			delay = time.Until(time.Unix(p.LastSubscriptionUpdate, 0).Add(interval))
+			if delay < 0 {
+				delay = 0
+			}
+		}
+		if !found || delay < earliest {
+			earliest, found = delay, true
+		}
+	}
+	return earliest, found
+}
+
 func (s *Server) runRefreshScheduler(ctx context.Context) {
 	retryDelay := time.Duration(0)
 	for {
+		profileDelay, profileScheduled := s.profileRefreshDelay()
 		s.refreshMu.Lock()
-		interval := s.refreshOpts.RefreshInterval
+		legacyInterval := s.refreshOpts.RefreshInterval
 		s.refreshMu.Unlock()
+		interval := legacyInterval
+		if profileScheduled {
+			interval = profileDelay
+			if interval < time.Second {
+				interval = time.Second
+			}
+		}
 		if interval <= 0 {
 			select {
 			case <-ctx.Done():
@@ -1005,20 +1720,25 @@ func (s *Server) runRefreshScheduler(ctx context.Context) {
 		s.refreshMu.Unlock()
 		refreshCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		s.opMu.Lock()
-		_, err := s.refreshProfilesLocked(refreshCtx)
+		var refreshErr error
+		if profileScheduled {
+			_, refreshErr = s.refreshProfilesScheduledLocked(refreshCtx)
+		} else {
+			_, refreshErr = s.refreshProfilesLocked(refreshCtx)
+		}
 		s.opMu.Unlock()
 		cancel()
 		next := interval
 		s.refreshMu.Lock()
 		s.refreshState.Running = false
-		if err == nil {
+		if refreshErr == nil {
 			retryDelay = 0
 			lastSuccess := time.Now().UTC()
 			s.refreshState.LastSuccess = &lastSuccess
 			s.refreshState.LastError = ""
 			s.refreshState.ConsecutiveFailures = 0
 		} else {
-			s.refreshState.LastError = err.Error()
+			s.refreshState.LastError = refreshErr.Error()
 			s.refreshState.ConsecutiveFailures++
 			next = s.refreshOpts.RetryMin
 			for i := 1; i < s.refreshState.ConsecutiveFailures && next < s.refreshOpts.RetryMax; i++ {
@@ -1035,9 +1755,10 @@ func (s *Server) runRefreshScheduler(ctx context.Context) {
 		nextAttempt := time.Now().UTC().Add(next)
 		s.refreshState.NextAttempt = &nextAttempt
 		s.refreshMu.Unlock()
-		if err != nil {
+		if refreshErr != nil {
 			retryDelay = next
 		}
+
 	}
 }
 
@@ -1338,4 +2059,96 @@ func (s *Server) dnsCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"status": "Разрешён", "addresses": ips})
+}
+
+type observatorySettings struct {
+	ProbeIntervalSeconds int `json:"probe_interval_seconds"`
+}
+
+func (s *Server) loadObservatorySettings() {
+	path := filepath.Join(s.stateDir, "observatory", "settings.json")
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 4096 {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var saved observatorySettings
+	if json.Unmarshal(data, &saved) == nil && saved.ProbeIntervalSeconds >= 5 && saved.ProbeIntervalSeconds <= 3600 {
+		s.observatoryInterval = saved.ProbeIntervalSeconds
+	}
+}
+
+func (s *Server) observatorySettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		s.opMu.Lock()
+		value := s.observatoryInterval
+		s.opMu.Unlock()
+		writeJSON(w, http.StatusOK, observatorySettings{ProbeIntervalSeconds: value})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var req observatorySettings
+		if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid Observatory settings")
+			return
+		}
+		if req.ProbeIntervalSeconds < 5 || req.ProbeIntervalSeconds > 3600 {
+			writeError(w, http.StatusUnprocessableEntity, "probe interval must be between 5 and 3600 seconds")
+			return
+		}
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
+		if s.stateDir == "" {
+			writeError(w, http.StatusServiceUnavailable, "state directory is not configured")
+			return
+		}
+		dir := filepath.Join(s.stateDir, "observatory")
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot create Observatory state directory")
+			return
+		}
+		if err := os.Chmod(dir, 0700); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot secure Observatory state directory")
+			return
+		}
+		data, _ := json.Marshal(req)
+		tmp, err := os.CreateTemp(dir, ".settings-*.json")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot save Observatory settings")
+			return
+		}
+		name := tmp.Name()
+		defer os.Remove(name)
+		if err = tmp.Chmod(0600); err == nil {
+			_, err = tmp.Write(data)
+		}
+		if err == nil {
+			err = tmp.Sync()
+		}
+		closeErr := tmp.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			err = os.Rename(name, filepath.Join(dir, "settings.json"))
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot persist Observatory settings")
+			return
+		}
+		s.observatoryInterval = req.ProbeIntervalSeconds
+		writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "probe_interval_seconds": s.observatoryInterval, "applies": "next configuration build"})
+	default:
+		methodNotAllowed(w)
+	}
 }

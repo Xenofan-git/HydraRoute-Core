@@ -23,7 +23,7 @@ func TestCompileRequestMultipleProfilesStayIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	inbounds := cfg["inbounds"].([]any)
-	if len(inbounds) != 2 {
+	if len(inbounds) != 3 {
 		t.Fatalf("inbounds=%v", inbounds)
 	}
 	if inbounds[0].(map[string]any)["port"] == inbounds[1].(map[string]any)["port"] {
@@ -32,7 +32,7 @@ func TestCompileRequestMultipleProfilesStayIsolated(t *testing.T) {
 	routing := cfg["routing"].(map[string]any)
 	balancers := routing["balancers"].([]any)
 	rules := routing["rules"].([]any)
-	if len(balancers) != 2 || len(rules) != 2 {
+	if len(balancers) != 2 || len(rules) != 3 {
 		t.Fatalf("balancers=%v rules=%v", balancers, rules)
 	}
 	outbounds := cfg["outbounds"].([]any)
@@ -112,8 +112,12 @@ func TestCompileRequestAppliesPersistedManualSelection(t *testing.T) {
 			vlessCount++
 		}
 	}
-	if vlessCount != 1 {
-		t.Fatalf("expected one selected VLESS outbound, got %d", vlessCount)
+	if vlessCount != 2 {
+		t.Fatalf("Observatory must retain both selected and excluded VLESS outbounds, got %d", vlessCount)
+	}
+	balancers := cfg["routing"].(map[string]any)["balancers"].([]any)
+	if len(balancers) != 1 || len(balancers[0].(map[string]any)["selector"].([]any)) != 1 {
+		t.Fatalf("manual selection must still expose only one node to balancing: %#v", balancers)
 	}
 }
 

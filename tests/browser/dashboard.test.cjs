@@ -33,7 +33,7 @@ const routing = {
   }],
 };
 const preview = {
-  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto',
+  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto', auto_update_available: true, auto_update_enabled: false, auto_update_interval: 1440, filter_keep: '', filter_exclude: '',
   nodes: [
     { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: true, excluded: false },
     { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: true, excluded: false },
@@ -75,6 +75,7 @@ before(async () => {
         const profile = profiles.find(item => item.id === update.id);
         if (!profile) return json(res, 404, { error: 'profile not found' });
         Object.assign(profile, update);
+        savedSelection = update;
         return json(res, 200, { status: 'updated', profile_id: profile.id });
       }
       if (url.pathname === '/v1/interfaces' && req.method === 'GET') return json(res, 200, {
@@ -88,9 +89,18 @@ before(async () => {
       if (url.pathname === '/v1/refresh/status' && req.method === 'GET') return json(res, 200, savedRefresh || { enabled: false, interval_seconds: 86400, running: false, consecutive_failures: 0 });
       if (url.pathname === '/v1/refresh/status' && req.method === 'PUT') { savedRefresh = await readBody(req); return json(res, 200, { status: 'saved' }); }
       if (url.pathname === '/v1/profiles/preview' && req.method === 'POST') return json(res, 200, preview);
-      if (url.pathname === '/v1/selections' && req.method === 'PUT') {
-        savedSelection = await readBody(req);
-        return json(res, 200, { status: 'saved', profile_id: savedSelection.id });
+      if (url.pathname === '/v1/observatory/status' && req.method === 'GET') return json(res, 200, { available: false, statuses: {} });
+      if (url.pathname === '/v1/profiles/ping' && req.method === 'GET') {
+        const keys = preview.nodes.map(n => JSON.stringify(n.key));
+        const at = Math.floor(Date.now() / 1000) + 1;
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write('data: ' + JSON.stringify({ links: keys }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[0], echo: { delay: 3 } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[1], echo: { delay: 5 } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[0], ping: { alive: false, delay: 0, at } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[1], ping: { alive: true, delay: 42, at } }) + '\n\n');
+        res.end('data: ' + JSON.stringify({ done: true }) + '\n\n');
+        return;
       }
       if (url.pathname === '/v1/routing' && req.method === 'PUT') {
         savedRouting = await readBody(req);
@@ -151,22 +161,31 @@ test('subscription modal supports select-all, manual node selection, filters and
     await page.getByRole('heading', { name: 'Серверы: foreign' }).waitFor();
     assert.equal(await page.locator('.subscription-node-row').count(), 2);
     assert.equal(await page.locator('.pick-node:checked').count(), 2);
-    await page.locator('.pick-node').nth(0).uncheck();
+    await page.locator('#probeSubscription').click();
+    await page.getByText('42 ms').waitFor();
+    assert.match(await page.locator('.node-ping').nth(0).textContent(), /3 ms/);
+    assert.match(await page.locator('.node-delay').nth(1).textContent(), /42 ms/);
+    await page.locator('#excludeOffline').check();
     assert.equal(await page.locator('.pick-node').nth(0).isChecked(), false);
     assert.equal(await page.locator('.pick-node').nth(1).isChecked(), true);
     await page.locator('#subscriptionSearch').fill('Alpha');
     assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
     await page.locator('#subscriptionSearch').fill('');
+    await page.locator('[data-sub-tab="filters"]').click();
+    await page.locator('#filterInclude').fill('Beta');
+    await page.locator('#applySubscriptionFilters').click();
+    assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
     await page.locator('[data-drop-missing="picked:0"]').click();
     await page.locator('#autoUpdateSubscription').check();
     await page.locator('#refreshHours').fill('24');
     await page.locator('#saveSubscription').click();
-    await page.getByText('Настройки подписки сохранены').waitFor();
+    await page.getByText('Настройки подписки сохранены и конфигурация применена').waitFor();
     assert.equal(savedSelection.pick_mode, 'manual');
     assert.deepEqual(savedSelection.picked, [{ source: 'providerA', name: 'Beta', nth: 0 }]);
-    assert.deepEqual(savedSelection.excluded, []);
-    assert.equal(savedRefresh.enabled, true);
-    assert.equal(savedRefresh.interval_seconds, 86400);
+    assert.deepEqual(savedSelection.excluded, [{ source: 'providerA', name: 'Alpha', nth: 0 }]);
+    assert.equal(savedSelection.auto_update_enabled, true);
+    assert.equal(savedSelection.auto_update_interval, 1440);
+    assert.equal(savedSelection.filter_keep, 'Beta');
   } finally { await page.close(); }
 });
 
