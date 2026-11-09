@@ -189,6 +189,42 @@ func TestCompileSharedSOCKSOrderedRulesAndExplicitDefault(t *testing.T) {
 	}
 }
 
+func TestValidateMatchValueAllowsGeoTagsAndSafeExternalFiles(t *testing.T) {
+	valid := []struct{ kind, value string }{
+		{"domain", "geosite:youtube"},
+		{"domain", "geosite:geolocation-!cn"},
+		{"domain", "ext:geosite.dat:youtube"},
+		{"domain", "ext:custom-list_v2.dat:category-ads-all"},
+		{"ip", "geoip:ru"},
+		{"ip", "geoip:private"},
+		{"ip", "geoip:!cn"},
+	}
+	for _, tc := range valid {
+		if err := validateMatchValue(tc.kind, tc.value); err != nil {
+			t.Errorf("validateMatchValue(%q, %q): %v", tc.kind, tc.value, err)
+		}
+	}
+}
+
+func TestValidateMatchValueRejectsExternalGeodataPathTraversal(t *testing.T) {
+	invalid := []string{
+		"ext:../geosite.dat:youtube",
+		"ext:../../etc/passwd:youtube",
+		"ext:/tmp/geosite.dat:youtube",
+		"ext:..\\geosite.dat:youtube",
+		"ext:geosite.dat/../../secret:youtube",
+		"ext:geosite.txt:youtube",
+		"ext:geosite.dat:../youtube",
+		"ext:geosite.dat:",
+		"ext::youtube",
+	}
+	for _, value := range invalid {
+		if err := validateMatchValue("domain", value); err == nil {
+			t.Errorf("validateMatchValue accepted unsafe external reference %q", value)
+		}
+	}
+}
+
 func TestSharedSOCKSRejectsUnsafeFallbackAndInvalidTargets(t *testing.T) {
 	base := CompileRequest{
 		Profiles: []Profile{{ID: "ok", Enabled: true, Port: 23101, Nodes: []Node{node("n1", "vless")}}},

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +36,20 @@ import (
 )
 
 const maxRequestBytes = 8 << 20
+const maxGeoDataAssetBytes = 128 << 20
+
+type geoDataAssetStatus struct {
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
+	Size      int64  `json:"size,omitempty"`
+	SHA256    string `json:"sha256,omitempty"`
+}
+
+type geoDataStatusResponse struct {
+	Ready  bool                 `json:"ready"`
+	Assets []geoDataAssetStatus `json:"assets"`
+	Error  string               `json:"error,omitempty"`
+}
 
 type Options struct {
 	RefreshInterval time.Duration
@@ -126,6 +142,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/profiles", s.profileCollection)
 	s.mux.HandleFunc("/v1/interfaces", s.interfaces)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
+	s.mux.HandleFunc("/v1/geodata/status", s.geoDataStatus)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
 	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
@@ -210,6 +227,65 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "runtime": s.supervisor.Status()})
+}
+
+func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	result := geoDataStatusResponse{Assets: []geoDataAssetStatus{{Name: "geoip.dat"}, {Name: "geosite.dat"}}}
+	assetDir := strings.TrimSpace(os.Getenv("XRAY_LOCATION_ASSET"))
+	if assetDir == "" || !filepath.IsAbs(assetDir) {
+		result.Error = "Xray asset directory is not configured"
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	dirInfo, err := os.Lstat(assetDir)
+	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
+		result.Error = "Xray asset directory is unavailable or unsafe"
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	result.Ready = true
+	for i := range result.Assets {
+		asset := &result.Assets[i]
+		path := filepath.Join(assetDir, asset.Name)
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > maxGeoDataAssetBytes {
+			result.Ready = false
+			continue
+		}
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			result.Ready = false
+			continue
+		}
+		openedInfo, fstatErr := f.Stat()
+		if fstatErr != nil || !os.SameFile(info, openedInfo) || !openedInfo.Mode().IsRegular() {
+			_ = f.Close()
+			result.Ready = false
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(f, maxGeoDataAssetBytes+1))
+		_ = f.Close()
+		if readErr != nil || len(data) == 0 || int64(len(data)) > maxGeoDataAssetBytes {
+			result.Ready = false
+			continue
+		}
+		sum := sha256.Sum256(data)
+		asset.Available = true
+		asset.Size = int64(len(data))
+		asset.SHA256 = hex.EncodeToString(sum[:])
+	}
+	if !result.Ready && result.Error == "" {
+		result.Error = "One or more required Xray geodata assets are missing or invalid"
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {

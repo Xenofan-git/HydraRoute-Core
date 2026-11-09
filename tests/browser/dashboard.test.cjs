@@ -93,6 +93,7 @@ before(async () => {
       if (url.pathname === '/v1/observatory/status' && req.method === 'GET') return json(res, 200, { available: false, statuses: {} });
       if (url.pathname === '/v1/observatory/settings' && req.method === 'GET') return json(res, 200, savedObservatorySettings);
       if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, savedObservatorySettings); }
+      if (url.pathname === '/v1/geodata/status' && req.method === 'GET') return json(res, 200, { ready: true, assets: [{ name: 'geoip.dat', available: true, size: 3312784, sha256: 'a'.repeat(64) }, { name: 'geosite.dat', available: true, size: 7554929, sha256: 'b'.repeat(64) }] });
       if (url.pathname === '/v1/profiles/ping' && req.method === 'GET') {
         const keys = preview.nodes.map(n => JSON.stringify(n.key));
         const at = Math.floor(Date.now() / 1000) + 1;
@@ -139,6 +140,20 @@ after(async () => {
   if (server) await new Promise(resolve => server.close(resolve));
 });
 
+
+test('rules page displays GeoIP and GeoSite asset readiness', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.getByRole('heading', { name: 'Геоданные Xray' }).waitFor();
+    await page.getByText('GeoIP', { exact: true }).waitFor();
+    await page.getByText('GeoSite', { exact: true }).waitFor();
+    await page.getByText('Доступны', { exact: true }).waitFor();
+  } finally {
+    await page.close();
+  }
+});
 
 test('Russian menu opens on Rules and rules can be reordered by dragging', async () => {
   const page = await browser.newPage();

@@ -109,6 +109,73 @@ func TestConfigEndpointCompilesAndPreparesOnly(t *testing.T) {
 	}
 }
 
+func TestGeoDataStatusReportsAssetReadinessAndHashes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "geoip.dat"), []byte("geoip-test-data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "geosite.dat"), []byte("geosite-test-data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", dir)
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got geoDataStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Ready || len(got.Assets) != 2 {
+		t.Fatalf("unexpected geodata readiness: %#v", got)
+	}
+	for _, asset := range got.Assets {
+		if !asset.Available || asset.Size <= 0 || len(asset.SHA256) != 64 {
+			t.Errorf("asset metadata incomplete: %#v", asset)
+		}
+	}
+	if strings.Contains(rr.Body.String(), dir) {
+		t.Fatal("geodata response leaked the asset directory path")
+	}
+}
+
+func TestGeoDataStatusRejectsSymlinkAssetsAndReportsMissingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "geoip-target.dat")
+	if err := os.WriteFile(target, []byte("geoip"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "geoip.dat")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "geosite.dat"), []byte("geosite"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", dir)
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+	var got geoDataStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Ready || got.Assets[0].Available || !got.Assets[1].Available {
+		t.Fatalf("symlinked asset must not be accepted: %#v", got)
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", "")
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+	got = geoDataStatusResponse{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Ready || got.Error == "" {
+		t.Fatalf("missing asset directory must report not-ready: %#v", got)
+	}
+}
+
 func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)

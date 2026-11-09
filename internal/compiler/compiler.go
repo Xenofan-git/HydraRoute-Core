@@ -15,7 +15,8 @@ import (
 var profileIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
 var ruleIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,48}$`)
 var domainNamePattern = regexp.MustCompile(`^(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\.?$`)
-var geoTagPattern = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,96}$`)
+var geoTagPattern = regexp.MustCompile(`^[A-Za-z0-9_.@!-]{1,96}$`)
+var geoDataFilePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,123}\.dat$`)
 var allowedStrategies = map[string]bool{"random": true, "roundRobin": true, "leastPing": true}
 
 // Compile builds one aggregate Xray configuration. Profile inbounds remain
@@ -359,8 +360,8 @@ func validateMatchValue(matchType, value string) error {
 			}
 		case strings.HasPrefix(value, "ext:"):
 			parts := strings.Split(value, ":")
-			if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
-				return fmt.Errorf("invalid external geosite reference %q", value)
+			if len(parts) != 3 || !geoDataFilePattern.MatchString(parts[1]) || !geoTagPattern.MatchString(parts[2]) {
+				return fmt.Errorf("invalid external geosite reference %q: expected ext:<basename>.dat:<tag>", value)
 			}
 		default:
 			return fmt.Errorf("domain values must use domain:, full:, keyword:, regexp:, geosite:, or ext: syntax")
