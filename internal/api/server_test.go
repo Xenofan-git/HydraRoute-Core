@@ -905,3 +905,30 @@ func TestInterfaceListIsReadOnlyAndLoopbackIsExcluded(t *testing.T) {
 		t.Fatalf("loopback should not be selectable: %s", rr.Body.String())
 	}
 }
+
+func TestRefreshSettingsPersistAndUpdateRuntimeSchedule(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/refresh/status", `{"enabled":true,"interval_seconds":86400}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got RefreshStatus
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/refresh/status"))
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &got) != nil {
+		t.Fatalf("GET status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !got.Enabled || got.IntervalSeconds != 86400 {
+		t.Fatalf("refresh status=%+v", got)
+	}
+	info, err := os.Stat(filepath.Join(stateDir, "refresh-settings.json"))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("settings file mode=%v err=%v", info, err)
+	}
+	restarted := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !restarted.refreshState.Enabled || restarted.refreshState.IntervalSeconds != 86400 || restarted.refreshOpts.RefreshInterval != 24*time.Hour {
+		t.Fatalf("settings were not restored: %+v", restarted.refreshState)
+	}
+}

@@ -47,7 +47,6 @@ func Compile(req CompileRequest) ([]byte, error) {
 			return nil, fmt.Errorf("duplicate profile id %q", p.ID)
 		}
 		seenIDs[p.ID] = true
-		enabledProfiles[p.ID] = true
 		if p.Port < 1024 {
 			return nil, fmt.Errorf("profile %s: port %d is outside allowed range 1024-65535", p.ID, p.Port)
 		}
@@ -84,7 +83,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 				return nil, fmt.Errorf("profile %s: duplicate node key %q", p.ID, n.Key)
 			}
 			nodeKeys[n.Key] = true
-			if excluded[n.Key] || (len(picked) > 0 && !picked[n.Key]) {
+			if excluded[n.Key] || ((p.ManualSelection || len(picked) > 0) && !picked[n.Key]) {
 				continue
 			}
 			var outbound map[string]any
@@ -127,8 +126,11 @@ func Compile(req CompileRequest) ([]byte, error) {
 			}
 		}
 		if len(eligible) == 0 {
-			return nil, fmt.Errorf("profile %s: no eligible nodes after picked/excluded filtering", p.ID)
+			// An intentionally empty manual pool is valid: keep the profile out
+			// of Xray and let route validation reject references to it.
+			continue
 		}
+		enabledProfiles[p.ID] = true
 
 		inTag := "hr_in_" + p.ID
 		balTag := "hr_bal_" + p.ID

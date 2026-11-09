@@ -59,6 +59,7 @@ type Server struct {
 	refreshMu    sync.Mutex
 	refreshOpts  Options
 	refreshState RefreshStatus
+	refreshWake  chan struct{}
 	mux          *http.ServeMux
 }
 
@@ -80,11 +81,26 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if opts.RetryMax < opts.RetryMin {
 		opts.RetryMax = opts.RetryMin
 	}
-	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, mux: http.NewServeMux()}
+	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), mux: http.NewServeMux()}
 	if stateDir != "" {
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
 		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
+		if data, err := os.ReadFile(filepath.Join(stateDir, "refresh-settings.json")); err == nil {
+			var saved struct {
+				Enabled         bool  `json:"enabled"`
+				IntervalSeconds int64 `json:"interval_seconds"`
+			}
+			if json.Unmarshal(data, &saved) == nil && saved.IntervalSeconds >= 3600 && saved.IntervalSeconds <= int64((30*24*time.Hour).Seconds()) {
+				s.refreshOpts.RefreshInterval = 0
+				if saved.Enabled {
+					s.refreshOpts.RefreshInterval = time.Duration(saved.IntervalSeconds) * time.Second
+				}
+				s.refreshState.Enabled = saved.Enabled
+				s.refreshState.IntervalSeconds = saved.IntervalSeconds
+			}
+		} else if !os.IsNotExist(err) { /* retain constructor defaults; status reports no saved override */
+		}
 	}
 	s.mux.HandleFunc("/healthz", s.health)
 	s.mux.HandleFunc("/v1/config", s.config)
@@ -140,10 +156,8 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		nextAttempt := time.Now().UTC().Add(s.refreshOpts.RefreshInterval)
 		s.refreshState.NextAttempt = &nextAttempt
 		s.refreshMu.Unlock()
-		go func() { defer close(schedulerDone); s.runRefreshScheduler(schedulerCtx) }()
-	} else {
-		close(schedulerDone)
 	}
+	go func() { defer close(schedulerDone); s.runRefreshScheduler(schedulerCtx) }()
 	defer func() { schedulerCancel(); <-schedulerDone }()
 	select {
 	case err := <-serveErr:
@@ -875,28 +889,113 @@ func (s *Server) refreshProfilesLocked(ctx context.Context) (map[string]any, err
 }
 
 func (s *Server) refreshStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		s.refreshMu.Lock()
+		status := s.refreshState
+		s.refreshMu.Unlock()
+		writeJSON(w, http.StatusOK, status)
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var req struct {
+			Enabled         bool  `json:"enabled"`
+			IntervalSeconds int64 `json:"interval_seconds"`
+		}
+		if err := decodeStrictJSON(w, r, &req, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid refresh settings")
+			return
+		}
+		if req.IntervalSeconds < 3600 || req.IntervalSeconds > int64((30*24*time.Hour).Seconds()) {
+			writeError(w, http.StatusUnprocessableEntity, "refresh interval must be between 1 hour and 30 days")
+			return
+		}
+		if s.stateDir == "" {
+			writeError(w, http.StatusServiceUnavailable, "persistent state directory is not configured")
+			return
+		}
+		data, _ := json.Marshal(struct {
+			Enabled         bool  `json:"enabled"`
+			IntervalSeconds int64 `json:"interval_seconds"`
+		}{req.Enabled, req.IntervalSeconds})
+		path := filepath.Join(s.stateDir, "refresh-settings.json")
+		tmp, err := os.CreateTemp(s.stateDir, ".refresh-settings-*")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot persist refresh settings")
+			return
+		}
+		name := tmp.Name()
+		_ = tmp.Chmod(0600)
+		_, err = tmp.Write(append(data, '\n'))
+		if err == nil {
+			err = tmp.Sync()
+		}
+		closeErr := tmp.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err == nil {
+			err = os.Rename(name, path)
+		}
+		_ = os.Remove(name)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot persist refresh settings")
+			return
+		}
+		s.refreshMu.Lock()
+		s.refreshState.Enabled = req.Enabled
+		s.refreshState.IntervalSeconds = req.IntervalSeconds
+		s.refreshOpts.RefreshInterval = 0
+		if req.Enabled {
+			s.refreshOpts.RefreshInterval = time.Duration(req.IntervalSeconds) * time.Second
+			next := time.Now().UTC().Add(s.refreshOpts.RefreshInterval)
+			s.refreshState.NextAttempt = &next
+		} else {
+			s.refreshState.NextAttempt = nil
+		}
+		s.refreshMu.Unlock()
+		select {
+		case s.refreshWake <- struct{}{}:
+		default:
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "enabled": req.Enabled, "interval_seconds": req.IntervalSeconds})
+	default:
 		methodNotAllowed(w)
-		return
 	}
-	if !validLocalReadRequest(r) {
-		writeError(w, http.StatusForbidden, "local request required")
-		return
-	}
-	s.refreshMu.Lock()
-	status := s.refreshState
-	s.refreshMu.Unlock()
-	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) runRefreshScheduler(ctx context.Context) {
-	interval := s.refreshOpts.RefreshInterval
-	timer := time.NewTimer(interval)
-	defer timer.Stop()
+	retryDelay := time.Duration(0)
 	for {
+		s.refreshMu.Lock()
+		interval := s.refreshOpts.RefreshInterval
+		s.refreshMu.Unlock()
+		if interval <= 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.refreshWake:
+				continue
+			}
+		}
+		delay := interval
+		if retryDelay > 0 {
+			delay = retryDelay
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
+		case <-s.refreshWake:
+			timer.Stop()
+			continue
 		case <-timer.C:
 		}
 		now := time.Now().UTC()
@@ -913,6 +1012,7 @@ func (s *Server) runRefreshScheduler(ctx context.Context) {
 		s.refreshMu.Lock()
 		s.refreshState.Running = false
 		if err == nil {
+			retryDelay = 0
 			lastSuccess := time.Now().UTC()
 			s.refreshState.LastSuccess = &lastSuccess
 			s.refreshState.LastError = ""
@@ -935,7 +1035,9 @@ func (s *Server) runRefreshScheduler(ctx context.Context) {
 		nextAttempt := time.Now().UTC().Add(next)
 		s.refreshState.NextAttempt = &nextAttempt
 		s.refreshMu.Unlock()
-		timer.Reset(next)
+		if err != nil {
+			retryDelay = next
+		}
 	}
 }
 

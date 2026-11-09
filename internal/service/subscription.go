@@ -118,7 +118,7 @@ func PreviewProfile(ctx context.Context, profile profiles.Profile, stateDir stri
 	out := ProfilePreview{ProfileID: profile.ID, SourceID: profile.SourceID, PickMode: selection.PickMode, Nodes: make([]PreviewNode, 0, len(servers)), MissingPicked: reconciled.MissingPicked, MissingExcluded: reconciled.MissingExcluded}
 	for _, server := range servers {
 		key := server.CompilerKey()
-		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Picked: picked[key], Excluded: excluded[key]})
+		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Picked: picked[key] || (selection.PickMode == "auto" && !excluded[key]), Excluded: excluded[key]})
 	}
 	return out, nil
 }
@@ -223,11 +223,12 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 					continue
 				}
 				selection, reconcileErr := state.Reconcile(*saved, servers)
-				if reconcileErr != nil {
+				if reconcileErr != nil && !(errors.Is(reconcileErr, state.ErrNoAvailablePickedNodes) && saved.PickMode == "manual" && len(saved.Picked) == 0) {
 					fail("saved selection reconciliation failed")
 					continue
 				}
 				profile.Picked, profile.Excluded = selection.Picked, selection.Excluded
+				profile.ManualSelection = saved.PickMode == "manual"
 			} else if !os.IsNotExist(loadErr) {
 				fail("cannot load saved selection state")
 				continue

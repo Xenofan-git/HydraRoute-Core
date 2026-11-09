@@ -15,6 +15,7 @@ type Profile struct {
 	Nodes             []Node    `json:"nodes"`
 	Picked            []string  `json:"picked,omitempty"`
 	Excluded          []string  `json:"excluded,omitempty"`
+	ManualSelection   bool      `json:"manual_selection,omitempty"`
 }
 
 // Node contains a stable identity and a validated Xray outbound object.

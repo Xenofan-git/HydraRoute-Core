@@ -322,3 +322,17 @@ func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
 		t.Fatalf("DPI options changed default outbound: %#v", out)
 	}
 }
+
+func TestManualEmptyPoolOmitsProfileWithoutCreatingEmptyBalancer(t *testing.T) {
+	config, err := Compile(CompileRequest{Profiles: []Profile{{ID: "empty", Enabled: true, Port: 16200, Strategy: "leastPing", ManualSelection: true, Nodes: []Node{{Key: "node-a", Outbound: json.RawMessage(`{"protocol":"freedom"}`)}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg["inbounds"].([]any)) != 0 || len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
+		t.Fatalf("empty manual pool unexpectedly emitted Xray profile: %s", config)
+	}
+}

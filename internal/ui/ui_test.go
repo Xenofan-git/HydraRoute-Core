@@ -35,7 +35,15 @@ func TestDashboardIncludesPerProfileServerPickerWorkflow(t *testing.T) {
 		`missing_excluded`,
 		`pick_mode`,
 		`class="pick-node"`,
-		`class="exclude-node"`,
+		`subscription-backdrop`,
+		`pickAllNodes`,
+		`excludeOffline`,
+		`refreshSubscription`,
+		`probeSubscription`,
+		`filterInclude`,
+		`filterExclude`,
+		`autoUpdateSubscription`,
+		`/v1/refresh/status`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Errorf("dashboard server picker is missing %q", required)
@@ -53,6 +61,8 @@ func TestRoutingEditorSplitsMultilineValuesCorrectly(t *testing.T) {
 	if strings.Contains(script, malformed) {
 		t.Fatalf("routing editor still contains over-escaped parser %q", malformed)
 	}
+	// Mirror the JavaScript character-class semantics to guard the multiline
+	// contract even on build hosts without an installed JavaScript runtime.
 	re, err := regexp.Compile(`[\r\n,]+`)
 	if err != nil {
 		t.Fatal(err)

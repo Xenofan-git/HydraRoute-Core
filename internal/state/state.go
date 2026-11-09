@@ -61,9 +61,6 @@ func Validate(s State) error {
 		if p.PickMode == "auto" && len(p.Picked) > 0 {
 			return fmt.Errorf("profile %s: auto mode cannot contain picked nodes", p.ID)
 		}
-		if p.PickMode == "manual" && len(p.Picked) == 0 {
-			return fmt.Errorf("profile %s: manual mode requires at least one stored picked node", p.ID)
-		}
 		picked, err := validateKeys(p.SourceID, p.Picked)
 		if err != nil {
 			return fmt.Errorf("profile %s picked: %w", p.ID, err)

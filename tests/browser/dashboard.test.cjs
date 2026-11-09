@@ -12,6 +12,7 @@ let browser;
 let baseURL;
 let savedSelection;
 let savedRouting;
+let savedRefresh;
 
 const profiles = [{
   id: 'foreign', source_id: 'providerA', enabled: true,
@@ -34,8 +35,8 @@ const routing = {
 const preview = {
   profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto',
   nodes: [
-    { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: false, excluded: false },
-    { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: false, excluded: false },
+    { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: true, excluded: false },
+    { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: true, excluded: false },
   ],
   missing_picked: [{ source: 'providerA', name: 'Gone', nth: 0 }],
   missing_excluded: [],
@@ -84,7 +85,8 @@ before(async () => {
         ],
       });
       if (url.pathname === '/v1/routing' && req.method === 'GET') return json(res, 200, { routing, configured: false });
-      if (url.pathname === '/v1/refresh/status') return json(res, 200, { enabled: false, running: false, consecutive_failures: 0 });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'GET') return json(res, 200, savedRefresh || { enabled: false, interval_seconds: 86400, running: false, consecutive_failures: 0 });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'PUT') { savedRefresh = await readBody(req); return json(res, 200, { status: 'saved' }); }
       if (url.pathname === '/v1/profiles/preview' && req.method === 'POST') return json(res, 200, preview);
       if (url.pathname === '/v1/selections' && req.method === 'PUT') {
         savedSelection = await readBody(req);
@@ -130,14 +132,44 @@ test('Russian menu opens on Rules and rules can be reordered by dragging', async
   try {
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
-    assert.equal(await page.locator('.nav-item').allTextContents(), ['▦Правила','♧Сеть','◎DNS','☷Hydra','ⓘИнфо','⚙Настройки','⇥Выход']);
+    assert.deepEqual((await page.locator('.nav-item').allTextContents()).map(x => x.replace(/^\S/, '')), ['Правила','Сеть','DNS','Hydra','Инфо','Настройки','Выход']);
     assert.equal(await page.locator('#pageTitle').textContent(), 'Правила');
     assert.equal(await page.locator('.rule-card[data-rule]').count(), 1);
     assert.equal(await page.locator('.rule-drag-handle').count(), 1);
   } finally { await page.close(); }
 });
 
-test('server picker supports manual selection, exclusions and forgotten missing nodes', async () => {
+test('subscription modal supports select-all, manual node selection, filters and save', async () => {
+  savedSelection = undefined;
+  savedRefresh = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="hydra"]').click();
+    await page.locator('[data-preview-servers="foreign"]').click();
+    await page.getByRole('heading', { name: 'Серверы: foreign' }).waitFor();
+    assert.equal(await page.locator('.subscription-node-row').count(), 2);
+    assert.equal(await page.locator('.pick-node:checked').count(), 2);
+    await page.locator('.pick-node').nth(0).uncheck();
+    assert.equal(await page.locator('.pick-node').nth(0).isChecked(), false);
+    assert.equal(await page.locator('.pick-node').nth(1).isChecked(), true);
+    await page.locator('#subscriptionSearch').fill('Alpha');
+    assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
+    await page.locator('#subscriptionSearch').fill('');
+    await page.locator('#autoUpdateSubscription').check();
+    await page.locator('#refreshHours').fill('24');
+    await page.locator('#saveSubscription').click();
+    await page.getByText('Настройки подписки сохранены').waitFor();
+    assert.equal(savedSelection.pick_mode, 'manual');
+    assert.deepEqual(savedSelection.picked, [{ source: 'providerA', name: 'Beta', nth: 0 }]);
+    assert.deepEqual(savedSelection.excluded, []);
+    assert.equal(savedRefresh.enabled, true);
+    assert.equal(savedRefresh.interval_seconds, 86400);
+  } finally { await page.close(); }
+});
+
+test('subscription modal permits deliberately empty server pool', async () => {
   savedSelection = undefined;
   const page = await browser.newPage();
   try {
@@ -145,46 +177,13 @@ test('server picker supports manual selection, exclusions and forgotten missing 
     await page.getByText('API подключён').waitFor();
     await page.locator('.nav-item[data-page="hydra"]').click();
     await page.locator('[data-preview-servers="foreign"]').click();
-    await page.getByRole('heading', { name: 'Профиль foreign' }).waitFor();
-    assert.equal(await page.locator('.server-card').count(), 2);
-    assert.equal(await page.locator('[data-drop-missing="picked:0"]').count(), 1);
-
-    await page.locator('#pickMode').selectOption('manual');
-    assert.equal(await page.locator('.pick-node:checked').count(), 2);
-    await page.locator('.exclude-node').nth(0).check();
-    assert.equal(await page.locator('.pick-node').nth(0).isChecked(), false);
-    assert.equal(await page.locator('.pick-node').nth(1).isChecked(), true);
-    await page.locator('[data-drop-missing="picked:0"]').click();
-    assert.equal(await page.locator('[data-drop-missing]').count(), 0);
-
-    await page.locator('#saveSelection').click();
-    await page.getByText(/Выбор серверов сохранён/).waitFor();
+    await page.locator('#pickAllNodes').uncheck();
+    assert.equal(await page.locator('.pick-node:checked').count(), 0);
+    await page.locator('#saveSubscription').click();
+    await page.getByText('Настройки подписки сохранены').waitFor();
+    assert.deepEqual(savedSelection.picked, []);
     assert.equal(savedSelection.pick_mode, 'manual');
-    assert.deepEqual(savedSelection.picked, [{ source: 'providerA', name: 'Beta', nth: 0 }]);
-    assert.deepEqual(savedSelection.excluded, [{ source: 'providerA', name: 'Alpha', nth: 0 }]);
-  } finally {
-    await page.close();
-  }
-});
-
-test('manual mode refuses an empty pool', async () => {
-  const page = await browser.newPage();
-  try {
-    await page.goto(baseURL);
-    await page.getByText('API подключён').waitFor();
-    await page.locator('.nav-item[data-page="hydra"]').click();
-    await page.locator('[data-preview-servers="foreign"]').click();
-    await page.locator('#pickMode').selectOption('manual');
-    await page.locator('[data-drop-missing="picked:0"]').click();
-    await page.locator('.pick-node').nth(0).uncheck();
-    await page.locator('.pick-node').nth(1).uncheck();
-    savedSelection = undefined;
-    await page.locator('#saveSelection').click();
-    await page.getByText('Для ручного режима выберите хотя бы один сервер').waitFor();
-    assert.equal(savedSelection, undefined);
-  } finally {
-    await page.close();
-  }
+  } finally { await page.close(); }
 });
 
 test('HRNeo navigation order and draggable routing rules are preserved', async () => {
