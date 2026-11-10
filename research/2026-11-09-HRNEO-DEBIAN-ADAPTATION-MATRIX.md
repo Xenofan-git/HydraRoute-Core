@@ -29,21 +29,21 @@ The target is functional parity at the hrcore panel and proxy-control plane, not
 
 | Original HRNeo capability | hrcore/Debian implementation | Status |
 |---|---|---|
-| Domain rules / watchlist | Ordered Xray domain rules on shared SOCKS inbounds | Partial |
-| IP/CIDR rules | Ordered Xray IP/CIDR rules | Partial |
+| Domain rules / watchlist | Ordered Xray domain rules on shared SOCKS inbounds; Core-owned MATCH/DUMP socket and readiness API | Implemented foundation; partial GeoSite coverage |
+| IP/CIDR rules | Ordered Xray IP/CIDR rules | Implemented foundation; syntax parity audit pending |
 | Direct / block / profile routing | freedom / blackhole / profile balancer | Partial, rule UI exists |
 | PolicyOrder | Preserve ordered first-match rule compilation | Partial |
-| GeoIP / GeoSite databases | Managed Xray geodata assets and UI rule types | Pending |
-| DNS capture / dynamic IP sets | Optional SmartDNS sidecar and local resolver groups | Pending |
+| GeoIP / GeoSite databases | Safe Xray asset readiness, tag catalog and rule references | Partial; list/preset CRUD and managed updates pending |
+| DNS capture / dynamic IP sets | Optional loopback-only Core DNS resolver consumed by Core Xray | Partial; no AF_PACKET capture, ipsets or transparent interception |
 | L7 HTTP/TLS/QUIC classification | Opt-in Xray inbound sniffing on Core SOCKS5 only; no NFLOG/firewall capture | Partial; HTTP/TLS E2E on VPS+NanoPi, QUIC E2E on VPS; ARM64 QUIC E2E pending |
-| DirectRoute / ForceInterface | Per-profile outbound socket interface selection | Partial |
+| DirectRoute / ForceInterface | Per-profile Xray `sockopt.interface` and read-only interface listing | Adapted / partial; no fwmark/ip-rule/table manager |
 | GlobalRouting | No safe host-level equivalent under current constraints | Not ported |
 | ConntrackFlush | Not applicable to independent SOCKS sessions | Not ported |
-| Health/Observatory | Xray gRPC Observatory, cached status and manual SSE probe | Implemented foundation |
-| Watchlist MATCH/DUMP API | Local rule match/dump API | Pending |
-| Event/log monitoring | Local structured events and log viewer | Partial |
+| Health/Observatory | Xray gRPC Observatory, cached status, manual ICMP/proxy SSE and Health Monitor | Implemented foundation; full parity/scale/failover audit pending |
+| Watchlist MATCH/DUMP API | Core-owned private Unix socket MATCH/DUMP plus HTTP readiness | Implemented with partial GeoSite Plain/Regex coverage |
+| Event/log monitoring | Bounded persistent structured event journal, local API, SSE and live UI | Implemented foundation; raw Xray stdout/stderr viewer pending |
 | Phobos / WireGuard helpers | Optional isolated helper/service lifecycle | Pending |
-| System/network metrics and speed tests | Read-only local metrics and isolated test module | Pending |
+| System/network metrics and speed tests | Read-only disk/RAM/load/uptime metrics in Health Monitor | Partial; network speed tests and full system diagnostics pending |
 | Service/config management | hrcore-owned local services/config only | Partial |
 
 ## 4. Observatory policy
@@ -74,25 +74,26 @@ Expected SHA-256: `553e05c8d50de951c2acbeebf06960c1b5934833c0218065d9bce26077e1e
 
 ## 6. Current implementation and validation
 
-- The hrcore panel on NanoPi responds at port 17891 and redirects unauthenticated requests to its login page. No production config was changed.
+- The hrcore panel on NanoPi was previously confirmed at port 17891 and redirects unauthenticated requests to its login page. No production config was changed.
 - Backend API is local on port 17890.
 - Per-profile DPI bypass, balancing strategy, outgoing interface, and subscription refresh settings are implemented in the VPS source branch.
 - Observatory settings are persisted; status polling and manual probe stream are wired.
 - The compiler and probe stream now restrict checks to actual balancer members.
-- Local VPS validation: `go test -count=1 ./...`, `go vet ./...`, and `git diff --check` passed.
-- GitHub Actions run #169: formatting, JS syntax, Go tests, generated Xray routing config, vet, and Playwright browser tests passed; AMD64 and ARM64 static build jobs were still running at the time of this note.
-- All source changes remain in a draft PR; nothing has been deployed to NanoPi or changed on Keenetic.
+- Local VPS validation after DNS/events/health integration: full `go test ./...`, `go vet ./...`, gofmt and `git diff --check` passed.
+- GitHub Actions #196 passed Go tests, JS syntax, Playwright, Xray config validation, HTTP/TLS/QUIC E2E and static AMD64/ARM64 builds. #197 is checking the subsequent SSE/Observatory hardening.
+- Current API has 26 route patterns; the original HRweb inventory has 114 regular API methods plus streams. Exact method-by-method parity remains an explicit audit task.
+- All source changes remain source/CI only; nothing has been deployed to NanoPi or changed on Keenetic.
 
 ## 7. Next implementation sequence
 
-1. Close AMD64/ARM64 CI build jobs and confirm the PR workflow.
-2. Finish active balancer target semantics without claiming that `principle_target` is a live TCP connection.
-3. Complete ordered domain/IP/CIDR rules, then add GeoIP/GeoSite data and rule import/export.
-4. Add Xray sniffing for HTTP/TLS/QUIC on hrcore SOCKS inbounds only.
-5. Implement the optional SmartDNS sidecar from the HRDNS analysis, with loopback-only defaults.
-6. Complete logs/events, status, metrics, and local MATCH/DUMP APIs.
-7. Add optional Phobos/WireGuard helpers only after isolated lifecycle and failure tests.
-8. Run final NanoPi tests only after explicit approval; keep the existing Keenetic HRNeo, HydraRoute Neo/Entware, NanoPi 3x-ui, Tailscale, and existing routing policies untouched.
+1. Close CI #197 and fix every failing gate.
+2. Complete method-by-method mapping of all 114 HRweb API methods plus streams.
+3. Finish balancer/Observatory scale, failure, fallback and two-profile isolation tests.
+4. Complete Geo list/preset management and safe data update/rollback.
+5. Finish DNS/HRDNS parity review and loopback-only resolver tests.
+6. Implement optional Phobos/WireGuard helpers only after isolated lifecycle and failure tests.
+7. Complete systemd packaging, file APIs and remaining system/speed workflows where safe.
+8. Run final NanoPi tests only after explicit approval; keep the existing Keenetic HRNeo, HydraRoute Neo/Entware, NanoPi 3x-ui, Tailscale and routing policies untouched.
 
 ## 8. Active server reverse-engineering note
 

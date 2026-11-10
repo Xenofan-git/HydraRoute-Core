@@ -45,9 +45,27 @@ Validation:
 
 Validation after this phase:
 - `go test -count=1 ./internal/health ./internal/events ./internal/api ./internal/ui ./internal/dnsservice` — PASS.
-- `go vet ./...` — pending final rerun after these changes.
-- Browser tests / JS syntax / ARM64 builds — pending GitHub CI; local VPS has no Node.js and only ~200 MiB free disk.
+- Full `go test -count=1 ./...` — PASS after the latest Observatory changes.
+- `go vet ./...`, gofmt and `git diff --check` — PASS.
+- GitHub Actions #196 and #197 — PASS for Go, JS syntax, Playwright, Xray config, HTTP/TLS/QUIC E2E and AMD64/ARM64 builds. A subsequent Observatory stream/cache patch is queued for CI #198.
+- Local VPS has no Node.js and only ~190 MiB free disk; JS/browser/build validation is delegated to GitHub CI.
+
+## Read-only NanoPi baseline check — 2026-11-10
+
+A read-only Tailscale SSH inspection corrected an outdated deployment assumption in earlier notes:
+
+- `hydraroute-core.service` was already enabled and active before this work (since 2026-11-08 23:59 MSK), running `/usr/local/libexec/hydraroute/hrapi` on `127.0.0.1:17890`.
+- The installed service is an older baseline: `/v1/runtime` reports `configured=false`, `running=false`; `/v1/observatory/settings`, `/v1/health/monitor`, `/v1/events`, `/v1/watchlist/status` and `/v1/geodata/status` return 404.
+- The installed service has not been replaced or restarted during this work. No new source changes have been deployed to NanoPi.
+- `hydraroute-login.service`, nginx and `x-ui.service` are already active; no changes were made to them or to any Xray process.
 
 ## Safety boundary
 
-All changes remain source-only. No Core runtime deployment/restart on NanoPi, no changes to Keenetic/Entware HydraRoute Neo, 3x-ui/Xray, Tailscale, Direct rules, system DNS, host routes, firewall or NAT.
+This phase made source/CI changes only. The pre-existing NanoPi Core API service was inspected read-only and left untouched. No changes were made to Keenetic/Entware HydraRoute Neo, 3x-ui/Xray, Tailscale, Direct rules, system DNS, host routes, firewall or NAT.
+
+## Additional Observatory audit findings
+
+- The manual ping stream previously persisted the probe cache once per newly observed outbound. It now batches in-memory updates and persists once when the stream exits, preserving the complete Xray Observatory status including health-average/failure fields.
+- The manual ping SSE clears the API server's global 60-second write deadline so configured Observatory cycles longer than one minute are not silently cut off.
+- ICMP probing is bounded to 8 concurrent workers and a 20-second overall phase; remaining echo results are explicitly reported as unavailable rather than leaving nodes indefinitely pending.
+- Disabled profiles now return stale cached Observatory data and do not wait for probe results that cannot arrive.

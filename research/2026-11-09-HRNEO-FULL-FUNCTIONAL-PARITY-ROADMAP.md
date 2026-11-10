@@ -136,10 +136,12 @@ All changes remain source/CI only. No NanoPi Core runtime deployment/restart and
 - Health Monitor implemented with persisted interval/timeout/fail/recovery settings, periodic and manual checks, component state hysteresis, local system metrics and UI.
 - Corrected Observatory ICMP batching bound discovered during source audit.
 
-### Validation still required
-- Rerun full `go test ./...` and `go vet ./...` after the latest event/health changes.
-- Run JavaScript syntax, Playwright browser tests and AMD64/ARM64 static builds in GitHub Actions; Node.js is absent on the VPS and disk space is constrained.
-- Continue the full API/UI parity audit and close remaining HRNeo behavior gaps; successful compilation is not the release criterion.
+### Validation status
+- Full VPS `go test ./...`, `go vet ./...`, gofmt and `git diff --check` passed after DNS/events/health integration.
+- GitHub Actions #196 passed Go tests, vet, JS syntax, Playwright, Xray config validation, HTTP/TLS/QUIC E2E and static AMD64/ARM64 builds.
+- CI #197 passed event SSE reconnection/subscriber-cap, Go/JS/browser tests, Xray config, HTTP/TLS/QUIC E2E and AMD64/ARM64 builds. The subsequent Observatory cache/write-deadline/ICMP-bounding patch is queued for CI #198.
+- A first compatibility audit is documented in `research/2026-11-10-HRNEO-FUNCTIONAL-PARITY-AUDIT.md`; it records 26 Core route patterns versus 114 HRweb regular API methods plus streams and maps all 30 original HRNeo `config_t` fields. Method-by-method HRweb transcription remains open.
+- The release criterion remains behavioral parity for safe equivalents, explicit disposition for omitted features, full tests and ARM64 runtime validation—not a successful compile alone.
 
 ### Deployment boundary
-No Core deployment/restart on NanoPi. Keenetic/Entware HydraRoute Neo, 3x-ui/Xray, Direct rules, Tailscale, system DNS, host routes and firewall remain untouched.
+A read-only check found a pre-existing `hydraroute-core.service` on NanoPi, active since 2026-11-08. Its older API reports Xray `configured=false`, `running=false`; new Health Monitor/Events/Watchlist/GeoData endpoints are absent. This phase did not replace or restart it. Keenetic/Entware HydraRoute Neo, 3x-ui/Xray, Direct rules, Tailscale, system DNS, host routes and firewall remain untouched.

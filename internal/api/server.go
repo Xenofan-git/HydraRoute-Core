@@ -1571,6 +1571,9 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 		return observatoryStatusResponse{}, err
 	}
 	eligibleNodes := eligibleObservatoryNodes(preview)
+	if !profile.Enabled {
+		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, eligibleNodes), Error: "Profile is disabled; showing last known measurements"}, nil
+	}
 	if !s.supervisor.Status().Running {
 		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, eligibleNodes), Error: "Xray is stopped; showing last known measurements"}, nil
 	}
@@ -1754,6 +1757,15 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	if controller := http.NewResponseController(w); controller != nil {
+		_ = controller.SetWriteDeadline(time.Time{})
+	}
+	cacheChanged := false
+	defer func() {
+		if cacheChanged {
+			_ = s.saveProbeCache()
+		}
+	}()
 	send := func(event pingStreamEvent) bool {
 		data, e := json.Marshal(event)
 		if e != nil {
@@ -1792,7 +1804,13 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 		echo map[string]any
 	}
 	const maxConcurrentICMP = 8
+	icmpCtx, cancelICMP := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelICMP()
+	echoSent := make(map[string]bool, len(eligibleNodes))
 	for start := 0; start < len(eligibleNodes); start += maxConcurrentICMP {
+		if icmpCtx.Err() != nil {
+			break
+		}
 		end := start + maxConcurrentICMP
 		if end > len(eligibleNodes) {
 			end = len(eligibleNodes)
@@ -1805,7 +1823,7 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				echoes <- echoResult{key, probeICMPEcho(ctx, host)}
+				echoes <- echoResult{key, probeICMPEcho(icmpCtx, host)}
 			}()
 		}
 		wg.Wait()
@@ -1814,10 +1832,26 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 			if ctx.Err() != nil {
 				return
 			}
+			echoSent[result.key] = true
 			if !send(pingStreamEvent{Link: result.key, Echo: result.echo}) {
 				return
 			}
 		}
+	}
+	cancelICMP()
+	if ctx.Err() != nil {
+		return
+	}
+	for _, node := range eligibleNodes {
+		keyBytes, _ := json.Marshal(node.Key)
+		key := string(keyBytes)
+		if !echoSent[key] && !send(pingStreamEvent{Link: key, Echo: map[string]any{}}) {
+			return
+		}
+	}
+	if !profile.Enabled {
+		send(pingStreamEvent{Done: true, Error: "Профиль выключен: прокси-задержка недоступна"})
+		return
 	}
 	if !s.supervisor.Status().Running {
 		send(pingStreamEvent{Done: true, Error: "Xray не запущен: прокси-задержка недоступна"})
@@ -1859,6 +1893,7 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 		for _, item := range items {
 			byTag[item.Tag] = item
 		}
+		pendingEvents := make([]pingStreamEvent, 0)
 		for key, tag := range tags {
 			if sent[key] {
 				continue
@@ -1868,16 +1903,19 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			sent[key] = true
-			ping := map[string]any{"alive": item.Alive, "delay": item.DelayMS, "at": item.LastTryTime}
-			cachedStatus := xrayapi.OutboundStatus{Tag: tag, Alive: item.Alive, DelayMS: item.DelayMS, LastTryTime: item.LastTryTime, LastSeenTime: item.LastSeenTime, LastError: item.LastError}
+			pendingEvents = append(pendingEvents, pingStreamEvent{Link: key, Ping: map[string]any{"alive": item.Alive, "delay": item.DelayMS, "at": item.LastTryTime}})
+			cachedStatus := item
+			cachedStatus.Stale = false
 			s.probeMu.Lock()
 			if s.probeCache[profileID] == nil {
 				s.probeCache[profileID] = make(map[string]xrayapi.OutboundStatus)
 			}
 			s.probeCache[profileID][key] = cachedStatus
 			s.probeMu.Unlock()
-			_ = s.saveProbeCache()
-			if !send(pingStreamEvent{Link: key, Ping: ping}) {
+			cacheChanged = true
+		}
+		for _, event := range pendingEvents {
+			if !send(event) {
 				return
 			}
 		}
