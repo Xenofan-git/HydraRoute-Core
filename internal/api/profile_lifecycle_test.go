@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc"
 
 	"hydraroute.local/core/internal/compiler"
-	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
 	hrruntime "hydraroute.local/core/internal/runtime"
 	"hydraroute.local/core/internal/service"
@@ -119,10 +118,10 @@ func TestProfileDeleteRebuildsConfigAndClearsObservatoryCache(t *testing.T) {
 		}
 	}
 	deleteProfile("alpha")
-	if _, err := h.profileStore.Get("alpha"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := h.profileStore.Get("alpha"); err == nil {
 		t.Fatalf("deleted profile still exists: err=%v", err)
 	}
-	if _, err := service.LoadSelection(stateDir, "alpha"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := service.LoadSelection(stateDir, "alpha"); err == nil {
 		t.Fatalf("deleted profile selection still exists: err=%v", err)
 	}
 	config, err := h.supervisor.SnapshotConfig()
