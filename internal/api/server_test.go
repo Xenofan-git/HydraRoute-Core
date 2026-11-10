@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hydraroute.local/core/internal/compiler"
+	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
 	"hydraroute.local/core/internal/service"
@@ -1674,3 +1675,84 @@ func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
 		t.Fatalf("public address rejected: %q %v", got, ok)
 	}
 }
+
+
+func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
+	stateDir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	fetcher := func(context.Context, string) (dnsblocklist.Result, error) {
+		return dnsblocklist.Result{Blocked: []string{"ads.example.com"}, Allowed: []string{"safe.example.com"}}, nil
+	}
+	manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.blocklists = manager
+	h.applyDNSBlocklists()
+	cfg := h.dns.Config()
+	cfg.BlockingEnabled = true
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists", `{"name":"Ads","url":"https://lists.example/ads.txt","enabled":true}`))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create source status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		Source dnsblocklist.Source `json:"source"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Source.ID == "" {
+		t.Fatalf("source ID missing: %s", rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/refresh", `{}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("refresh source status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !h.dns.blockedHost("tracker.ads.example.com") {
+		t.Fatal("refreshed blocklist did not affect Core DNS resolver")
+	}
+	if h.dns.blockedHost("safe.example.com") {
+		t.Fatal("blocklist allow exception did not reach Core DNS resolver")
+	}
+
+	reloaded := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !reloaded.dns.blockedHost("tracker.ads.example.com") {
+		t.Fatal("persisted blocklist was not restored into Core DNS resolver")
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/remove", `{"domain":"ads.example.com"}`))
+	if rr.Code != http.StatusOK || h.dns.blockedHost("tracker.ads.example.com") {
+		t.Fatalf("remove entry failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/restore", `{"domain":"ads.example.com"}`))
+	if rr.Code != http.StatusOK || !h.dns.blockedHost("tracker.ads.example.com") {
+		t.Fatalf("restore entry failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	patch := localPost("/v1/dns/blocklists/"+created.Source.ID, `{"enabled":false}`)
+	patch.Method = http.MethodPatch
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, patch)
+	if rr.Code != http.StatusOK || h.dns.blockedHost("tracker.ads.example.com") {
+		t.Fatalf("disable source failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	del := localGet("/v1/dns/blocklists/" + created.Source.ID)
+	del.Method = http.MethodDelete
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, del)
+	if rr.Code != http.StatusOK || len(h.blocklists.Snapshot().Sources) != 0 {
+		t.Fatalf("delete source failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+

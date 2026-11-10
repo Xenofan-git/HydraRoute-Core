@@ -26,6 +26,7 @@ import (
 
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/dnsservice"
+	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
 	"hydraroute.local/core/internal/events"
 	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
@@ -79,6 +80,8 @@ type Server struct {
 	profileStore        *profiles.Store
 	routingStore        *routeconfig.Store
 	dns                 *dnsservice.Manager
+	blocklists          *dnsblocklist.Manager
+	blocklistsErr       string
 	opMu                sync.Mutex
 	refreshMu           sync.Mutex
 	refreshOpts         Options
@@ -136,6 +139,12 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
 		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
+		if manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), nil); err != nil {
+			s.blocklistsErr = err.Error()
+		} else {
+			s.blocklists = manager
+			s.applyDNSBlocklists()
+		}
 		if data, err := os.ReadFile(filepath.Join(stateDir, "refresh-settings.json")); err == nil {
 			var saved struct {
 				Enabled         bool  `json:"enabled"`
@@ -180,6 +189,8 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
 	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
 	s.mux.HandleFunc("/v1/dns/check", s.dnsCheck)
+	s.mux.HandleFunc("/v1/dns/blocklists", s.dnsBlocklists)
+	s.mux.HandleFunc("/v1/dns/blocklists/", s.dnsBlocklistItem)
 	s.mux.Handle("/", ui.Handler())
 	if s.supervisor != nil && s.supervisor.Status().Configured {
 		s.syncWatchlist()
@@ -3425,4 +3436,212 @@ func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	s.watchlistMu.Unlock()
 	writeJSON(w, http.StatusOK, status)
+}
+
+
+func (s *Server) applyDNSBlocklists() {
+	if s.dns == nil || s.blocklists == nil {
+		return
+	}
+	snapshot := s.blocklists.Snapshot()
+	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
+}
+
+func (s *Server) dnsBlocklists(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		message := "DNS blocklist state is not configured"
+		if s.blocklistsErr != "" {
+			message = "DNS blocklist state could not be loaded"
+		}
+		writeError(w, http.StatusServiceUnavailable, message)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		writeJSON(w, http.StatusOK, s.blocklists.Snapshot())
+	case http.MethodPost:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var source dnsblocklist.Source
+		if err := decodeStrictJSON(w, r, &source, 32<<10); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid DNS blocklist source")
+			return
+		}
+		saved, err := s.blocklists.SaveSource(source)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.applyDNSBlocklists()
+		s.recordEvent("info", "dns", "blocklist_source_saved", "DNS blocklist source saved")
+		writeJSON(w, http.StatusCreated, map[string]any{"source": saved, "snapshot": s.blocklists.Snapshot()})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) dnsBlocklistItem(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		message := "DNS blocklist state is not configured"
+		if s.blocklistsErr != "" {
+			message = "DNS blocklist state could not be loaded"
+		}
+		writeError(w, http.StatusServiceUnavailable, message)
+		return
+	}
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/dns/blocklists/"), "/")
+	parts := strings.Split(path, "/")
+	if path == "" || len(parts) == 0 || parts[0] == "" {
+		writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+		return
+	}
+	if len(parts) == 1 && parts[0] == "_refresh" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		failures := s.blocklists.RefreshAll(r.Context())
+		s.applyDNSBlocklists()
+		messages := make([]string, 0, len(failures))
+		for _, err := range failures {
+			messages = append(messages, err.Error())
+		}
+		s.recordEvent("info", "dns", "blocklist_refresh_all", "DNS blocklist refresh completed")
+		writeJSON(w, http.StatusOK, map[string]any{"snapshot": s.blocklists.Snapshot(), "failures": messages})
+		return
+	}
+	id := parts[0]
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			if !validLocalReadRequest(r) {
+				writeError(w, http.StatusForbidden, "local request required")
+				return
+			}
+			source, err := s.blocklists.Get(id)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+				return
+			}
+			writeJSON(w, http.StatusOK, source)
+		case http.MethodPut:
+			if !validLocalJSONRequest(r) {
+				writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+				return
+			}
+			var source dnsblocklist.Source
+			if err := decodeStrictJSON(w, r, &source, 32<<10); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid DNS blocklist source")
+				return
+			}
+			source.ID = id
+			saved, err := s.blocklists.SaveSource(source)
+			if err != nil {
+				writeError(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
+			s.applyDNSBlocklists()
+			writeJSON(w, http.StatusOK, map[string]any{"source": saved, "snapshot": s.blocklists.Snapshot()})
+		case http.MethodPatch:
+			if !validLocalJSONRequest(r) {
+				writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+				return
+			}
+			var request struct {
+				Enabled *bool `json:"enabled"`
+			}
+			if err := decodeStrictJSON(w, r, &request, 4096); err != nil || request.Enabled == nil {
+				writeError(w, http.StatusBadRequest, "enabled boolean is required")
+				return
+			}
+			source, err := s.blocklists.SetEnabled(id, *request.Enabled)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+				return
+			}
+			s.applyDNSBlocklists()
+			writeJSON(w, http.StatusOK, map[string]any{"source": source, "snapshot": s.blocklists.Snapshot()})
+		case http.MethodDelete:
+			if !validLocalReadRequest(r) {
+				writeError(w, http.StatusForbidden, "local request required")
+				return
+			}
+			if err := s.blocklists.Delete(id); err != nil {
+				writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+				return
+			}
+			s.applyDNSBlocklists()
+			s.recordEvent("warning", "dns", "blocklist_source_deleted", "DNS blocklist source deleted")
+			writeJSON(w, http.StatusOK, s.blocklists.Snapshot())
+		default:
+			methodNotAllowed(w)
+		}
+		return
+	}
+	if len(parts) != 2 {
+		writeError(w, http.StatusNotFound, "DNS blocklist action not found")
+		return
+	}
+	action := parts[1]
+	if action == "refresh" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		source, err := s.blocklists.Refresh(r.Context(), id)
+		s.applyDNSBlocklists()
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"source": source, "snapshot": s.blocklists.Snapshot(), "error": err.Error()})
+			return
+		}
+		s.recordEvent("info", "dns", "blocklist_source_refreshed", "DNS blocklist source refreshed")
+		writeJSON(w, http.StatusOK, map[string]any{"source": source, "snapshot": s.blocklists.Snapshot()})
+		return
+	}
+	if action == "remove" || action == "restore" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var request struct {
+			Domain string `json:"domain"`
+		}
+		if err := decodeStrictJSON(w, r, &request, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid DNS blocklist domain")
+			return
+		}
+		var err error
+		if action == "remove" {
+			err = s.blocklists.RemoveEntry(id, request.Domain)
+		} else {
+			err = s.blocklists.RestoreEntry(id, request.Domain)
+		}
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.applyDNSBlocklists()
+		s.recordEvent("info", "dns", "blocklist_entry_updated", "DNS blocklist entry updated")
+		writeJSON(w, http.StatusOK, s.blocklists.Snapshot())
+		return
+	}
+	writeError(w, http.StatusNotFound, "DNS blocklist action not found")
 }

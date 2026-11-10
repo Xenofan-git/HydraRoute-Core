@@ -78,6 +78,8 @@ type Manager struct {
 	running                                         bool
 	total, blocked, success, errors, latency, count atomic.Uint64
 	hosts                                           map[string]net.IP
+	blocklistBlocked                                map[string]struct{}
+	blocklistAllowed                                map[string]struct{}
 	client                                          *http.Client
 }
 
@@ -93,7 +95,7 @@ func New(path string) *Manager {
 			return fmt.Errorf("too many DoH redirects")
 		}
 		return nil
-	}}, hosts: map[string]net.IP{}}
+	}}, hosts: map[string]net.IP{}, blocklistBlocked: map[string]struct{}{}, blocklistAllowed: map[string]struct{}{}}
 	m.cfg = DefaultConfig()
 	_ = m.Load()
 	return m
@@ -387,16 +389,80 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 	}
 	_ = w.WriteMsg(reply)
 }
+func (m *Manager) SetBlocklistDomains(blocked, allowed []string) {
+	blockedSet := make(map[string]struct{}, len(blocked))
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, raw := range blocked {
+		if domain := normalizeBlocklistDomain(raw); domain != "" {
+			blockedSet[domain] = struct{}{}
+		}
+	}
+	for _, raw := range allowed {
+		if domain := normalizeBlocklistDomain(raw); domain != "" {
+			allowedSet[domain] = struct{}{}
+		}
+	}
+	m.mu.Lock()
+	m.blocklistBlocked = blockedSet
+	m.blocklistAllowed = allowedSet
+	m.mu.Unlock()
+}
+
 func (m *Manager) blockedHost(host string) bool {
-	c := m.Config()
-	if !c.BlockingEnabled {
+	host = normalizeBlocklistDomain(host)
+	if host == "" {
 		return false
 	}
-	for _, r := range c.Rules {
-		d := strings.TrimPrefix(strings.ToLower(r.Domain), "*.")
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return strings.ToLower(r.Action) != "allow"
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.cfg.BlockingEnabled {
+		return false
+	}
+	// Explicit Core rules retain their existing first-match priority.
+	for _, rule := range m.cfg.Rules {
+		domain := normalizeBlocklistDomain(rule.Domain)
+		if domain != "" && (host == domain || strings.HasSuffix(host, "."+domain)) {
+			return !strings.EqualFold(rule.Action, "allow")
 		}
+	}
+	// HRweb checks allow exceptions before applying the block source result.
+	if matchesBlocklistDomain(host, m.blocklistAllowed) {
+		return false
+	}
+	return matchesBlocklistDomain(host, m.blocklistBlocked)
+}
+
+func normalizeBlocklistDomain(raw string) string {
+	domain := strings.ToLower(strings.TrimSpace(raw))
+	domain = strings.TrimPrefix(domain, "*.")
+	domain = strings.TrimPrefix(domain, ".")
+	domain = strings.TrimSuffix(domain, ".")
+	if domain == "" || len(domain) > 253 || net.ParseIP(domain) != nil || strings.ContainsAny(domain, "/\\ \t\r\n") {
+		return ""
+	}
+	for _, label := range strings.Split(domain, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return ""
+		}
+		for _, r := range label {
+			if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+				return ""
+			}
+		}
+	}
+	return domain
+}
+
+func matchesBlocklistDomain(host string, domains map[string]struct{}) bool {
+	for candidate := host; candidate != ""; {
+		if _, ok := domains[candidate]; ok {
+			return true
+		}
+		separator := strings.IndexByte(candidate, '.')
+		if separator < 0 {
+			break
+		}
+		candidate = candidate[separator+1:]
 	}
 	return false
 }

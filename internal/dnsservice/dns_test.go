@@ -327,3 +327,37 @@ func TestDo53RetriesOverTCPWhenUDPResponseIsTruncated(t *testing.T) {
 		t.Fatalf("expected one UDP then one TCP request, got UDP=%d TCP=%d", udpCount.Load(), tcpCount.Load())
 	}
 }
+
+
+func TestBlocklistDomainSetsMatchSubdomainsAndAllowExceptions(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true}}
+	m.SetBlocklistDomains([]string{"Ads.Example.com."}, []string{"safe.ads.example.com"})
+	if !m.blockedHost("tracker.ads.example.com") {
+		t.Fatal("blocklist parent domain did not match subdomain")
+	}
+	if m.blockedHost("safe.ads.example.com") || m.blockedHost("child.safe.ads.example.com") {
+		t.Fatal("allow exception did not override matching blocklist domain")
+	}
+}
+
+func TestExplicitDNSRulesOverrideBlocklistDomainSets(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true, Rules: []Rule{
+		{Domain: "ads.example.com", Action: "allow"},
+		{Domain: "safe.example.com", Action: "block"},
+	}}}
+	m.SetBlocklistDomains([]string{"ads.example.com", "safe.example.com"}, []string{"safe.example.com"})
+	if m.blockedHost("ads.example.com") {
+		t.Fatal("explicit allow rule did not override blocklist")
+	}
+	if !m.blockedHost("safe.example.com") {
+		t.Fatal("explicit block rule did not override allow exception")
+	}
+}
+
+func TestBlocklistDomainSetsRespectBlockingEnabled(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: false}}
+	m.SetBlocklistDomains([]string{"ads.example.com"}, nil)
+	if m.blockedHost("ads.example.com") {
+		t.Fatal("blocklist should be inactive when blocking is disabled")
+	}
+}
