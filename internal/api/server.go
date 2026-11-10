@@ -1191,6 +1191,21 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "cannot read profile metadata")
 			return
 		}
+		fullProfiles, err := s.profileStore.ListProfiles()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot read profile settings")
+			return
+		}
+		byID := make(map[string]profiles.Profile, len(fullProfiles))
+		for _, profile := range fullProfiles {
+			byID[profile.ID] = profile
+		}
+		for i := range items {
+			if profile, ok := byID[items[i].ID]; ok {
+				preview, previewErr := service.PreviewProfileCached(r.Context(), profile, s.stateDir)
+				items[i].MuxCompatible = previewErr == nil && preview.MuxCompatible
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"profiles": items})
 	case http.MethodPost:
 		if !validLocalJSONRequest(r) {
@@ -1227,6 +1242,7 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 			Port               *uint16             `json:"port,omitempty"`
 			Strategy           *string             `json:"strategy,omitempty"`
 			OutboundInterface  *string             `json:"outbound_interface,omitempty"`
+			MuxEnabled         *bool               `json:"mux_enabled,omitempty"`
 			DPIBypass          *profiles.DPIBypass `json:"dpi_bypass,omitempty"`
 			FilterKeep         *string             `json:"filter_keep,omitempty"`
 			FilterExclude      *string             `json:"filter_exclude,omitempty"`
@@ -1257,6 +1273,9 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.OutboundInterface != nil {
 			p.OutboundInterface = strings.TrimSpace(*req.OutboundInterface)
+		}
+		if req.MuxEnabled != nil {
+			p.MuxEnabled = *req.MuxEnabled
 		}
 		if err := validateOutboundInterface(p.OutboundInterface); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
@@ -1362,7 +1381,7 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 		case s.refreshWake <- struct{}{}:
 		default:
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "profile_id": p.ID, "enabled": p.Enabled, "port": p.Port, "strategy": p.Strategy, "outbound_interface": p.OutboundInterface, "dpi_bypass": p.DPIBypass, "runtime": s.supervisor.Status()})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "updated", "profile_id": p.ID, "enabled": p.Enabled, "port": p.Port, "strategy": p.Strategy, "outbound_interface": p.OutboundInterface, "mux_enabled": p.MuxEnabled, "dpi_bypass": p.DPIBypass, "runtime": s.supervisor.Status()})
 	case http.MethodDelete:
 		if !validLocalJSONRequest(r) {
 			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
@@ -2353,7 +2372,7 @@ func (s *Server) refreshProfilesModeWithFallbacks(ctx context.Context, forceFetc
 			}
 			subscription = p.CachedSubscription
 		}
-		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: compiler.DPIBypass{NoiseTraffic: p.DPIBypass.NoiseTraffic, TLSFragmentation: p.DPIBypass.TLSFragmentation, RandomTLSFingerprint: p.DPIBypass.RandomTLSFingerprint}, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval, Fallback: fallbacks[p.ID]}, Links: p.Links, Subscription: subscription, SubscriptionURL: ""})
+		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, MuxEnabled: p.MuxEnabled, DPIBypass: compiler.DPIBypass{NoiseTraffic: p.DPIBypass.NoiseTraffic, TLSFragmentation: p.DPIBypass.TLSFragmentation, RandomTLSFingerprint: p.DPIBypass.RandomTLSFingerprint}, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval, Fallback: fallbacks[p.ID]}, Links: p.Links, Subscription: subscription, SubscriptionURL: ""})
 	}
 	var routing *compiler.RoutingConfig
 	if s.routingStore != nil {
