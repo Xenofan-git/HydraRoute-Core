@@ -41,24 +41,24 @@ type RuntimeConfig struct {
 }
 
 type RuntimeStatus struct {
-	Enabled       bool      `json:"enabled"`
-	Running       bool      `json:"running"`
-	PID           int       `json:"pid,omitempty"`
-	Generation    string    `json:"generation,omitempty"`
-	LastStarted   time.Time `json:"last_started,omitempty"`
-	LastError     string    `json:"last_error,omitempty"`
-	ConfigPath    string    `json:"config_path,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	Running     bool      `json:"running"`
+	PID         int       `json:"pid,omitempty"`
+	Generation  string    `json:"generation,omitempty"`
+	LastStarted time.Time `json:"last_started,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
+	ConfigPath  string    `json:"config_path,omitempty"`
 }
 
 type Runtime struct {
-	mu        sync.Mutex
-	cfg       RuntimeConfig
-	launcher  Launcher
-	probe     Probe
-	process   Process
-	waitDone  chan error
-	current   string
-	status    RuntimeStatus
+	mu       sync.Mutex
+	cfg      RuntimeConfig
+	launcher Launcher
+	probe    Probe
+	process  Process
+	waitDone chan error
+	current  string
+	status   RuntimeStatus
 }
 
 func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
