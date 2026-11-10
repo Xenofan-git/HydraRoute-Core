@@ -8,6 +8,12 @@ on:
       - 'third_party/smartdns/**'
       - 'tests/integration/smartdns_profile_pinned_socks.py'
       - '.github/workflows/smartdns.yml'
+  pull_request:
+    paths:
+      - 'internal/dnsservice/smartdns/**'
+      - 'third_party/smartdns/**'
+      - 'tests/integration/smartdns_profile_pinned_socks.py'
+      - '.github/workflows/smartdns.yml'
 
 permissions:
   contents: read
@@ -135,7 +141,9 @@ jobs:
       - name: Verify managed SmartDNS start, readiness and stop
         env:
           SMARTDNS_BINARY: ${{ runner.temp }}/smartdns/smartdns
-        run: go test -count=1 -v -run '^TestRuntimeWithSmartDNSBinary
+        run: go test -count=1 -v -run '^TestRuntimeWithSmartDNSBinary        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns/smartdns
+        run: python3 tests/integration/smartdns_profile_pinned_socks.py
 
   sandbox-arm64:
     name: Verify ARM64 profile-pinned SOCKS, TLS and fail-closed isolation under QEMU
@@ -194,10 +202,18 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Verify managed ARM64 SmartDNS start, readiness and stop
+      - name: Verify managed SmartDNS start, readiness and stop
         env:
           SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns
-        run: go test -count=1 -v -run '^TestRuntimeWithSmartDNSBinary
+        run: go test -count=1 -v -run '^TestRuntimeWithSmartDNSBinary        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns
+          SMARTDNS_DNS_TIMEOUT: "8"
+          SMARTDNS_STARTUP_TIMEOUT: "30"
+          SMARTDNS_NO_STRACE: "0"
+          QEMU_STRACE: "1"
+          QEMU_LOG: "guest_errors,unimp"
+          QEMU_LOG_FILENAME: ${{ runner.temp }}/smartdns-arm64/qemu.debug
+        run: python3 tests/integration/smartdns_profile_pinned_socks.py
 
       - name: Upload ARM64 QEMU runtime diagnostics
         if: always()
