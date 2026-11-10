@@ -177,10 +177,17 @@ jobs:
           EOF
           chmod +x "$RUNNER_TEMP/smartdns-arm64/smartdns-qemu"
           qemu-aarch64-static --version
+          readelf -l "$RUNNER_TEMP/smartdns-arm64/smartdns" | grep -F 'Requesting program interpreter' || true
+          ls -l /lib/ld-linux-aarch64.so.1 /lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 /usr/lib/aarch64-linux-gnu/libssl.so.3 2>&1 || true
+          set +e
+          qemu-aarch64-static -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" -v
+          echo "QEMU SmartDNS version preflight rc=$?"
+          set -e
 
       - name: Verify ARM64 SmartDNS isolation under QEMU
         env:
           SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns-qemu
           SMARTDNS_DNS_TIMEOUT: "8"
           SMARTDNS_STARTUP_TIMEOUT: "30"
+          SMARTDNS_NO_STRACE: "1"
         run: python3 tests/integration/smartdns_profile_pinned_socks.py
