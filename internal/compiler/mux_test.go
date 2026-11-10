@@ -18,7 +18,7 @@ func TestProfileSupportsMuxRejectsXTLSRPRX(t *testing.T) {
 func TestProfileSupportsMuxUsesSelectedPool(t *testing.T) {
 	p := Profile{
 		ManualSelection: true,
-		Picked: []string{"safe"},
+		Picked:          []string{"safe"},
 		Nodes: []Node{
 			{Key: "safe", Outbound: json.RawMessage(`{"protocol":"vmess","settings":{}}`)},
 			{Key: "vision", Outbound: json.RawMessage(`{"protocol":"vless","settings":{"vnext":[{"users":[{"flow":"xtls-rprx-vision"}]}]}}`)},
@@ -50,9 +50,9 @@ func TestProfileSupportsMuxRequiresSelectedNode(t *testing.T) {
 
 func TestCompileAppliesMuxOnlyForCompatibleProfilePool(t *testing.T) {
 	cases := []struct {
-		name       string
-		outbound   string
-		wantMux    bool
+		name     string
+		outbound string
+		wantMux  bool
 	}{
 		{name: "compatible", outbound: `{"protocol":"vmess","settings":{}}`, wantMux: true},
 		{name: "xtls flow", outbound: `{"protocol":"vless","settings":{"vnext":[{"users":[{"flow":"xtls-rprx-vision"}]}]}}`, wantMux: false},
@@ -62,7 +62,7 @@ func TestCompileAppliesMuxOnlyForCompatibleProfilePool(t *testing.T) {
 			raw, err := Compile(CompileRequest{Profiles: []Profile{{
 				ID: "mux-test", Enabled: true, Port: 16091, Strategy: "leastPing",
 				MuxEnabled: true,
-				Nodes: []Node{{Key: "node-1", Outbound: json.RawMessage(tc.outbound)}},
+				Nodes:      []Node{{Key: "node-1", Outbound: json.RawMessage(tc.outbound)}},
 			}}})
 			if err != nil {
 				t.Fatalf("Compile() error = %v", err)
