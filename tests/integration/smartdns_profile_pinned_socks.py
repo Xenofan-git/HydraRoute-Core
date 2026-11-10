@@ -387,6 +387,8 @@ def cleanup() -> None:
 
 def main() -> None:
     global SMARTDNS_PROCESS, LOG_FILE
+    print(f"SmartDNS executable: {SMARTDNS}")
+    print(f"SmartDNS sandbox root: {ROOT}")
     allocate_test_ports()
     create_test_ca()
     start_doh_servers()
