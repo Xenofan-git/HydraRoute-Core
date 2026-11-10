@@ -57,7 +57,7 @@ type Metadata struct {
 	Strategy               string    `json:"strategy,omitempty"`
 	OutboundInterface      string    `json:"outbound_interface,omitempty"`
 	MuxEnabled             bool      `json:"mux_enabled,omitempty"`
-	MuxCompatible           bool      `json:"mux_compatible"`
+	MuxCompatible          bool      `json:"mux_compatible"`
 	DPIBypass              DPIBypass `json:"dpi_bypass,omitempty"`
 	FilterKeep             string    `json:"filter_keep,omitempty"`
 	FilterExclude          string    `json:"filter_exclude,omitempty"`
