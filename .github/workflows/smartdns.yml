@@ -189,5 +189,5 @@ jobs:
           SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns-qemu
           SMARTDNS_DNS_TIMEOUT: "8"
           SMARTDNS_STARTUP_TIMEOUT: "30"
-          SMARTDNS_NO_STRACE: "1"
+          SMARTDNS_NO_STRACE: "0"
         run: python3 tests/integration/smartdns_profile_pinned_socks.py
