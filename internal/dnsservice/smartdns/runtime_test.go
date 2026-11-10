@@ -18,6 +18,14 @@ type fakeProcess struct {
 
 func newFakeProcess() *fakeProcess { return &fakeProcess{wait: make(chan error, 1)} }
 func (p *fakeProcess) Wait() error { return <-p.wait }
+func (p *fakeProcess) exit(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.stopped {
+		p.stopped = true
+		p.wait <- err
+	}
+}
 func (p *fakeProcess) Stop(context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -124,6 +132,32 @@ func TestRuntimeApplyRollsBackToPreviousGenerationWhenCandidateFails(t *testing.
 	}
 	if len(launcher.processes) != 2 {
 		t.Fatalf("expected candidate failure and previous generation restart, got %d successful launches", len(launcher.processes))
+	}
+}
+
+func TestRuntimeStatusDetectsUnexpectedProcessExit(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeLauncher{}
+	r.setTestHooks(launcher, func(context.Context, string) error { return nil })
+	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
+	if err := r.Apply(context.Background(), cfg, []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	launcher.processes[0].exit(fmt.Errorf("simulated crash"))
+	deadline := time.Now().Add(time.Second)
+	for r.Status().Running && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	status := r.Status()
+	if status.Running || status.LastError == "" {
+		t.Fatalf("unexpected process exit was not reflected in status: %+v", status)
 	}
 }
 
