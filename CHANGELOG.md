@@ -164,3 +164,10 @@
 - Added a typed SmartDNS Release48.4 config compiler with per-profile SOCKS5 proxy/group isolation, DoH/DoT bootstrap and TLS identity validation, exact/suffix rules, deterministic block/allow/route domain-set files, and fail-closed default behavior.
 - Added an upstream patch to suppress NETLINK_ROUTE neighbor-cache setup when MAC client rules are absent; compiler disables local-PTR, mDNS and system resolv-file loading.
 - D1 compiler unit tests pass. Sidecar lifecycle, patched build, sandbox runtime and data-plane tests remain pending; the earlier unpatched ARM64 binary is not a release artifact.
+
+
+## 2026-11-10 — HRweb Mux defaults corrected from ARM64 disassembly
+- Static disassembly of the original HRweb 1.68.0-1 binary at `main.applyMuxToConfig` confirms `concurrency=8`, `xudpConcurrency=1`, and `xudpProxyUDP443="reject"`.
+- Corrected Core's prior `xudpConcurrency=8` mismatch to `1` and updated the Mux regression assertion.
+- Evidence and address/value mapping: `research/2026-11-10-HRWEB-MUX-CONFIG-DISASSEMBLY.md`.
+- No live HRNeo or NanoPi runtime settings were changed. Awaiting CI for the updated PR #6 head.
