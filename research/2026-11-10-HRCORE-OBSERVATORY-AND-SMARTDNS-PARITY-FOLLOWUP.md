@@ -28,6 +28,8 @@ Commits:
 - `9526a6ae8b24fd61736fd46e4e7a5d034fcb7824` — restrict fallback candidates to the active URI family.
 - `eb91465ca3be864764a5b14d0e186dd88662198e` — replace the old global-pool test with URI-family tests; add no-widening and missing-reference cases.
 - `98981d499552161f5e11d99b938003b804ad5577` — fix declaration ordering after the behavior change.
+- `04712ee4bb4991d2392870070029937959bf220f` — real Xray random-strategy distribution test (30 connections across three healthy upstreams).
+- `7b6f4a7792f72a6edf6f8b8edc8eb5d85c76879b` — record the random runtime result and remaining lifecycle gaps.
 
 Current intended sequence:
 - Retain the previous runtime candidate only if it remains selected, alive, URI-compatible, and belongs to the active reference family.
