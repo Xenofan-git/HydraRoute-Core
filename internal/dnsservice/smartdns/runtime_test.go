@@ -29,9 +29,9 @@ func (p *fakeProcess) Stop(context.Context) error {
 }
 
 type fakeLauncher struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	processes []*fakeProcess
-	failNext bool
+	failNext  bool
 }
 
 func (l *fakeLauncher) Start(context.Context, string, string) (Process, error) {
