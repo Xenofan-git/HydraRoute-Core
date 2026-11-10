@@ -34,7 +34,7 @@ func TestSubscriptionRefreshReplacesPoolAndPreservesProfileEndpoint(t *testing.T
 	}, "\n")
 	profile := profiles.Profile{
 		ID: "subscription", SourceID: "providerA", Enabled: true, Port: 16311,
-		SubscriptionURL: "https://provider.example/subscription",
+		SubscriptionURL:    "https://provider.example/subscription",
 		CachedSubscription: oldSubscription, LastSubscriptionUpdate: 100,
 	}
 	if err := h.profileStore.Save(profile); err != nil {
