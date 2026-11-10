@@ -63,9 +63,9 @@ func hasXTLSRPRXFlowValue(value any) bool {
 // until a live original config confirms a different value.
 func applyMux(outbound map[string]any) {
 	outbound["mux"] = map[string]any{
-		"enabled":          true,
-		"concurrency":      8,
-		"xudpConcurrency":  8,
-		"xudpProxyUDP443":  "reject",
+		"enabled":         true,
+		"concurrency":     8,
+		"xudpConcurrency": 8,
+		"xudpProxyUDP443": "reject",
 	}
 }
