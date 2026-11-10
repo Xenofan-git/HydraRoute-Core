@@ -62,7 +62,7 @@ The config test returned `Configuration OK`. In addition, a complete config gene
 
 ## Functional end-to-end validation
 
-Added reusable loopback-only test script: `tests/integration/l7_proxy_sniffing.py`. It starts a temporary Xray process and a local TCP target, then sends SOCKS5 connections addressed to an IP while varying only the HTTP Host or TLS SNI. The routing rule blocks `blocked.example` and leaves `allowed.example` on the direct outbound.
+Added reusable loopback-only tests: `tests/integration/l7_proxy_sniffing.py` (stdlib-only HTTP/TLS) and `tests/integration/l7_quic_sni.py` (aioquic 1.7.2; pinned in `tests/integration/requirements-quic.txt`). They start a temporary Xray process and local targets, then send SOCKS5 connections addressed to IPs while varying HTTP Host, TLS SNI or QUIC SNI. The routing rule blocks `blocked.example` and leaves `allowed.example` on the direct outbound.
 
 Results:
 - VPS Xray 26.10.31 AMD64: `L7_PROXY_SNIFFING_E2E_OK`.
@@ -82,7 +82,7 @@ The test binds only 127.0.0.1 on ephemeral ports and terminates its temporary Xr
 
 ## Functional limitation
 
-This is not full HRNeo NFLOG parity. It can inspect HTTP/TLS/QUIC metadata only when the client uses a Core SOCKS5 inbound. It does not capture direct LAN/VPN traffic, local process OUTPUT traffic, DoH/DoT/DoQ contents, or ECH-protected inner names. QUIC packet parsing has not yet been verified with a real QUIC client. It does not MITM TLS. Xray's own sniffing/reassembly implementation replaces HRNeo's custom NFLOG/TCP/QUIC packet reassembly only within the proxy ingress boundary.
+This is not full HRNeo NFLOG parity. It can inspect HTTP/TLS/QUIC metadata only when the client uses a Core SOCKS5 inbound. It does not capture direct LAN/VPN traffic, local process OUTPUT traffic, DoH/DoT/DoQ contents, or ECH-protected inner names. QUIC packet parsing has been verified with aioquic on VPS Xray 26.10.31 AMD64; repeat the packet-level test on NanoPi ARM64 when the temporary aioquic test dependency can be supplied without installing system packages. It does not MITM TLS. Xray's own sniffing/reassembly implementation replaces HRNeo's custom NFLOG/TCP/QUIC packet reassembly only within the proxy ingress boundary.
 
 ## Safety
 

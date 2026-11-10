@@ -1,8 +1,11 @@
 package dnsservice
 
 import (
+	"net"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfigUsesSafeLoopbackAndKnownResolvers(t *testing.T) {
@@ -71,4 +74,89 @@ func TestDefaultConfigHasSafeLocalDNSListener(t *testing.T) {
 	if c.Listen != "127.0.0.1" || c.Port != 5353 {
 		t.Fatalf("unexpected DNS bind: %s:%d", c.Listen, c.Port)
 	}
+}
+
+func freeDNSPort(t *testing.T) int {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := pc.LocalAddr().(*net.UDPAddr).Port
+	_ = pc.Close()
+	ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ln.Close()
+	return port
+}
+
+func TestStopClosesUDPAndTCPListenersAndAllowsRestart(t *testing.T) {
+	m := New(filepath.Join(t.TempDir(), "dns", "config.json"))
+	cfg := m.Config()
+	cfg.Port = freeDNSPort(t)
+	if err := m.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := m.Start(); err != nil {
+			t.Fatalf("start %d: %v", i, err)
+		}
+		if !m.Status()["running"].(bool) {
+			t.Fatalf("service did not report running on start %d", i)
+		}
+		if err := m.Stop(); err != nil {
+			t.Fatalf("stop %d: %v", i, err)
+		}
+		if m.Status()["running"].(bool) {
+			t.Fatalf("service still reports running after stop %d", i)
+		}
+		udp, err := net.ListenPacket("udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+		if err != nil {
+			t.Fatalf("UDP listener leaked after stop %d: %v", i, err)
+		}
+		_ = udp.Close()
+		tcp, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+		if err != nil {
+			t.Fatalf("TCP listener leaked after stop %d: %v", i, err)
+		}
+		_ = tcp.Close()
+	}
+}
+
+func TestUDPServeFailureStopsTCPListener(t *testing.T) {
+	m := New(filepath.Join(t.TempDir(), "dns", "config.json"))
+	cfg := m.Config()
+	cfg.Port = freeDNSPort(t)
+	if err := m.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.RLock()
+	pc := m.udp.PacketConn
+	m.mu.RUnlock()
+	if err := pc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !m.Status()["running"].(bool) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if m.Status()["running"].(bool) {
+		t.Fatal("service remained running after UDP listener failure")
+	}
+	if err := m.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	tcp, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if err != nil {
+		t.Fatalf("TCP listener leaked after UDP failure: %v", err)
+	}
+	_ = tcp.Close()
 }

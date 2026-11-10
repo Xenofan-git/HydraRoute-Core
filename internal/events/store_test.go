@@ -1,0 +1,87 @@
+package events
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestAppendPersistsAndReloadsPrivateJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events", "events.json")
+	s := New(path)
+	got, err := s.Append("info", "runtime", "started", "Xray process started")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != 1 {
+		t.Fatalf("event ID=%d", got.ID)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("journal mode=%o", info.Mode().Perm())
+	}
+	reloaded := New(path)
+	items := reloaded.List(10, 0)
+	if len(items) != 1 || items[0].Message != "Xray process started" {
+		t.Fatalf("reloaded events=%+v", items)
+	}
+	second, err := reloaded.Append("warning", "dns", "stopped", "Resolver stopped")
+	if err != nil || second.ID != 2 {
+		t.Fatalf("second event=%+v err=%v", second, err)
+	}
+}
+
+func TestJournalBoundsEntriesAndSanitizesMessages(t *testing.T) {
+	s := New("")
+	for i := 0; i < maxEvents+5; i++ {
+		if _, err := s.Append("info", "test", "tick", fmt.Sprintf("event %d\nsecret", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items := s.List(maxEvents, 0)
+	if len(items) != maxEvents || items[0].ID != 6 || items[len(items)-1].ID != 505 {
+		t.Fatalf("unexpected retained range: len=%d first=%d last=%d", len(items), items[0].ID, items[len(items)-1].ID)
+	}
+	if items[0].Message != "event 5 secret" {
+		t.Fatalf("message not sanitized: %q", items[0].Message)
+	}
+}
+
+func TestSubscribersReceiveEventsAndCanCancel(t *testing.T) {
+	s := New("")
+	ch, cancel := s.Subscribe()
+	if _, err := s.Append("error", "runtime", "exit", "Xray exited"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-ch:
+		if event.Type != "exit" {
+			t.Fatalf("event=%+v", event)
+		}
+	default:
+		t.Fatal("subscriber did not receive event")
+	}
+	cancel()
+	if _, err := s.Append("info", "runtime", "restart", "Xray restarted"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClearRemovesEventsButKeepsMonotonicIDs(t *testing.T) {
+	s := New("")
+	first, _ := s.Append("info", "api", "ready", "API ready")
+	if err := s.Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.List(10, 0)) != 0 {
+		t.Fatal("events were not cleared")
+	}
+	second, err := s.Append("info", "api", "ready", "API ready again")
+	if err != nil || second.ID != first.ID+1 {
+		t.Fatalf("IDs not monotonic: first=%d second=%d err=%v", first.ID, second.ID, err)
+	}
+}

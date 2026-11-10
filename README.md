@@ -178,3 +178,16 @@ No license has been added yet. Until a license is published, the source is not g
 ### Dashboard browser tests
 
 The CI test job runs Playwright against the embedded dashboard assets with a local API fixture. It exercises the subscription manager, streamed echo/proxy ping events, offline exclusion, keyword filtering without losing manual picks, per-profile auto-refresh settings, and empty manual-pool handling. The browser is Chromium headless; the test fixture does not start Xray or modify host networking.
+
+## Operations: Health Monitor and event journal
+
+HydraRoute Core exposes a read-only local Health Monitor and a structured event journal:
+
+- `GET /v1/health/monitor` — latest component health and local system metrics.
+- `POST /v1/health/check` — run an immediate health check.
+- `GET /v1/health/settings`, `PUT /v1/health/settings` — configure interval, timeout, failure and recovery thresholds.
+- `GET /v1/events?limit=100&after_id=0` — read the bounded event history.
+- `GET /v1/events/stream?after_id=0` — receive structured events over Server-Sent Events.
+- `DELETE /v1/events` — clear the local event history.
+
+The journal retains at most 500 records and is stored in the private Core state directory. Event messages deliberately exclude subscription URLs, credentials, raw request bodies and generated configuration contents. Health checks inspect only Core-owned services, GeoIP/GeoSite readiness, Watchlist state, and read-only local disk/memory metrics. They do not change host routes, firewall rules, interfaces, or system DNS.

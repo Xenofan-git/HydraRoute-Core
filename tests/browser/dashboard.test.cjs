@@ -15,6 +15,9 @@ let savedRouting;
 let savedRefresh;
 let savedObservatorySettings = { probe_interval_seconds: 30 };
 let savedL7Settings = { enabled: false, http: true, tls: true, quic: true };
+let savedHealthSettings = { enabled: true, interval_seconds: 30, timeout_seconds: 4, fail_threshold: 2, recover_threshold: 2 };
+let healthSnapshot = { status: 'healthy', checked_at: new Date().toISOString(), checks: [{ name: 'api', state: 'healthy', message: 'Local API is responding' }], metrics: {} };
+let eventItems = [{ id: 1, time: new Date().toISOString(), level: 'info', component: 'api', type: 'started', message: 'HydraRoute Core API started' }];
 
 const profiles = [{
   id: 'foreign', source_id: 'providerA', enabled: true,
@@ -71,6 +74,12 @@ before(async () => {
     try {
       if (url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
       if (url.pathname === '/v1/runtime') return json(res, 200, { running: false, configured: false });
+      if (url.pathname === '/v1/health/monitor' && req.method === 'GET') return json(res, 200, healthSnapshot);
+      if (url.pathname === '/v1/health/check' && req.method === 'POST') return json(res, 200, healthSnapshot);
+      if (url.pathname === '/v1/health/settings' && req.method === 'GET') return json(res, 200, savedHealthSettings);
+      if (url.pathname === '/v1/health/settings' && req.method === 'PUT') { savedHealthSettings = await readBody(req); return json(res, 200, savedHealthSettings); }
+      if (url.pathname === '/v1/events' && req.method === 'GET') return json(res, 200, { events: eventItems.slice(-Number(url.searchParams.get('limit') || 50)) });
+      if (url.pathname === '/v1/events' && req.method === 'DELETE') { eventItems = []; return json(res, 200, { status: 'cleared' }); }
       if (url.pathname === '/v1/profiles' && req.method === 'GET') return json(res, 200, { profiles });
       if (url.pathname === '/v1/profiles' && req.method === 'PUT') {
         const update = await readBody(req);
@@ -352,4 +361,25 @@ test('connection settings persist independently per profile: DPI, balancing and 
     assert.equal(profiles[0].outbound_interface, 'wg0');
     assert.equal(profiles[1].outbound_interface, '');
   } finally { await page.close(); }
+});
+
+test('Health Monitor settings persist and event journal is visible', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('[data-page="settings"]').click();
+    await page.getByRole('heading', { name: 'Health Monitor' }).first().waitFor();
+    await page.locator('#healthInterval').fill('45');
+    await page.locator('#healthTimeout').fill('3');
+    await page.locator('#healthFailThreshold').fill('3');
+    await page.locator('#healthRecoverThreshold').fill('2');
+    await page.locator('#saveHealthSettings').click();
+    await page.getByText('Настройки Health Monitor сохранены').waitFor();
+    assert.deepEqual(savedHealthSettings, { enabled: true, interval_seconds: 45, timeout_seconds: 3, fail_threshold: 3, recover_threshold: 2 });
+    await page.getByRole('heading', { name: 'Журнал событий' }).waitFor();
+    await page.getByText('HydraRoute Core API started').waitFor();
+  } finally {
+    await page.close();
+  }
 });

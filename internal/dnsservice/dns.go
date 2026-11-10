@@ -72,6 +72,8 @@ type Manager struct {
 	path                                            string
 	cfg                                             Config
 	udp, tcp                                        *mdns.Server
+	serveDone                                       chan struct{}
+	generation                                      uint64
 	running                                         bool
 	total, blocked, success, errors, latency, count atomic.Uint64
 	hosts                                           map[string]net.IP
@@ -197,9 +199,9 @@ func (m *Manager) Stats() Stats {
 }
 func (m *Manager) Start() error {
 	m.mu.Lock()
-	if m.running {
+	if m.running || m.udp != nil || m.tcp != nil {
 		m.mu.Unlock()
-		return fmt.Errorf("DNS service already running")
+		return fmt.Errorf("DNS service already running or shutting down")
 	}
 	addr := net.JoinHostPort(m.cfg.Listen, fmt.Sprint(m.cfg.Port))
 	mux := mdns.NewServeMux()
@@ -217,35 +219,100 @@ func (m *Manager) Start() error {
 	}
 	u := &mdns.Server{PacketConn: pc, Handler: mux}
 	t := &mdns.Server{Listener: ln, Handler: mux}
-	m.udp = u
-	m.tcp = t
+	m.generation++
+	generation := m.generation
+	done := make(chan struct{})
+	m.udp, m.tcp, m.serveDone = u, t, done
 	m.running = true
-	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	startErr := make(chan error, 2)
+	launch := func(server *mdns.Server, peer *mdns.Server) {
+		ready := make(chan struct{})
+		var readyOnce sync.Once
+		server.NotifyStartedFunc = func() { readyOnce.Do(func() { close(ready) }) }
+		go func() {
+			defer wg.Done()
+			err := server.ActivateAndServe()
+			if err != nil {
+				startErr <- err
+			}
+			readyOnce.Do(func() { close(ready) })
+			if err != nil {
+				m.stopAfterServeFailure(generation, peer)
+			}
+		}()
+		<-ready
+	}
+	launch(u, t)
+	launch(t, u)
 	go func() {
-		if err := u.ActivateAndServe(); err != nil {
-			m.mu.Lock()
-			m.running = false
-			m.mu.Unlock()
-		}
+		wg.Wait()
+		close(done)
 	}()
-	go func() { _ = t.ActivateAndServe() }()
+	select {
+	case err := <-startErr:
+		m.mu.Unlock()
+		_ = m.Stop()
+		return fmt.Errorf("DNS server failed during startup: %w", err)
+	default:
+	}
+	m.mu.Unlock()
 	return nil
 }
+
+func (m *Manager) stopAfterServeFailure(generation uint64, peer *mdns.Server) {
+	m.mu.Lock()
+	if m.generation == generation {
+		m.running = false
+	}
+	m.mu.Unlock()
+	if err := peer.Shutdown(); err != nil {
+		if peer.PacketConn != nil {
+			_ = peer.PacketConn.Close()
+		}
+		if peer.Listener != nil {
+			_ = peer.Listener.Close()
+		}
+	}
+}
+
 func (m *Manager) Stop() error {
 	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return nil
-	}
-	u, t := m.udp, m.tcp
+	u, t, done := m.udp, m.tcp, m.serveDone
 	m.running = false
 	m.mu.Unlock()
-	a := u.Shutdown()
-	b := t.Shutdown()
-	if a != nil {
-		return a
+	var first error
+	if u != nil {
+		if err := u.Shutdown(); err != nil {
+			if u.PacketConn != nil {
+				_ = u.PacketConn.Close()
+			}
+			if !strings.Contains(err.Error(), "server not started") {
+				first = err
+			}
+		}
 	}
-	return b
+	if t != nil {
+		if err := t.Shutdown(); err != nil {
+			if t.Listener != nil {
+				_ = t.Listener.Close()
+			}
+			if !strings.Contains(err.Error(), "server not started") && first == nil {
+				first = err
+			}
+		}
+	}
+	if done != nil {
+		<-done
+	}
+	m.mu.Lock()
+	if m.serveDone == done {
+		m.udp, m.tcp, m.serveDone = nil, nil, nil
+	}
+	m.mu.Unlock()
+	return first
 }
 func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 	start := time.Now()

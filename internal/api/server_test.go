@@ -1350,3 +1350,100 @@ func TestRoutingPublishesCoreOwnedWatchlistSocketAndStatus(t *testing.T) {
 		t.Fatalf("watchlist socket remains after routing disabled: %v", err)
 	}
 }
+
+func TestEventJournalAPIListsClearsAndStreamsStructuredEvents(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	h.recordEvent("info", "runtime", "started", "Xray process started")
+
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/events?limit=10"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"type":"started"`) {
+		t.Fatalf("list status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	streamReq := localGet("/v1/events/stream?after_id=0")
+	streamReq = streamReq.WithContext(ctx)
+	streamRR := httptest.NewRecorder()
+	finished := make(chan struct{})
+	go func() {
+		h.mux.ServeHTTP(streamRR, streamReq)
+		close(finished)
+	}()
+	deadline := time.After(2 * time.Second)
+	for !strings.Contains(streamRR.Body.String(), "event: message") {
+		select {
+		case <-deadline:
+			cancel()
+			<-finished
+			t.Fatalf("stream did not emit initial event: %s", streamRR.Body.String())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("event stream did not stop after request cancellation")
+	}
+	if !strings.Contains(streamRR.Body.String(), `"message":"Xray process started"`) {
+		t.Fatalf("stream body=%s", streamRR.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/events", nil)
+	deleteReq.Host = "127.0.0.1:17890"
+	deleteReq.RemoteAddr = "127.0.0.1:12345"
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteRR := httptest.NewRecorder()
+	h.mux.ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusOK {
+		t.Fatalf("clear status=%d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/events"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"events":[]`) {
+		t.Fatalf("after clear status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHealthMonitorStatusAndSettingsPersist(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/health/monitor"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"checked_at"`) || !strings.Contains(rr.Body.String(), `"checks"`) {
+		t.Fatalf("monitor status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	settings := `{"enabled":true,"interval_seconds":45,"timeout_seconds":3,"fail_threshold":3,"recover_threshold":2}`
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/health/settings", settings))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("settings save=%d body=%s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(filepath.Join(dir, "health", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("settings mode=%o", info.Mode().Perm())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), dir)
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localGet("/v1/health/settings"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"interval_seconds":45`) || !strings.Contains(rr.Body.String(), `"fail_threshold":3`) {
+		t.Fatalf("settings reload=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/health/settings", `{"enabled":true,"interval_seconds":5,"timeout_seconds":5,"fail_threshold":2,"recover_threshold":2}`))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid settings status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/health/check", `{}`))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status"`) {
+		t.Fatalf("manual check=%d body=%s", rr.Code, rr.Body.String())
+	}
+}

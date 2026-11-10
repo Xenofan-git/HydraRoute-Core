@@ -126,3 +126,20 @@ All changes remain source/CI only. No NanoPi Core runtime deployment/restart and
 - Actual NanoPi ARM64 Xray geosite.dat parser probe: youtube=178 keys, category-ads-all=904, geolocation-!cn=25006, ext:geosite.dat:youtube=178. This probe ran from a temporary ARM64 binary under /tmp and was removed; no Core service was deployed.
 - Unit/API tests and race tests passed on VPS. GitHub Actions #191/#192 both passed formatting, JavaScript syntax, Go tests, Xray config validation, HTTP/TLS/QUIC E2E, go vet, Playwright and static AMD64/ARM64 builds.
 
+
+
+## Progress update — 2026-11-10
+
+### Completed in working tree
+- DNS UDP/TCP lifecycle race fixed with server-readiness barrier, coordinated shutdown, partial-failure cleanup and restart tests. Package tests and race detector pass.
+- Structured event journal implemented with bounded persistent history, local read/clear API and SSE stream; safe lifecycle/config/profile/subscription/DNS events integrated.
+- Health Monitor implemented with persisted interval/timeout/fail/recovery settings, periodic and manual checks, component state hysteresis, local system metrics and UI.
+- Corrected Observatory ICMP batching bound discovered during source audit.
+
+### Validation still required
+- Rerun full `go test ./...` and `go vet ./...` after the latest event/health changes.
+- Run JavaScript syntax, Playwright browser tests and AMD64/ARM64 static builds in GitHub Actions; Node.js is absent on the VPS and disk space is constrained.
+- Continue the full API/UI parity audit and close remaining HRNeo behavior gaps; successful compilation is not the release criterion.
+
+### Deployment boundary
+No Core deployment/restart on NanoPi. Keenetic/Entware HydraRoute Neo, 3x-ui/Xray, Direct rules, Tailscale, system DNS, host routes and firewall remain untouched.

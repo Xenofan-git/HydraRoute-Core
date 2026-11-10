@@ -21,10 +21,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/dnsservice"
+	"hydraroute.local/core/internal/events"
+	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
 	"hydraroute.local/core/internal/routeconfig"
@@ -84,6 +87,10 @@ type Server struct {
 	probeMu             sync.RWMutex
 	probeSaveMu         sync.Mutex
 	probeCache          map[string]map[string]xrayapi.OutboundStatus
+	events              *events.Store
+	healthMonitor       *health.Monitor
+	healthCheckMu       sync.Mutex
+	healthWake          chan struct{}
 	watchlistMu         sync.Mutex
 	watchlist           *hrwatchlist.Server
 	watchlistPath       string
@@ -116,7 +123,11 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		opts.RetryMax = opts.RetryMin
 	}
 	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
+	s.events = events.New("")
+	healthSettings := health.DefaultSettings()
 	if stateDir != "" {
+		s.events = events.New(filepath.Join(stateDir, "events", "events.json"))
+		healthSettings = loadHealthSettings(filepath.Join(stateDir, "health", "settings.json"))
 		s.loadProbeCache()
 		s.loadObservatorySettings()
 		s.loadL7Settings()
@@ -139,7 +150,12 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		} else if !os.IsNotExist(err) { /* retain constructor defaults; status reports no saved override */
 		}
 	}
+	s.healthMonitor = health.New(healthSettings)
+	s.healthWake = make(chan struct{}, 1)
 	s.mux.HandleFunc("/healthz", s.health)
+	s.mux.HandleFunc("/v1/health/monitor", s.healthMonitorStatus)
+	s.mux.HandleFunc("/v1/health/check", s.healthMonitorCheck)
+	s.mux.HandleFunc("/v1/health/settings", s.healthMonitorSettings)
 	s.mux.HandleFunc("/v1/config", s.config)
 	s.mux.HandleFunc("/v1/subscriptions/compile", s.compileSubscription)
 	s.mux.HandleFunc("/v1/selections", s.selections)
@@ -155,6 +171,8 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/geodata/status", s.geoDataStatus)
 	s.mux.HandleFunc("/v1/watchlist/status", s.watchlistStatus)
+	s.mux.HandleFunc("/v1/events", s.eventCollection)
+	s.mux.HandleFunc("/v1/events/stream", s.eventStream)
 	s.mux.HandleFunc("/v1/l7/settings", s.l7SettingsHandler)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
@@ -193,9 +211,14 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	if err != nil {
 		return err
 	}
+	s.recordEvent("info", "api", "started", "HydraRoute Core API started")
 	srv := &http.Server{Addr: address, Handler: s.mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(listener) }()
+	monitorCtx, monitorCancel := context.WithCancel(ctx)
+	monitorDone := make(chan struct{})
+	go func() { defer close(monitorDone); s.runHealthMonitor(monitorCtx) }()
+	defer func() { monitorCancel(); <-monitorDone }()
 	schedulerCtx, schedulerCancel := context.WithCancel(ctx)
 	schedulerDone := make(chan struct{})
 	if s.refreshOpts.RefreshInterval > 0 {
@@ -213,6 +236,8 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		return err
 	case <-ctx.Done():
+		monitorCancel()
+		<-monitorDone
 		s.closeWatchlist()
 		if s.dns != nil {
 			_ = s.dns.Stop()
@@ -233,6 +258,441 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		return nil
 	}
+}
+
+func (s *Server) recordEvent(level, component, eventType, message string) {
+	if s.events != nil {
+		_, _ = s.events.Append(level, component, eventType, message)
+	}
+}
+
+func (s *Server) eventCollection(w http.ResponseWriter, r *http.Request) {
+	if s.events == nil {
+		writeError(w, http.StatusServiceUnavailable, "event journal is unavailable")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		limit := 100
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 || value > 500 {
+				writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+				return
+			}
+			limit = value
+		}
+		var after uint64
+		if raw := r.URL.Query().Get("after_id"); raw != "" {
+			value, err := strconv.ParseUint(raw, 10, 64)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "after_id must be an unsigned integer")
+				return
+			}
+			after = value
+		}
+		if err := s.events.Error(); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "event journal is not readable")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"events": s.events.List(limit, after), "limit": limit})
+	case http.MethodDelete:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin request required")
+			return
+		}
+		if err := s.events.Clear(); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot clear event journal")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "cleared"})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	if s.events == nil || s.events.Error() != nil {
+		writeError(w, http.StatusServiceUnavailable, "event journal is unavailable")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "event streaming is unavailable")
+		return
+	}
+	var after uint64
+	if raw := r.URL.Query().Get("after_id"); raw != "" {
+		value, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "after_id must be an unsigned integer")
+			return
+		}
+		after = value
+	}
+	ch, cancel := s.events.Subscribe()
+	defer cancel()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	send := func(event events.Event) bool {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "id: %d\nevent: message\ndata: %s\n\n", event.ID, data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	for _, event := range s.events.List(500, after) {
+		if event.ID > after {
+			if !send(event) {
+				return
+			}
+			after = event.ID
+		}
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, open := <-ch:
+			if !open {
+				return
+			}
+			if event.ID <= after {
+				continue
+			}
+			if !send(event) {
+				return
+			}
+			after = event.ID
+		case <-heartbeat.C:
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+type healthSettingsFile struct {
+	Settings health.Settings `json:"settings"`
+}
+
+func loadHealthSettings(path string) health.Settings {
+	settings := health.DefaultSettings()
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 || info.Size() > 4096 {
+		return settings
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return settings
+	}
+	var saved healthSettingsFile
+	if json.Unmarshal(data, &saved) == nil && saved.Settings.Validate() == nil {
+		return saved.Settings
+	}
+	return settings
+}
+
+func (s *Server) saveHealthSettings(settings health.Settings) error {
+	if s.stateDir == "" {
+		return fmt.Errorf("state directory is not configured")
+	}
+	dir := filepath.Join(s.stateDir, "health")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+		return fmt.Errorf("health settings directory must be private")
+	}
+	data, err := json.Marshal(healthSettingsFile{Settings: settings})
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".settings-*.json")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, filepath.Join(dir, "settings.json"))
+}
+
+func (s *Server) healthMonitorSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		writeJSON(w, http.StatusOK, s.healthMonitor.Settings())
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var settings health.Settings
+		if err := decodeStrictJSON(w, r, &settings, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid health monitor settings")
+			return
+		}
+		if err := settings.Validate(); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		if err := s.saveHealthSettings(settings); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot save health monitor settings")
+			return
+		}
+		if err := s.healthMonitor.Configure(settings); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		select {
+		case s.healthWake <- struct{}{}:
+		default:
+		}
+		s.recordEvent("info", "health", "settings_updated", "Health monitor settings updated")
+		writeJSON(w, http.StatusOK, settings)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) healthMonitorStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	snapshot := s.healthMonitor.Snapshot()
+	if snapshot.CheckedAt.IsZero() {
+		snapshot = s.runHealthCheck(r.Context())
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) healthMonitorCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalJSONRequest(r) {
+		writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+		return
+	}
+	snapshot := s.runHealthCheck(r.Context())
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) runHealthMonitor(ctx context.Context) {
+	for {
+		settings := s.healthMonitor.Settings()
+		if settings.Enabled {
+			checkCtx, cancel := context.WithTimeout(ctx, time.Duration(settings.TimeoutSeconds)*time.Second)
+			s.runHealthCheck(checkCtx)
+			cancel()
+		}
+		timer := time.NewTimer(time.Duration(settings.IntervalSeconds) * time.Second)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-s.healthWake:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
+	s.healthCheckMu.Lock()
+	defer s.healthCheckMu.Unlock()
+	checks := make([]health.Check, 0, 8)
+	add := func(name, state, message string) {
+		checks = append(checks, health.Check{Name: name, State: state, Message: message})
+	}
+	add("api", "healthy", "Local API is responding")
+	if s.supervisor == nil {
+		add("xray", "failed", "Xray supervisor is unavailable")
+	} else {
+		status := s.supervisor.Status()
+		switch {
+		case !status.Configured:
+			add("xray", "not_configured", "No validated Xray configuration")
+		case !status.Running:
+			add("xray", "warning", "Xray process is stopped")
+		default:
+			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			_, err := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
+			cancel()
+			if err != nil {
+				add("xray", "failed", "Xray control API did not respond")
+			} else {
+				add("xray", "healthy", "Xray process and control API are responding")
+			}
+		}
+	}
+	if s.dns == nil || !s.dns.Config().Enabled {
+		add("dns", "disabled", "Core DNS resolver is disabled")
+	} else if running, _ := s.dns.Status()["running"].(bool); running {
+		add("dns", "healthy", "Core DNS resolver is running")
+	} else {
+		add("dns", "failed", "Core DNS resolver is enabled but stopped")
+	}
+	assetDir := strings.TrimSpace(os.Getenv("XRAY_LOCATION_ASSET"))
+	geoState := "healthy"
+	geoMessage := "GeoIP and GeoSite assets are available"
+	if assetDir == "" || !filepath.IsAbs(assetDir) {
+		geoState, geoMessage = "warning", "Xray asset directory is not configured"
+	} else {
+		for _, name := range []string{"geoip.dat", "geosite.dat"} {
+			info, err := os.Lstat(filepath.Join(assetDir, name))
+			if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > maxGeoDataAssetBytes {
+				geoState, geoMessage = "warning", "One or more GeoIP/GeoSite assets are unavailable"
+				break
+			}
+		}
+	}
+	add("geodata", geoState, geoMessage)
+	watchState, watchMessage := "disabled", "Watchlist is not active"
+	s.watchlistMu.Lock()
+	if s.watchlistErr != "" {
+		watchState, watchMessage = "failed", "Watchlist could not be synchronized"
+	} else if s.watchlist != nil && s.watchlistPath != "" {
+		watchState, watchMessage = "healthy", "Watchlist snapshot and local socket are active"
+	}
+	s.watchlistMu.Unlock()
+	add("watchlist", watchState, watchMessage)
+
+	metrics := health.Metrics{}
+	if s.stateDir != "" {
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs(s.stateDir, &stat); err == nil {
+			metrics.DiskFreeBytes = stat.Bavail * uint64(stat.Bsize)
+			metrics.DiskTotalBytes = stat.Blocks * uint64(stat.Bsize)
+			if metrics.DiskTotalBytes > 0 && (metrics.DiskFreeBytes < 64<<20 || metrics.DiskFreeBytes*100/metrics.DiskTotalBytes < 1) {
+				add("disk", "failed", "Filesystem free space is critically low")
+			} else if metrics.DiskTotalBytes > 0 && (metrics.DiskFreeBytes < 256<<20 || metrics.DiskFreeBytes*100/metrics.DiskTotalBytes < 5) {
+				add("disk", "warning", "Filesystem free space is low")
+			} else {
+				add("disk", "healthy", "Filesystem free space is sufficient")
+			}
+		} else {
+			add("disk", "warning", "Filesystem metrics are unavailable")
+		}
+	}
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		var total, available uint64
+		for _, line := range strings.Split(string(data), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+			if parseErr != nil {
+				continue
+			}
+			switch strings.TrimSuffix(fields[0], ":") {
+			case "MemTotal":
+				total = value * 1024
+			case "MemAvailable":
+				available = value * 1024
+			}
+		}
+		metrics.MemoryTotalBytes, metrics.MemoryFreeBytes = total, available
+		if total > 0 && available*100/total < 5 {
+			add("memory", "failed", "Available system memory is critically low")
+		} else if total > 0 && available*100/total < 10 {
+			add("memory", "warning", "Available system memory is low")
+		} else if total > 0 {
+			add("memory", "healthy", "Available system memory is sufficient")
+		}
+	}
+	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) > 0 {
+			metrics.Load1, _ = strconv.ParseFloat(fields[0], 64)
+		}
+	}
+	if data, err := os.ReadFile("/proc/uptime"); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) > 0 {
+			metrics.UptimeSeconds, _ = strconv.ParseFloat(fields[0], 64)
+		}
+	}
+
+	previous := s.healthMonitor.Snapshot()
+	result := s.healthMonitor.Apply(checks, metrics, time.Now())
+	previousStates := make(map[string]string, len(previous.Checks))
+	for _, check := range previous.Checks {
+		previousStates[check.Name] = check.State
+	}
+	for _, check := range result.Checks {
+		if old, ok := previousStates[check.Name]; ok && old != check.State {
+			level := "info"
+			if check.State == "degraded" || check.State == "warning" {
+				level = "warning"
+			}
+			s.recordEvent(level, "health", "component_state_changed", check.Name+" health state changed: "+old+" -> "+check.State)
+		}
+	}
+	if !previous.CheckedAt.IsZero() && previous.Status != result.Status {
+		level := "info"
+		if result.Status == "degraded" {
+			level = "error"
+		} else if result.Status == "warning" {
+			level = "warning"
+		}
+		s.recordEvent(level, "health", "overall_state_changed", "Health status changed: "+previous.Status+" -> "+result.Status)
+	}
+	return result
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -439,9 +899,11 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	if err := s.supervisor.Prepare(ctx, compiled); err != nil {
+		s.recordEvent("error", "runtime", "config_rejected", "Xray configuration validation failed")
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	s.recordEvent("info", "runtime", "config_prepared", "Xray configuration validated and prepared")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "prepared", "bytes": len(compiled), "runtime": s.supervisor.Status()})
 }
 
@@ -486,9 +948,11 @@ func (s *Server) compileSubscription(w http.ResponseWriter, r *http.Request) {
 	prepareCtx, prepareCancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer prepareCancel()
 	if err := s.supervisor.Prepare(prepareCtx, result.Config); err != nil {
+		s.recordEvent("error", "runtime", "config_rejected", "Subscription configuration validation failed")
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	s.recordEvent("info", "runtime", "config_prepared", "Subscription configuration validated and prepared")
 	writeJSON(w, http.StatusOK, map[string]any{"status": "prepared", "profiles": result.ProfileCount, "nodes": result.NodeCount, "bytes": len(result.Config), "runtime": s.supervisor.Status()})
 }
 
@@ -717,6 +1181,7 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
+		s.recordEvent("info", "profiles", "profile_saved", "Profile saved: "+p.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "profile_id": p.ID})
 	case http.MethodPut:
 		if !validLocalJSONRequest(r) {
@@ -858,6 +1323,7 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		s.recordEvent("info", "profiles", "profile_updated", "Profile updated: "+p.ID)
 		select {
 		case s.refreshWake <- struct{}{}:
 		default:
@@ -898,6 +1364,7 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
+		s.recordEvent("warning", "profiles", "profile_deleted", "Profile deleted: "+req.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "profile_id": req.ID})
 	default:
 		methodNotAllowed(w)
@@ -1317,7 +1784,7 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 	for start := 0; start < len(eligibleNodes); start += maxConcurrentICMP {
 		end := start + maxConcurrentICMP
 		if end > len(eligibleNodes) {
-			end = len(preview.Nodes)
+			end = len(eligibleNodes)
 		}
 		echoes := make(chan echoResult, end-start)
 		var wg sync.WaitGroup
@@ -1525,9 +1992,11 @@ func (s *Server) refreshProfiles(w http.ResponseWriter, r *http.Request) {
 		result, err = s.refreshProfilesLocked(ctx)
 	}
 	if err != nil {
+		s.recordEvent("error", "subscriptions", "refresh_failed", "Subscription refresh failed")
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	s.recordEvent("info", "subscriptions", "refreshed", "Subscription profiles refreshed and configuration prepared")
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -1656,6 +2125,7 @@ func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targe
 		}
 	}
 	s.syncWatchlist()
+	s.recordEvent("info", "subscriptions", "configuration_refreshed", "Subscription configuration refreshed")
 	return map[string]any{"status": "prepared", "profiles": result.ProfileCount, "nodes": result.NodeCount, "bytes": len(result.Config), "runtime": s.supervisor.Status()}, nil
 }
 
@@ -1898,14 +2368,18 @@ func (s *Server) runtime(w http.ResponseWriter, r *http.Request) {
 		switch strings.ToLower(body.Action) {
 		case "start":
 			if err := s.supervisor.Start(ctx); err != nil {
+				s.recordEvent("error", "runtime", "start_failed", "Xray failed to start")
 				writeError(w, http.StatusConflict, err.Error())
 				return
 			}
+			s.recordEvent("info", "runtime", "started", "Xray process started")
 		case "stop":
 			if err := s.supervisor.Stop(ctx); err != nil {
+				s.recordEvent("error", "runtime", "stop_failed", "Xray failed to stop cleanly")
 				writeError(w, http.StatusConflict, err.Error())
 				return
 			}
+			s.recordEvent("warning", "runtime", "stopped", "Xray process stopped")
 		default:
 			writeError(w, http.StatusBadRequest, "action must be start or stop")
 			return
@@ -2138,8 +2612,14 @@ func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		s.recordEvent("error", "dns", "service_action_failed", "DNS service action failed")
 		writeError(w, 409, err.Error())
 		return
+	}
+	if req.Action == "start" {
+		s.recordEvent("info", "dns", "started", "Core DNS resolver started")
+	} else {
+		s.recordEvent("warning", "dns", "stopped", "Core DNS resolver stopped")
 	}
 	writeJSON(w, 200, map[string]any{"status": s.dns.Status(), "config": s.dns.Config()})
 }

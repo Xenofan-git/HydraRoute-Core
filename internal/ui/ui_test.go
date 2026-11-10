@@ -95,3 +95,22 @@ func TestObservatoryUISeparatesStaleFromOffline(t *testing.T) {
 		t.Fatal("UI must label stale measurements separately and exclude them from offline auto-selection")
 	}
 }
+
+func TestDashboardIncludesHealthMonitorAndStructuredEventJournal(t *testing.T) {
+	script := string(mustReadStatic(t, "app.js"))
+	for _, required := range []string{
+		"Health Monitor",
+		"Журнал событий",
+		"/v1/health/monitor",
+		"/v1/health/settings",
+		"/v1/health/check",
+		"/v1/events?limit=50",
+		"/v1/events",
+		"fail_threshold",
+		"recover_threshold",
+	} {
+		if !strings.Contains(script, required) {
+			t.Errorf("dashboard is missing %q", required)
+		}
+	}
+}

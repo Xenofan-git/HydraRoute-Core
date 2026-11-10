@@ -1,0 +1,50 @@
+package health
+
+import (
+	"testing"
+	"time"
+)
+
+func TestSettingsValidation(t *testing.T) {
+	if err := DefaultSettings().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	bad := DefaultSettings()
+	bad.TimeoutSeconds = bad.IntervalSeconds
+	if err := bad.Validate(); err == nil {
+		t.Fatal("expected timeout/interval validation")
+	}
+}
+
+func TestFailAndRecoveryThresholds(t *testing.T) {
+	m := New(DefaultSettings())
+	now := time.Now()
+	checks := []Check{{Name: "xray", State: "healthy"}}
+	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "healthy" {
+		t.Fatalf("initial state=%s", got)
+	}
+	checks[0].State = "failed"
+	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "healthy" {
+		t.Fatalf("first failure should be damped, got %s", got)
+	}
+	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "degraded" {
+		t.Fatalf("second failure should degrade, got %s", got)
+	}
+	checks[0].State = "healthy"
+	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "degraded" {
+		t.Fatalf("first recovery should remain degraded, got %s", got)
+	}
+	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "healthy" {
+		t.Fatalf("second recovery should restore healthy, got %s", got)
+	}
+}
+
+func TestSnapshotCopiesChecks(t *testing.T) {
+	m := New(DefaultSettings())
+	m.Apply([]Check{{Name: "api", State: "healthy"}}, Metrics{}, time.Now())
+	copy := m.Snapshot()
+	copy.Checks[0].Name = "mutated"
+	if m.Snapshot().Checks[0].Name != "api" {
+		t.Fatal("snapshot exposed mutable internal slice")
+	}
+}

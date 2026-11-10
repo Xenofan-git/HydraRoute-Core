@@ -148,3 +148,5 @@ button,input,select,textarea{font-size:inherit}
 
 .subscription-filtered{margin:10px 0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px}.subscription-filtered summary{cursor:pointer}.filtered-node-row{opacity:.55}.subscription-filtered table{width:100%;margin-top:8px}
 .subscription-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:700;padding:2px 4px;cursor:pointer}.subscription-sort:hover{color:var(--accent)}
+
+.event-list .info-row{align-items:flex-start;gap:14px}.event-list .info-row>span:first-child{min-width:150px}.event-list small{display:block;color:var(--muted);font-size:11px;margin-top:3px}.event-message{flex:1;text-align:right;overflow-wrap:anywhere}
