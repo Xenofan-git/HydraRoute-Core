@@ -33,7 +33,7 @@ func TestCompileCreatesOnePinnedProxyPerProfile(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"bind 127.0.0.1:16053", "bind-tcp 127.0.0.1:16053",
-		"cache-persist no", "resolv-file /dev/null", "local-ptr-enable no", "mdns-lookup no", "expand-ptr-from-address no", "audit-enable no",
+		"cache-persist no", "resolv-file /dev/null", "speed-check-mode none", "local-ptr-enable no", "mdns-lookup no", "expand-ptr-from-address no", "audit-enable no",
 		"proxy-server socks5://127.0.0.1:16081 -name hr_proxy_foreign",
 		"proxy-server socks5://127.0.0.1:16082 -name hr_proxy_torrent",
 		"server-https https://dns.example.net:443/dns-query -group hr_dns_foreign -exclude-default-group -proxy hr_proxy_foreign",
