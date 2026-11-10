@@ -452,7 +452,7 @@ func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
 	}
 }
 
-func TestXrayLeastPingAndRoundRobinDistribution(t *testing.T) {
+func TestXrayRandomLeastPingAndRoundRobinDistribution(t *testing.T) {
 	if os.Getenv("HRCORE_XRAY_INTEGRATION") != "1" {
 		t.Skip("set HRCORE_XRAY_INTEGRATION=1 to run the real Xray data-plane test")
 	}
@@ -474,9 +474,9 @@ func TestXrayLeastPingAndRoundRobinDistribution(t *testing.T) {
 	slow := startSOCKSUpstream(t, 250*time.Millisecond)
 	medium := startSOCKSUpstream(t, 90*time.Millisecond)
 	fast := startSOCKSUpstream(t, 20*time.Millisecond)
-	rrPort, lpPort := freeTCPPort(t), freeTCPPort(t)
-	for rrPort == lpPort {
-		lpPort = freeTCPPort(t)
+	rrPort, lpPort, randomPort := freeTCPPort(t), freeTCPPort(t), freeTCPPort(t)
+	for rrPort == lpPort || rrPort == randomPort || lpPort == randomPort {
+		lpPort, randomPort = freeTCPPort(t), freeTCPPort(t)
 	}
 	outbound := func(key string, port uint16) compiler.Node {
 		data, _ := json.Marshal(map[string]any{"protocol": "socks", "settings": map[string]any{"servers": []any{map[string]any{"address": "127.0.0.1", "port": port}}}})
@@ -485,6 +485,7 @@ func TestXrayLeastPingAndRoundRobinDistribution(t *testing.T) {
 	compiled, err := compiler.Compile(compiler.CompileRequest{ObservatoryProbeIntervalSeconds: 5, Profiles: []compiler.Profile{
 		{ID: "rrdist", Enabled: true, Port: rrPort, Strategy: "roundRobin", FallbackKey: "rr-slow", Nodes: []compiler.Node{outbound("rr-slow", uint16(slow.listener.Addr().(*net.TCPAddr).Port)), outbound("rr-medium", uint16(medium.listener.Addr().(*net.TCPAddr).Port)), outbound("rr-fast", uint16(fast.listener.Addr().(*net.TCPAddr).Port))}},
 		{ID: "lpfast", Enabled: true, Port: lpPort, Strategy: "leastPing", FallbackKey: "lp-slow", Nodes: []compiler.Node{outbound("lp-slow", uint16(slow.listener.Addr().(*net.TCPAddr).Port)), outbound("lp-medium", uint16(medium.listener.Addr().(*net.TCPAddr).Port)), outbound("lp-fast", uint16(fast.listener.Addr().(*net.TCPAddr).Port))}},
+		{ID: "random", Enabled: true, Port: randomPort, Strategy: "random", FallbackKey: "random-slow", Nodes: []compiler.Node{outbound("random-slow", uint16(slow.listener.Addr().(*net.TCPAddr).Port)), outbound("random-medium", uint16(medium.listener.Addr().(*net.TCPAddr).Port)), outbound("random-fast", uint16(fast.listener.Addr().(*net.TCPAddr).Port))}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -523,6 +524,7 @@ func TestXrayLeastPingAndRoundRobinDistribution(t *testing.T) {
 	wantTags := []string{
 		compiler.OutboundTag("rrdist", "rr-slow"), compiler.OutboundTag("rrdist", "rr-medium"), compiler.OutboundTag("rrdist", "rr-fast"),
 		compiler.OutboundTag("lpfast", "lp-slow"), compiler.OutboundTag("lpfast", "lp-medium"), compiler.OutboundTag("lpfast", "lp-fast"),
+		compiler.OutboundTag("random", "random-slow"), compiler.OutboundTag("random", "random-medium"), compiler.OutboundTag("random", "random-fast"),
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	ready := false
@@ -588,5 +590,19 @@ func TestXrayLeastPingAndRoundRobinDistribution(t *testing.T) {
 	}
 	if slow.userHits.Load() != slowBefore || medium.userHits.Load() != mediumBefore || fast.userHits.Load()-fastBefore != 3 {
 		t.Fatalf("leastPing traffic did not stay on the fastest member: slow=%d medium=%d fast=%d", slow.userHits.Load()-slowBefore, medium.userHits.Load()-mediumBefore, fast.userHits.Load()-fastBefore)
+	}
+
+	slowBefore, mediumBefore, fastBefore = slow.userHits.Load(), medium.userHits.Load(), fast.userHits.Load()
+	for i := 0; i < 30; i++ {
+		code, err := socksGET(randomPort, probe.http.URL+"/user")
+		if err != nil || code != http.StatusNoContent {
+			t.Fatalf("random request %d failed: status=%d err=%v", i+1, code, err)
+		}
+	}
+	slowDelta := slow.userHits.Load() - slowBefore
+	mediumDelta := medium.userHits.Load() - mediumBefore
+	fastDelta := fast.userHits.Load() - fastBefore
+	if slowDelta == 0 || mediumDelta == 0 || fastDelta == 0 || slowDelta+mediumDelta+fastDelta != 30 {
+		t.Fatalf("random did not distribute 30 requests across all three members: slow=%d medium=%d fast=%d", slowDelta, mediumDelta, fastDelta)
 	}
 }
