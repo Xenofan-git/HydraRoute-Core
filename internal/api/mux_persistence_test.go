@@ -36,7 +36,7 @@ func TestProfileMuxSettingPersistsAndCompilesAcrossRestart(t *testing.T) {
 				continue
 			}
 			mux, ok := outbound["mux"].(map[string]any)
-			if ok && mux["enabled"] == true && mux["concurrency"] == float64(8) && mux["xudpConcurrency"] == float64(8) {
+			if ok && mux["enabled"] == true && mux["concurrency"] == float64(8) && mux["xudpConcurrency"] == float64(1) && mux["xudpProxyUDP443"] == "reject" {
 				return
 			}
 		}
