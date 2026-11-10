@@ -188,8 +188,14 @@ func (s *lifecycleObservatoryServer) GetOutboundStatus(context.Context, *command
 	if s.status == nil {
 		return &command.GetOutboundStatusResponse{Status: &xrayobservatory.ObservationResult{}}, nil
 	}
-	copy := *s.status
-	return &command.GetOutboundStatusResponse{Status: &xrayobservatory.ObservationResult{Status: []*xrayobservatory.OutboundStatus{&copy}}}, nil
+	copy := &xrayobservatory.OutboundStatus{
+		OutboundTag: s.status.OutboundTag,
+		Alive:       s.status.Alive,
+		Delay:       s.status.Delay,
+		LastTryTime: s.status.LastTryTime,
+		LastSeenTime: s.status.LastSeenTime,
+	}
+	return &command.GetOutboundStatusResponse{Status: &xrayobservatory.ObservationResult{Status: []*xrayobservatory.OutboundStatus{copy}}}, nil
 }
 
 func TestObservatoryRecoversAfterManagedXrayRestart(t *testing.T) {
