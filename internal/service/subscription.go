@@ -27,6 +27,7 @@ type ProfileInput struct {
 	FilterExclude      string             `json:"filter_exclude,omitempty"`
 	AutoUpdateEnabled  bool               `json:"auto_update_enabled,omitempty"`
 	AutoUpdateInterval int                `json:"auto_update_interval,omitempty"`
+	Fallback           ProfileFallback    `json:"-"`
 	Picked             []string           `json:"picked,omitempty"`
 	Excluded           []string           `json:"excluded,omitempty"`
 }
@@ -65,7 +66,8 @@ type PreviewNode struct {
 	Host     string           `json:"host,omitempty"`
 	Picked   bool             `json:"picked"`
 	Excluded bool             `json:"excluded"`
-	Filtered bool             `json:"filtered"`
+	Filtered      bool             `json:"filtered"`
+	ReferenceURI string           `json:"-"`
 }
 
 type ProfilePreview struct {
@@ -211,7 +213,7 @@ func previewProfile(ctx context.Context, profile profiles.Profile, stateDir stri
 		if host == "" && len(outbound.Settings.Servers) > 0 {
 			host = outbound.Settings.Servers[0].Address
 		}
-		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Protocol: outbound.Protocol, Host: host, Picked: picked[key] || (selection.PickMode == "auto" && !excluded[key]), Excluded: excluded[key], Filtered: filtered})
+		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Protocol: outbound.Protocol, Host: host, Picked: picked[key] || (selection.PickMode == "auto" && !excluded[key]), Excluded: excluded[key], Filtered: filtered, ReferenceURI: server.ReferenceURI})
 	}
 	return out, nil
 }
@@ -327,6 +329,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 				continue
 			}
 		}
+		profile.FallbackKey = chooseFallbackKey(servers, input.Profile, profile, len(input.Links) > 0)
 		for _, server := range servers {
 			if serverFiltered(server.Name, input.Profile.FilterKeep, input.Profile.FilterExclude, len(input.Links) > 0 || server.Key.Source == "direct") {
 				continue
