@@ -45,7 +45,7 @@ jobs:
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
             sudo sed -i '/^Architectures:/d; /^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
           elif [ -f /etc/apt/sources.list ]; then
-            sudo sed -i -E '/^deb /{ /\\[arch=/! s/^deb /deb [arch=amd64] /; }' /etc/apt/sources.list
+            sudo sed -i -E '/^deb /{ /\[arch=/! s/^deb /deb [arch=amd64] /; }' /etc/apt/sources.list
           else
             echo 'Could not locate the Ubuntu APT source list to scope native repositories' >&2
             exit 1
