@@ -16,18 +16,22 @@ func profileSupportsMux(p Profile) bool {
 			continue
 		}
 		selected++
-		if hasXTLSRPRXFlow(node.Outbound) {
+		if !SupportsMuxOutbound(node.Outbound) {
 			return false
 		}
 	}
 	return selected > 0
 }
 
-func hasXTLSRPRXFlow(raw json.RawMessage) bool {
+func SupportsMuxOutbound(raw json.RawMessage) bool {
 	var value any
 	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
 		return false
 	}
+	return !hasXTLSRPRXFlowValue(value)
+}
+
+func hasXTLSRPRXFlowValue(value any) bool {
 	var walk func(any) bool
 	walk = func(v any) bool {
 		switch x := v.(type) {
@@ -54,6 +58,9 @@ func hasXTLSRPRXFlow(raw json.RawMessage) bool {
 	return walk(value)
 }
 
+// HRweb uses concurrency=8 and xudpConcurrency=8. Its stripped binary carries
+// an opaque static value for xudpProxyUDP443; use Xray's safe reject default
+// until a live original config confirms a different value.
 func applyMux(outbound map[string]any) {
 	outbound["mux"] = map[string]any{
 		"enabled":          true,
