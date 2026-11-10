@@ -16,6 +16,8 @@ The recovered fallback priority in closeout spec §4 is:
 3. First selected outbound.
 The reference URI is taken from the active outbound of the current balancer; comparison uses the URI prefix before `#`.
 
+**Candidate caveat:** the recovered HRweb callback keeps the last repeated `principle_target.tag` from `GetBalancerInfo`. Static research confirms this is a strategy candidate list (not necessarily the outbound carrying a live connection, especially for Round Robin). Core therefore treats it as a candidate/reference hint only, not as proof of an active socket; unknown tags are ignored.
+
 This is a static reverse-engineering result, not a live execution of HRweb.
 
 ## Change made
