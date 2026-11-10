@@ -84,11 +84,11 @@ func chooseFallbackKey(servers []parser.ParsedServer, input ProfileInput, profil
 
 	// First retain the previous runtime candidate if it still belongs to this
 	// profile's selected pool and its last observation was alive.
-	if input.Fallback.CandidateKey != "" {
+	if reference != "" && input.Fallback.CandidateKey != "" {
 		for _, server := range eligible {
 			key := server.CompilerKey()
 			if key == input.Fallback.CandidateKey {
-				if _, alive := statusFor(server); alive && (input.Fallback.ReferenceURI == "" || referenceURIMatches(server.ReferenceURI, input.Fallback.ReferenceURI)) {
+				if _, alive := statusFor(server); alive && referenceURIMatches(server.ReferenceURI, reference) {
 					return key
 				}
 				break
@@ -115,26 +115,22 @@ func chooseFallbackKey(servers []parser.ParsedServer, input ProfileInput, profil
 		}
 	}
 
-	// Next choose the lowest-delay alive member. Prefer the URI family when it
-	// has an alive measurement; otherwise use the whole profile-local pool.
+	// Next choose the lowest-delay alive member of that same URI family.
+	// HRweb does not widen this search to unrelated subscription URIs.
 	bestKey := ""
 	bestDelay := int64(1<<63 - 1)
-	for pass := 0; pass < 2 && bestKey == ""; pass++ {
+	if reference != "" {
 		for _, server := range eligible {
-			key := server.CompilerKey()
+			if !referenceURIMatches(server.ReferenceURI, reference) {
+				continue
+			}
 			status, alive := statusFor(server)
 			if !alive {
 				continue
 			}
-			if pass == 0 && reference != "" && !referenceURIMatches(server.ReferenceURI, reference) {
-				continue
-			}
 			if bestKey == "" || status.DelayMS < bestDelay {
-				bestKey, bestDelay = key, status.DelayMS
+				bestKey, bestDelay = server.CompilerKey(), status.DelayMS
 			}
-		}
-		if pass == 0 && bestKey != "" {
-			break
 		}
 	}
 	if bestKey != "" {
