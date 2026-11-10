@@ -45,6 +45,7 @@ func newProbeServer() *probeServer {
 type socksUpstream struct {
 	listener    net.Listener
 	connections atomic.Int64
+	healthy     atomic.Bool
 }
 
 func startSOCKSUpstream(t *testing.T) *socksUpstream {
@@ -54,6 +55,7 @@ func startSOCKSUpstream(t *testing.T) *socksUpstream {
 		t.Fatal(err)
 	}
 	s := &socksUpstream{listener: ln}
+	s.healthy.Store(true)
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
@@ -115,6 +117,10 @@ func (s *socksUpstream) handle(conn net.Conn) {
 	}
 	var rawPort [2]byte
 	if _, err := io.ReadFull(conn, rawPort[:]); err != nil {
+		return
+	}
+	if !s.healthy.Load() {
+		_, _ = conn.Write([]byte{5, 5, 0, 1, 127, 0, 0, 1, 0, 0})
 		return
 	}
 	destination := net.JoinHostPort(host, fmt.Sprint(binary.BigEndian.Uint16(rawPort[:])))
@@ -208,6 +214,38 @@ func socksGET(port uint16, target string) (int, error) {
 	return code, nil
 }
 
+func readOutboundStatuses() (map[string]xrayapi.OutboundStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	items, err := xrayapi.GetOutboundStatus(ctx, "127.0.0.1:16285")
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]xrayapi.OutboundStatus, len(items))
+	for _, item := range items {
+		out[item.Tag] = item
+	}
+	return out, nil
+}
+
+func waitForOutboundState(t *testing.T, tag string, alive bool, afterTry int64) xrayapi.OutboundStatus {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	var latest xrayapi.OutboundStatus
+	for time.Now().Before(deadline) {
+		statuses, err := readOutboundStatuses()
+		if err == nil {
+			latest = statuses[tag]
+			if status, ok := statuses[tag]; ok && status.LastTryTime > afterTry && status.Alive == alive {
+				return status
+			}
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	t.Fatalf("Observatory did not move %s to alive=%v after LastTryTime %d; latest=%+v", tag, alive, afterTry, latest)
+	return xrayapi.OutboundStatus{}
+}
+
 func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
 	if os.Getenv("HRCORE_XRAY_INTEGRATION") != "1" {
 		t.Skip("set HRCORE_XRAY_INTEGRATION=1 to run the real Xray data-plane test")
@@ -297,27 +335,20 @@ func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
 	}
 	deadline := time.Now().Add(18 * time.Second)
 	ready := false
+	var initialStatuses map[string]xrayapi.OutboundStatus
 	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		statuses, statusErr := xrayapi.GetOutboundStatus(ctx, "127.0.0.1:16285")
-		cancel()
+		statuses, statusErr := readOutboundStatuses()
 		if statusErr == nil {
-			seen := make(map[string]bool, len(statuses))
-			for _, status := range statuses {
-				if _, expected := wantAlive[status.Tag]; expected && status.LastTryTime > 0 {
-					seen[status.Tag] = status.Alive
-				}
-			}
-			ready = len(seen) == len(wantAlive)
-			if ready {
-				for tag, alive := range wantAlive {
-					if seen[tag] != alive {
-						ready = false
-						break
-					}
+			ready = true
+			for tag, alive := range wantAlive {
+				status, ok := statuses[tag]
+				if !ok || status.LastTryTime == 0 || status.Alive != alive {
+					ready = false
+					break
 				}
 			}
 			if ready {
+				initialStatuses = statuses
 				break
 			}
 		}
@@ -327,6 +358,18 @@ func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
 		t.Fatal("Observatory did not report the expected alive/dead state for all five profile outbounds")
 	}
 
+	// Every subject must be probed again on the configured cadence.
+	time.Sleep(12 * time.Second)
+	refreshed, err := readOutboundStatuses()
+	if err != nil {
+		t.Fatalf("cannot read refreshed Observatory statuses: %v", err)
+	}
+	for tag := range wantAlive {
+		t.Logf("cadence %s: before=%d after=%d", tag, initialStatuses[tag].LastTryTime, refreshed[tag].LastTryTime)
+		if refreshed[tag].LastTryTime <= initialStatuses[tag].LastTryTime {
+			t.Fatalf("Observatory did not refresh %s: before=%d after=%d", tag, initialStatuses[tag].LastTryTime, refreshed[tag].LastTryTime)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	targets, err := xrayapi.GetBalancerPrincipleTargetTags(ctx, "127.0.0.1:16285", "hr_bal_rr")
 	cancel()
@@ -359,6 +402,29 @@ func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
 	}
 	if probe.userHits.Load() != 3 {
 		t.Fatalf("roundRobin user request count mismatch: got %d want 3", probe.userHits.Load())
+	}
+
+	// A live outbound must transition to dead when its upstream fails, then
+	// recover after the upstream becomes available again.
+	liveTag := compiler.OutboundTag("rr", "rr-live")
+	beforeStatuses, err := readOutboundStatuses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeTry := beforeStatuses[liveTag].LastTryTime
+	live.healthy.Store(false)
+	deadStatus := waitForOutboundState(t, liveTag, false, beforeTry)
+	before = probe.userHits.Load()
+	if _, err := socksGET(rrPort, probe.http.URL+"/user"); err == nil {
+		t.Fatal("roundRobin unexpectedly succeeded while its only healthy member was down")
+	}
+	if got := probe.userHits.Load(); got != before {
+		t.Fatalf("roundRobin sent traffic directly while its pool was down: user hits %d -> %d", before, got)
+	}
+	live.healthy.Store(true)
+	_ = waitForOutboundState(t, liveTag, true, deadStatus.LastTryTime)
+	if code, err := socksGET(rrPort, probe.http.URL+"/user"); err != nil || code != http.StatusNoContent {
+		t.Fatalf("roundRobin did not recover after its member came back: status=%d err=%v", code, err)
 	}
 
 	before = probe.userHits.Load()
