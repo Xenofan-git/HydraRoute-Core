@@ -1676,7 +1676,6 @@ func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
 	}
 }
 
-
 func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
 	stateDir := t.TempDir()
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
@@ -1755,4 +1754,3 @@ func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
 		t.Fatalf("delete source failed: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
-

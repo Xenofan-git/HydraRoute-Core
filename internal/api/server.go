@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"hydraroute.local/core/internal/compiler"
-	"hydraroute.local/core/internal/dnsservice"
 	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
+	"hydraroute.local/core/internal/dnsservice"
 	"hydraroute.local/core/internal/events"
 	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
@@ -3437,7 +3437,6 @@ func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
 	s.watchlistMu.Unlock()
 	writeJSON(w, http.StatusOK, status)
 }
-
 
 func (s *Server) applyDNSBlocklists() {
 	if s.dns == nil || s.blocklists == nil {

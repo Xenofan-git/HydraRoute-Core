@@ -328,7 +328,6 @@ func TestDo53RetriesOverTCPWhenUDPResponseIsTruncated(t *testing.T) {
 	}
 }
 
-
 func TestBlocklistDomainSetsMatchSubdomainsAndAllowExceptions(t *testing.T) {
 	m := &Manager{cfg: Config{BlockingEnabled: true}}
 	m.SetBlocklistDomains([]string{"Ads.Example.com."}, []string{"safe.ads.example.com"})
