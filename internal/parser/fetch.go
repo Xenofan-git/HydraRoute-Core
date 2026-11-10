@@ -39,7 +39,7 @@ func FetchSubscription(ctx context.Context, rawURL string) (string, error) {
 				return nil, fmt.Errorf("subscription host has no addresses")
 			}
 			for _, item := range ips {
-				if !isPublicDialIP(item.IP) {
+				if !IsPublicDialIP(item.IP) {
 					return nil, fmt.Errorf("subscription host resolves to a non-public address")
 				}
 			}
@@ -81,7 +81,7 @@ func validateSubscriptionURL(raw string) (*url.URL, error) {
 	if !validServerHost(u.Hostname()) {
 		return nil, fmt.Errorf("subscription URL host is invalid")
 	}
-	if ip := net.ParseIP(u.Hostname()); ip != nil && !isPublicDialIP(ip) {
+	if ip := net.ParseIP(u.Hostname()); ip != nil && !IsPublicDialIP(ip) {
 		return nil, fmt.Errorf("subscription URL cannot target a private or local address")
 	}
 	if p := u.Port(); p != "" {
@@ -93,7 +93,7 @@ func validateSubscriptionURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-func isPublicDialIP(ip net.IP) bool {
+func IsPublicDialIP(ip net.IP) bool {
 	if ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
 		return false
 	}

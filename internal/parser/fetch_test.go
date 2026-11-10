@@ -52,11 +52,11 @@ func TestFetchSubscriptionEnforcesSizeLimit(t *testing.T) {
 
 func TestPublicIPGuard(t *testing.T) {
 	for _, ip := range []string{"127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "::1", "fc00::1", "fe80::1", "100.64.0.1", "192.0.2.1", "2001:db8::1", "64:ff9b::7f00:1", "64:ff9b:1::a00:1", "2002:7f00:1::", "2001::1", "2001:20::1", "2001:2::1", "192.88.99.1", "0.1.2.3"} {
-		if isPublicDialIP(net.ParseIP(ip)) {
+		if IsPublicDialIP(net.ParseIP(ip)) {
 			t.Errorf("private IP accepted: %s", ip)
 		}
 	}
-	if !isPublicDialIP(net.ParseIP("1.1.1.1")) {
+	if !IsPublicDialIP(net.ParseIP("1.1.1.1")) {
 		t.Fatal(fmt.Sprint("public IP rejected"))
 	}
 }

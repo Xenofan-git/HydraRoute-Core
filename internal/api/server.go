@@ -1685,18 +1685,15 @@ type pingStreamEvent struct {
 var icmpTimePattern = regexp.MustCompile(`time[=<]([0-9]+(?:\.[0-9]+)?)\s*ms`)
 
 func publicProbeAddress(ctx context.Context, host string) (string, bool) {
-	public := func(ip net.IP) bool {
-		return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast() && !ip.IsUnspecified()
-	}
 	if ip := net.ParseIP(host); ip != nil {
-		return ip.String(), public(ip)
+		return ip.String(), parser.IsPublicDialIP(ip)
 	}
 	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil || len(ips) == 0 {
 		return "", false
 	}
 	for _, item := range ips {
-		if !public(item.IP) {
+		if !parser.IsPublicDialIP(item.IP) {
 			return "", false
 		}
 	}

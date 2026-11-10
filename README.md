@@ -24,6 +24,8 @@ The project keeps subscription profiles isolated: each enabled profile receives 
 - **Shared SOCKS5 routing** — optional dedicated inbound with ordered domain/IP rules, profile/DIRECT/BLOCK actions, and an explicit default route.
 - **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, selection operations, GeoIP/GeoSite readiness, and Watchlist status.
 - **HRNeo-compatible Watchlist** — Core-owned Unix socket with MATCH/DUMP line protocol, rank-based suffix matching, bounded DUMP streaming, and a read-only status endpoint. GeoSite Domain/Full keys are expanded from the installed data file; non-enumerable patterns are reported as partial coverage.
+- **Optional Core DNS resolver** — disabled by default, loopback-only UDP/TCP listener, Do53/DoT/HTTPS-only DoH upstreams, DHCP DNS discovery, host overrides, custom domain block/allow rules, upstream failover, statistics, and managed Xray DNS integration. It never edits the host resolver or router DNS.
+- **Health Monitor and event journal** — periodic/manual read-only checks, fail/recovery hysteresis, resource metrics, bounded private event history, and live SSE updates in the dashboard.
 - **Runtime supervision** — validates candidate configurations with Xray before activation and preserves the last known-good configuration on refresh failures.
 - **Scheduled refresh** — independent per-profile schedules with capped exponential retry; disabled unless configured.
 - **ARM64 and AMD64 builds** — cross-compilation for Linux ARM64/AArch64 and AMD64.
@@ -178,6 +180,16 @@ No license has been added yet. Until a license is published, the source is not g
 ### Dashboard browser tests
 
 The CI test job runs Playwright against the embedded dashboard assets with a local API fixture. It exercises the subscription manager, streamed echo/proxy ping events, offline exclusion, keyword filtering without losing manual picks, per-profile auto-refresh settings, and empty manual-pool handling. The browser is Chromium headless; the test fixture does not start Xray or modify host networking.
+
+## Optional Core DNS resolver
+
+The resolver is an opt-in Core component. It is disabled by default and binds only to `127.0.0.1` (UDP and TCP, default port `5353`). Supported upstreams are classic DNS (Do53), DNS-over-TLS (DoT), and DNS-over-HTTPS (DoH; HTTPS is mandatory and redirects cannot downgrade to HTTP). The resolver supports ordered upstream fallback, hosts overrides, custom domain block/allow rules, and optional query statistics. Truncated Do53 UDP replies are retried over TCP; blocked AAAA requests do not fall through to upstreams.
+
+- `GET /v1/dns`, `PUT /v1/dns` — read or transactionally update resolver configuration.
+- `POST /v1/dns/service` with `start` or `stop` — manage the resolver and update only the Core-owned Xray configuration.
+- `POST /v1/dns/check` — resolve a test domain through the configured Core upstreams.
+
+Automatic provider discovery reads the active default-route interface and DHCP-provided DNS options. It does not use `resolv.conf` as a provider source. Core DNS does not change `/etc/resolv.conf`, NetworkManager settings, system DNS, host routes, firewall rules, or LAN interception. URL blocklist sources are currently configuration placeholders; downloading, parsing, scheduling and restore semantics remain pending. This is not yet full HRDNS/HRNeo DNS parity.
 
 ## Operations: Health Monitor and event journal
 

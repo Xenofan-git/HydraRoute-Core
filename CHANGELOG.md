@@ -139,3 +139,14 @@
 - Added loopback-only Watchlist status API and Rules UI card.
 - Added snapshot, socket protocol, API lifecycle and browser UI regression tests.
 - No NanoPi runtime deployment or network changes.
+
+
+## 2026-11-10 — DNS lifecycle, event journal, Health Monitor and compatibility audit
+
+- Hardened the optional loopback DNS resolver: coordinated UDP/TCP start-stop, restart safety, blocked A/AAAA correctness, Do53 TCP fallback for truncated UDP replies, HTTPS-only DoH and transactional rollback of Core DNS/Xray settings.
+- Added resolver/API lifecycle regression tests, including DNS listener cleanup when the API listener cannot bind.
+- Added a bounded, persistent structured event journal with local API, Last-Event-ID SSE, subscriber limits and dashboard live updates.
+- Added read-only Health Monitor with persisted interval/timeout/fail/recovery settings, Xray/DNS/GeoData/Watchlist checks, disk/RAM/load/uptime metrics and state-transition events.
+- Classified all 114 regular HRweb 1.68.0 methods individually in `research/2026-11-10-HRWEB-114-METHOD-COMPATIBILITY-MATRIX.md`; separately mapped the `proxy.pingServers` stream. The audit explicitly records pending modules and Keenetic/RCI exclusions.
+- Hardened ICMP probe destinations to reject CGNAT and reserved/documentation ranges using the same strict public-IP classifier as subscription fetching.
+- No NanoPi deployment. No changes to Keenetic/Entware, 3x-ui/Xray, Tailscale, Direct rules, system DNS, host routes or firewall.

@@ -1561,3 +1561,14 @@ func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
 		t.Fatal("DNS service leaked after API listener bind failure")
 	}
 }
+
+func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
+	for _, address := range []string{"100.64.0.1", "192.0.2.1", "198.18.0.1", "2001:db8::1", "127.0.0.1", "10.0.0.1"} {
+		if _, ok := publicProbeAddress(context.Background(), address); ok {
+			t.Errorf("probe accepted non-public address %s", address)
+		}
+	}
+	if got, ok := publicProbeAddress(context.Background(), "1.1.1.1"); !ok || got != "1.1.1.1" {
+		t.Fatalf("public address rejected: %q %v", got, ok)
+	}
+}

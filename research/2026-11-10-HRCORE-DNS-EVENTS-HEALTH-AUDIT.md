@@ -94,3 +94,9 @@ Latest local validation after these changes:
 
 - Added `2026-11-10-HRWEB-114-METHOD-COMPATIBILITY-MATRIX.md`: all 114 regular HRweb 1.68.0 methods are individually classified, with Core endpoint mapping, adaptation status, known gaps and explicit Keenetic/RCI exclusions. The separate `proxy.pingServers` stream is included as item 115.
 - The matrix is conservative: no 1:1 compatibility is claimed from a similar endpoint name alone. Phobos, FQDN groups, speed tests, file APIs, system update workflow, full Geo list management and DNS blocklist lifecycle remain open.
+
+## Additional outbound-probe SSRF boundary audit — 2026-11-10
+
+- The ICMP probe destination validator now reuses the subscription fetcher's strict public-IP classifier. It rejects CGNAT, documentation, benchmarking, reserved IPv4/IPv6 ranges in addition to private, loopback, link-local and multicast addresses.
+- Added regression coverage for CGNAT (100.64/10), documentation (192.0.2/24, 2001:db8::/32), benchmarking (198.18/15), loopback/private and a known public resolver.
+- Focused parser and API tests pass. This small security hardening is subsequent to CI #200 and requires the next CI run.
