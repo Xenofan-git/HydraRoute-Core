@@ -179,14 +179,14 @@ jobs:
           readelf -h "$RUNNER_TEMP/smartdns-arm64/smartdns" | grep -F AArch64
           cat > "$RUNNER_TEMP/smartdns-arm64/smartdns-qemu" <<EOF
           #!/usr/bin/env bash
-          exec qemu-aarch64-static -d guest_errors,unimp -D "$RUNNER_TEMP/smartdns-arm64/qemu.debug" -strace -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" "\$@"
+          exec qemu-aarch64-static -B 0x10000000000 -d guest_errors,unimp -D "$RUNNER_TEMP/smartdns-arm64/qemu.debug" -strace -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" "\$@"
           EOF
           chmod +x "$RUNNER_TEMP/smartdns-arm64/smartdns-qemu"
           qemu-aarch64-static --version
           readelf -l "$RUNNER_TEMP/smartdns-arm64/smartdns" | grep -F 'Requesting program interpreter' || true
           ls -l /lib/ld-linux-aarch64.so.1 /lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 /usr/lib/aarch64-linux-gnu/libssl.so.3 2>&1 || true
           set +e
-          qemu-aarch64-static -strace -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" -v
+          qemu-aarch64-static -B 0x10000000000 -strace -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" -v
           echo "QEMU SmartDNS version preflight rc=$?"
           set -e
 
