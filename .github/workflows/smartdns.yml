@@ -6,6 +6,7 @@ on:
     paths:
       - 'internal/dnsservice/smartdns/**'
       - 'third_party/smartdns/**'
+      - 'tests/integration/smartdns_profile_pinned_socks.py'
       - '.github/workflows/smartdns.yml'
 
 permissions:
@@ -107,7 +108,7 @@ jobs:
           retention-days: 14
 
   sandbox:
-    name: Verify AMD64 config parsing and no host netlink/resolver access
+    name: Verify AMD64 profile-pinned SOCKS, TLS and fail-closed isolation
     needs: build
     runs-on: ubuntu-24.04
     steps:
@@ -123,58 +124,10 @@ jobs:
       - name: Install runtime test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dnsutils strace
+          sudo apt-get install -y openssl strace
           chmod +x "$RUNNER_TEMP/smartdns/smartdns"
 
-      - name: Start isolated config and assert no netlink or system resolver access
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/smartdns-data"
-          printf 'ads.example.test\n' > "$RUNNER_TEMP/smartdns-data/ads.txt"
-          cat > "$RUNNER_TEMP/smartdns.conf" <<EOFCONF
-          bind 127.0.0.1:16053
-          bind-tcp 127.0.0.1:16053
-          cache-size 4096
-          cache-persist no
-          resolv-file /dev/null
-          local-ptr-enable no
-          mdns-lookup no
-          expand-ptr-from-address no
-          audit-enable no
-          log-level error
-          ca-path /etc/ssl/certs
-          proxy-server socks5://127.0.0.1:16081 -name hr_proxy_test
-          server-https https://dns.example.test:443/dns-query -group hr_dns_test -exclude-default-group -proxy hr_proxy_test -host-name dns.example.test -tls-host-verify dns.example.test -host-ip 127.0.0.1 -http-host dns.example.test
-          domain-set -name hr_set_ads -type list -file $RUNNER_TEMP/smartdns-data/ads.txt
-          address /domain-set:hr_set_ads/#
-          address /allowed.example.test/203.0.113.5
-          nameserver /-login.example.test/hr_dns_test
-          EOFCONF
-          timeout --signal=TERM --kill-after=2s 8s strace -f -e trace=socket,bind,openat,execve -o "$RUNNER_TEMP/smartdns.strace" \
-            "$RUNNER_TEMP/smartdns/smartdns" -f -c "$RUNNER_TEMP/smartdns.conf" -p - > "$RUNNER_TEMP/smartdns.log" 2>&1 &
-          trace_pid=$!
-          cleanup() { kill "$trace_pid" 2>/dev/null || true; wait "$trace_pid" 2>/dev/null || true; }
-          trap cleanup EXIT
-          for _ in $(seq 1 30); do
-            if dig @127.0.0.1 -p 16053 allowed.example.test A +short +time=1 +tries=1 | grep -qx '203.0.113.5'; then
-              break
-            fi
-            sleep 0.2
-          done
-          dig @127.0.0.1 -p 16053 allowed.example.test A +short +time=1 +tries=1 | grep -qx '203.0.113.5'
-          if grep -Eq 'socket\(AF_NETLINK|socket\(PF_NETLINK' "$RUNNER_TEMP/smartdns.strace"; then
-            echo 'SmartDNS opened a NETLINK socket despite Core isolation patch/config' >&2
-            cat "$RUNNER_TEMP/smartdns.strace" >&2
-            exit 1
-          fi
-          if grep -F '"/etc/resolv.conf"' "$RUNNER_TEMP/smartdns.strace"; then
-            echo 'SmartDNS read the host system resolver file' >&2
-            exit 1
-          fi
-          if grep -E 'execve\(".*/(ip|iptables|ip6tables|nft|ipset)"' "$RUNNER_TEMP/smartdns.strace"; then
-            echo 'SmartDNS attempted to invoke a host networking tool' >&2
-            exit 1
-          fi
-          grep -F '127.0.0.1' "$RUNNER_TEMP/smartdns.strace" | grep -F '16053'
-          cat "$RUNNER_TEMP/smartdns.log"
+      - name: Verify TLS, profile-pinned SOCKS and fail-closed isolation
+        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns/smartdns
+        run: python3 tests/integration/smartdns_profile_pinned_socks.py
