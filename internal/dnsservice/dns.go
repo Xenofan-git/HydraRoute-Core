@@ -408,6 +408,10 @@ func (m *Manager) SetBlocklistDomains(blocked, allowed []string) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) IsBlockedHost(host string) bool {
+	return m.blockedHost(host)
+}
+
 func (m *Manager) blockedHost(host string) bool {
 	host = normalizeBlocklistDomain(host)
 	if host == "" {

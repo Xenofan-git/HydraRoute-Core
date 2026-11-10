@@ -1714,27 +1714,27 @@ func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("refresh source status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !h.dns.blockedHost("tracker.ads.example.com") {
+	if !h.dns.IsBlockedHost("tracker.ads.example.com") {
 		t.Fatal("refreshed blocklist did not affect Core DNS resolver")
 	}
-	if h.dns.blockedHost("safe.example.com") {
+	if h.dns.IsBlockedHost("safe.example.com") {
 		t.Fatal("blocklist allow exception did not reach Core DNS resolver")
 	}
 
 	reloaded := NewWithStateDir(apiSupervisor(t), stateDir)
-	if !reloaded.dns.blockedHost("tracker.ads.example.com") {
+	if !reloaded.dns.IsBlockedHost("tracker.ads.example.com") {
 		t.Fatal("persisted blocklist was not restored into Core DNS resolver")
 	}
 
 	rr = httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/remove", `{"domain":"ads.example.com"}`))
-	if rr.Code != http.StatusOK || h.dns.blockedHost("tracker.ads.example.com") {
+	if rr.Code != http.StatusOK || h.dns.IsBlockedHost("tracker.ads.example.com") {
 		t.Fatalf("remove entry failed: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
 	rr = httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/restore", `{"domain":"ads.example.com"}`))
-	if rr.Code != http.StatusOK || !h.dns.blockedHost("tracker.ads.example.com") {
+	if rr.Code != http.StatusOK || !h.dns.IsBlockedHost("tracker.ads.example.com") {
 		t.Fatalf("restore entry failed: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
@@ -1742,7 +1742,7 @@ func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
 	patch.Method = http.MethodPatch
 	rr = httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, patch)
-	if rr.Code != http.StatusOK || h.dns.blockedHost("tracker.ads.example.com") {
+	if rr.Code != http.StatusOK || h.dns.IsBlockedHost("tracker.ads.example.com") {
 		t.Fatalf("disable source failed: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
