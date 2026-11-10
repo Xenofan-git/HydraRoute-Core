@@ -353,7 +353,7 @@ func Compile(cfg Config, profiles []ProfileRef) (Output, error) {
 	fmt.Fprintf(&b, "bind-tcp %s:%d\n", cfg.ListenHost, cfg.ListenPort)
 	fmt.Fprintf(&b, "ca-path %s\n", cfg.CAPath)
 	fmt.Fprintf(&b, "cache-size %d\n", cfg.CacheSize)
-	b.WriteString("cache-persist no\nresolv-file /dev/null\nlocal-ptr-enable no\nmdns-lookup no\nexpand-ptr-from-address no\naudit-enable no\nlog-level error\n")
+	b.WriteString("cache-persist no\nresolv-file /dev/null\nspeed-check-mode none\nlocal-ptr-enable no\nmdns-lookup no\nexpand-ptr-from-address no\naudit-enable no\nlog-level error\n")
 	b.WriteString("\n# One SOCKS5 proxy per Core profile; never per Xray node.\n")
 	for _, id := range profileIDs {
 		profile := profileMap[id]
