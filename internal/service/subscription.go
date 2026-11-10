@@ -22,6 +22,7 @@ type ProfileInput struct {
 	Port               uint16             `json:"port"`
 	Strategy           string             `json:"strategy,omitempty"`
 	OutboundInterface  string             `json:"outbound_interface,omitempty"`
+	MuxEnabled         bool               `json:"mux_enabled,omitempty"`
 	DPIBypass          compiler.DPIBypass `json:"dpi_bypass,omitempty"`
 	FilterKeep         string             `json:"filter_keep,omitempty"`
 	FilterExclude      string             `json:"filter_exclude,omitempty"`
@@ -80,6 +81,7 @@ type ProfilePreview struct {
 	FilterKeep          string             `json:"filter_keep"`
 	FilterExclude       string             `json:"filter_exclude"`
 	FilterAvailable     bool               `json:"filter_available"`
+	MuxCompatible       bool               `json:"mux_compatible"`
 	Nodes               []PreviewNode      `json:"nodes"`
 	MissingPicked       []parser.ServerKey `json:"missing_picked,omitempty"`
 	MissingExcluded     []parser.ServerKey `json:"missing_excluded,omitempty"`
@@ -189,9 +191,18 @@ func previewProfile(ctx context.Context, profile profiles.Profile, stateDir stri
 	for _, key := range reconciled.Excluded {
 		excluded[key] = true
 	}
+	muxCompatible := true
+	muxNodeCount := 0
 	out := ProfilePreview{ProfileID: profile.ID, SourceID: profile.SourceID, PickMode: selection.PickMode, AutoUpdateEnabled: profile.AutoUpdateEnabled, AutoUpdateInterval: profile.AutoUpdateInterval, AutoUpdateAvailable: profile.SubscriptionURL != "", FilterKeep: profile.FilterKeep, FilterExclude: profile.FilterExclude, FilterAvailable: profile.SubscriptionURL != "" || profile.Subscription != "", Nodes: make([]PreviewNode, 0, len(servers)), MissingPicked: reconciled.MissingPicked, MissingExcluded: reconciled.MissingExcluded}
 	for _, server := range servers {
 		key := server.CompilerKey()
+		selected := picked[key] || (selection.PickMode == "auto" && !excluded[key])
+		if selected && !excluded[key] && !serverFiltered(server.Name, profile.FilterKeep, profile.FilterExclude, len(profile.Links) > 0 && profile.Subscription == "" && profile.SubscriptionURL == "" || server.Key.Source == "direct") {
+			muxNodeCount++
+			if strings.Contains(strings.ToLower(server.ReferenceURI), "flow=xtls-rprx") {
+				muxCompatible = false
+			}
+		}
 		directSource := len(profile.Links) > 0 && profile.Subscription == "" && profile.SubscriptionURL == ""
 		filtered := serverFiltered(server.Name, profile.FilterKeep, profile.FilterExclude, directSource || server.Key.Source == "direct")
 		var outbound struct {
@@ -215,6 +226,7 @@ func previewProfile(ctx context.Context, profile profiles.Profile, stateDir stri
 		}
 		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Protocol: outbound.Protocol, Host: host, Picked: picked[key] || (selection.PickMode == "auto" && !excluded[key]), Excluded: excluded[key], Filtered: filtered, ReferenceURI: server.ReferenceURI})
 	}
+	out.MuxCompatible = muxNodeCount > 0 && muxCompatible
 	return out, nil
 }
 
@@ -258,7 +270,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 			fail("invalid profile/source identity")
 			continue
 		}
-		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, OutboundInterface: input.Profile.OutboundInterface, DPIBypass: input.Profile.DPIBypass, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
+		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, OutboundInterface: input.Profile.OutboundInterface, MuxEnabled: input.Profile.MuxEnabled, DPIBypass: input.Profile.DPIBypass, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
 		if !profile.Enabled {
 			compiledProfiles = append(compiledProfiles, profile)
 			continue
