@@ -1,0 +1,371 @@
+package integration
+
+import (
+	"bufio"
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"hydraroute.local/core/internal/compiler"
+	"hydraroute.local/core/internal/xrayapi"
+)
+
+const xrayAPIPort = 16285
+
+type probeServer struct {
+	http     *httptest.Server
+	userHits atomic.Int64
+}
+
+func newProbeServer() *probeServer {
+	p := &probeServer{}
+	p.http = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			p.userHits.Add(1)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	return p
+}
+
+type socksUpstream struct {
+	listener    net.Listener
+	connections atomic.Int64
+}
+
+func startSOCKSUpstream(t *testing.T) *socksUpstream {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &socksUpstream{listener: ln}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			s.connections.Add(1)
+			go s.handle(conn)
+		}
+	}()
+	return s
+}
+
+func (s *socksUpstream) handle(conn net.Conn) {
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+	var greeting [2]byte
+	if _, err := io.ReadFull(conn, greeting[:]); err != nil || greeting[0] != 5 {
+		return
+	}
+	methods := make([]byte, int(greeting[1]))
+	if _, err := io.ReadFull(conn, methods); err != nil {
+		return
+	}
+	if _, err := conn.Write([]byte{5, 0}); err != nil {
+		return
+	}
+	var request [4]byte
+	if _, err := io.ReadFull(conn, request[:]); err != nil || request[0] != 5 || request[1] != 1 {
+		return
+	}
+	var host string
+	switch request[3] {
+	case 1:
+		var raw [4]byte
+		if _, err := io.ReadFull(conn, raw[:]); err != nil {
+			return
+		}
+		host = net.IP(raw[:]).String()
+	case 3:
+		var size [1]byte
+		if _, err := io.ReadFull(conn, size[:]); err != nil {
+			return
+		}
+		raw := make([]byte, int(size[0]))
+		if _, err := io.ReadFull(conn, raw); err != nil {
+			return
+		}
+		host = string(raw)
+	case 4:
+		var raw [16]byte
+		if _, err := io.ReadFull(conn, raw[:]); err != nil {
+			return
+		}
+		host = net.IP(raw[:]).String()
+	default:
+		return
+	}
+	var rawPort [2]byte
+	if _, err := io.ReadFull(conn, rawPort[:]); err != nil {
+		return
+	}
+	destination := net.JoinHostPort(host, fmt.Sprint(binary.BigEndian.Uint16(rawPort[:])))
+	upstream, err := net.DialTimeout("tcp", destination, 4*time.Second)
+	if err != nil {
+		_, _ = conn.Write([]byte{5, 5, 0, 1, 127, 0, 0, 1, 0, 0})
+		return
+	}
+	defer upstream.Close()
+	if _, err := conn.Write([]byte{5, 0, 0, 1, 127, 0, 0, 1, 0, 0}); err != nil {
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+	_ = upstream.SetDeadline(time.Time{})
+	finished := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(upstream, conn); finished <- struct{}{} }()
+	go func() { _, _ = io.Copy(conn, upstream); finished <- struct{}{} }()
+	<-finished
+}
+
+func freeTCPPort(t *testing.T) uint16 {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := uint16(ln.Addr().(*net.TCPAddr).Port)
+	_ = ln.Close()
+	return port
+}
+
+func socksGET(port uint16, target string) (int, error) {
+	u, err := url.Parse(target)
+	if err != nil {
+		return 0, err
+	}
+	host, portText, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		return 0, err
+	}
+	ip := net.ParseIP(host).To4()
+	if ip == nil {
+		return 0, fmt.Errorf("test target must use IPv4")
+	}
+	upstream, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", fmt.Sprint(port)), 3*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	defer upstream.Close()
+	_ = upstream.SetDeadline(time.Now().Add(4 * time.Second))
+	if _, err := upstream.Write([]byte{5, 1, 0}); err != nil {
+		return 0, err
+	}
+	var greeting [2]byte
+	if _, err := io.ReadFull(upstream, greeting[:]); err != nil {
+		return 0, err
+	}
+	if greeting != [2]byte{5, 0} {
+		return 0, fmt.Errorf("SOCKS method negotiation failed: %v", greeting)
+	}
+	portNum, err := strconv.Atoi(portText)
+	if err != nil {
+		return 0, err
+	}
+	request := []byte{5, 1, 0, 1, ip[0], ip[1], ip[2], ip[3], byte(portNum >> 8), byte(portNum)}
+	if _, err := upstream.Write(request); err != nil {
+		return 0, err
+	}
+	var reply [10]byte
+	if _, err := io.ReadFull(upstream, reply[:]); err != nil {
+		return 0, err
+	}
+	if reply[1] != 0 {
+		return 0, fmt.Errorf("SOCKS connect rejected: code %d", reply[1])
+	}
+	path := u.RequestURI()
+	if path == "" {
+		path = "/"
+	}
+	if _, err := fmt.Fprintf(upstream, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, u.Host); err != nil {
+		return 0, err
+	}
+	line, err := bufio.NewReader(upstream).ReadString('\n')
+	if err != nil {
+		return 0, err
+	}
+	var major, minor, code int
+	if _, err := fmt.Sscanf(line, "HTTP/%d.%d %d", &major, &minor, &code); err != nil {
+		return 0, fmt.Errorf("invalid HTTP response %q: %w", line, err)
+	}
+	return code, nil
+}
+
+func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
+	if os.Getenv("HRCORE_XRAY_INTEGRATION") != "1" {
+		t.Skip("set HRCORE_XRAY_INTEGRATION=1 to run the real Xray data-plane test")
+	}
+	xrayBinary := os.Getenv("XRAY_BINARY")
+	if xrayBinary == "" {
+		t.Fatal("XRAY_BINARY is required")
+	}
+	if _, err := os.Stat(xrayBinary); err != nil {
+		t.Fatalf("Xray binary is unavailable: %v", err)
+	}
+	if ln, err := net.Listen("tcp", "127.0.0.1:16285"); err == nil {
+		_ = ln.Close()
+	} else {
+		t.Skipf("Xray API test port %d is already in use: %v", xrayAPIPort, err)
+	}
+
+	probe := newProbeServer()
+	defer probe.http.Close()
+	live := startSOCKSUpstream(t)
+	rrPort, lpPort := freeTCPPort(t), freeTCPPort(t)
+	for rrPort == lpPort {
+		lpPort = freeTCPPort(t)
+	}
+
+	outbound := func(key string, port uint16) compiler.Node {
+		data, _ := json.Marshal(map[string]any{"protocol": "socks", "settings": map[string]any{"servers": []any{map[string]any{"address": "127.0.0.1", "port": port}}}})
+		return compiler.Node{Key: key, Outbound: data}
+	}
+	compiled, err := compiler.Compile(compiler.CompileRequest{ObservatoryProbeIntervalSeconds: 5, Profiles: []compiler.Profile{
+		{ID: "rr", Enabled: true, Port: rrPort, Strategy: "roundRobin", FallbackKey: "rr-dead-a", Nodes: []compiler.Node{outbound("rr-dead-a", freeTCPPort(t)), outbound("rr-live", uint16(live.listener.Addr().(*net.TCPAddr).Port)), outbound("rr-dead-c", freeTCPPort(t))}},
+		{ID: "lp", Enabled: true, Port: lpPort, Strategy: "leastPing", FallbackKey: "lp-dead-a", Nodes: []compiler.Node{outbound("lp-dead-a", freeTCPPort(t)), outbound("lp-dead-b", freeTCPPort(t))}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(compiled, &config); err != nil {
+		t.Fatal(err)
+	}
+	routing := config["routing"].(map[string]any)
+	balancers := routing["balancers"].([]any)
+	fallbacks := map[string]string{"rr": compiler.OutboundTag("rr", "rr-dead-a"), "lp": compiler.OutboundTag("lp", "lp-dead-a")}
+	for _, raw := range balancers {
+		balancer := raw.(map[string]any)
+		id := strings.TrimPrefix(balancer["tag"].(string), "hr_bal_")
+		if balancer["fallbackTag"] != fallbacks[id] {
+			t.Fatalf("profile %s has non-local fallbackTag %v", id, balancer["fallbackTag"])
+		}
+	}
+	config["log"] = map[string]any{"loglevel": "warning", "access": filepath.Join(t.TempDir(), "access.log"), "error": filepath.Join(t.TempDir(), "error.log")}
+	observatory := config["observatory"].(map[string]any)
+	observatory["probeUrl"] = probe.http.URL + "/generate_204"
+	observatory["probeInterval"] = "500ms"
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "xray.json")
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(xrayBinary, "run", "-test", "-config", configPath).CombinedOutput(); err != nil {
+		t.Fatalf("Xray rejected Core-generated fallback config: %v\n%s", err, output)
+	}
+
+	logPath := config["log"].(map[string]any)["error"].(string)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(xrayBinary, "run", "-config", configPath)
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait(); _ = logFile.Close() })
+
+	wantAlive := map[string]bool{
+		compiler.OutboundTag("rr", "rr-dead-a"): false,
+		compiler.OutboundTag("rr", "rr-live"):   true,
+		compiler.OutboundTag("rr", "rr-dead-c"): false,
+		compiler.OutboundTag("lp", "lp-dead-a"): false,
+		compiler.OutboundTag("lp", "lp-dead-b"): false,
+	}
+	deadline := time.Now().Add(18 * time.Second)
+	ready := false
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		statuses, statusErr := xrayapi.GetOutboundStatus(ctx, "127.0.0.1:16285")
+		cancel()
+		if statusErr == nil {
+			seen := make(map[string]bool, len(statuses))
+			for _, status := range statuses {
+				if _, expected := wantAlive[status.Tag]; expected && status.LastTryTime > 0 {
+					seen[status.Tag] = status.Alive
+				}
+			}
+			ready = len(seen) == len(wantAlive)
+			if ready {
+				for tag, alive := range wantAlive {
+					if seen[tag] != alive {
+						ready = false
+						break
+					}
+				}
+			}
+			if ready {
+				break
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("Observatory did not report the expected alive/dead state for all five profile outbounds")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	targets, err := xrayapi.GetBalancerPrincipleTargetTags(ctx, "127.0.0.1:16285", "hr_bal_rr")
+	cancel()
+	if err != nil {
+		t.Fatalf("GetBalancerInfo failed for roundRobin: %v", err)
+	}
+	wantTargets := map[string]bool{
+		compiler.OutboundTag("rr", "rr-dead-a"): true,
+		compiler.OutboundTag("rr", "rr-live"):   true,
+		compiler.OutboundTag("rr", "rr-dead-c"): true,
+	}
+	if len(targets) != len(wantTargets) {
+		t.Fatalf("GetBalancerInfo candidate set mismatch: %q", targets)
+	}
+	for _, tag := range targets {
+		if !wantTargets[tag] {
+			t.Fatalf("GetBalancerInfo returned foreign candidate %q", tag)
+		}
+	}
+
+	before := live.connections.Load()
+	for i := 0; i < 3; i++ {
+		code, err := socksGET(rrPort, probe.http.URL+"/user")
+		if err != nil || code != http.StatusNoContent {
+			t.Fatalf("roundRobin request %d failed: status=%d err=%v", i+1, code, err)
+		}
+	}
+	if live.connections.Load()-before < 3 {
+		t.Fatal("roundRobin did not send all three user requests through its only healthy member")
+	}
+	if probe.userHits.Load() != 3 {
+		t.Fatalf("roundRobin user request count mismatch: got %d want 3", probe.userHits.Load())
+	}
+
+	before = probe.userHits.Load()
+	if code, err := socksGET(lpPort, probe.http.URL+"/user"); err == nil {
+		t.Fatalf("all-dead leastPing unexpectedly returned HTTP %d; a direct fallback leak is possible", code)
+	}
+	if got := probe.userHits.Load(); got != before {
+		t.Fatalf("all-dead leastPing reached the direct HTTP endpoint: user hits %d -> %d", before, got)
+	}
+}
