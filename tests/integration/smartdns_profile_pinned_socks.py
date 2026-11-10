@@ -18,6 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 SMARTDNS = os.environ.get("SMARTDNS_BINARY", "")
+DNS_TIMEOUT = float(os.environ.get("SMARTDNS_DNS_TIMEOUT", "3"))
+STARTUP_TIMEOUT = float(os.environ.get("SMARTDNS_STARTUP_TIMEOUT", "10"))
 if not SMARTDNS or not Path(SMARTDNS).is_file():
     raise SystemExit("SMARTDNS_BINARY must point to the built SmartDNS executable")
 
@@ -246,7 +248,9 @@ nameserver /torrent.test/hr_dns_torrent
     return path
 
 
-def dns_query(name: str, timeout: float = 3.0) -> str | None:
+def dns_query(name: str, timeout: float | None = None) -> str | None:
+    if timeout is None:
+        timeout = DNS_TIMEOUT
     ident = int(time.time_ns()) & 0xFFFF
     qname = b"".join(bytes([len(label)]) + label.encode("ascii") for label in name.split(".")) + b"\x00"
     packet = struct.pack("!HHHHHH", ident, 0x0100, 1, 0, 0, 1) + qname + struct.pack("!HH", 1, 1)
@@ -353,7 +357,7 @@ def main() -> None:
     config_path = build_config()
     SMARTDNS_PROCESS, trace_path, LOG_FILE = start_smartdns(config_path)
     try:
-        deadline = time.time() + 10
+        deadline = time.time() + STARTUP_TIMEOUT
         while time.time() < deadline:
             if dns_query("allowed.example.test", 1) == "203.0.113.5":
                 break
@@ -376,14 +380,14 @@ def main() -> None:
             assert "dns-foreign.example.test" in SNI and "dns-torrent.example.test" in SNI, SNI
             before_foreign_failure = len(HITS)
         DISABLED_PROXIES.add(16081)
-        assert dns_query("login2.foreign.test", 3) != "203.0.113.77", "foreign DNS bypassed its failed profile SOCKS proxy"
+        assert dns_query("login2.foreign.test") != "203.0.113.77", "foreign DNS bypassed its failed profile SOCKS proxy"
         with LOCK:
             assert len(HITS) == before_foreign_failure, f"foreign query reached DoH after its proxy was disabled: {HITS[before_foreign_failure:]}"
         assert dns_query("tracker2.torrent.test") == "203.0.113.77", "torrent profile was affected by foreign proxy failure"
         with LOCK:
             assert any(port == 18444 and name == "tracker2.torrent.test" for port, name in HITS), HITS
             before_unmatched = len(HITS)
-        assert dns_query("unmatched.test", 1) != "203.0.113.77", "unmatched domain unexpectedly resolved"
+        assert dns_query("unmatched.test") != "203.0.113.77", "unmatched domain unexpectedly resolved"
         with LOCK:
             assert len(HITS) == before_unmatched, "unmatched domain unexpectedly reached a DoH upstream"
         print("PASS: static/domain-set rules, TLS/SNI verification, profile-pinned SOCKS, per-profile failure isolation, fail-closed default group")
