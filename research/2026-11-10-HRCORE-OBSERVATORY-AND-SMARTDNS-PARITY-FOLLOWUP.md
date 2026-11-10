@@ -54,7 +54,7 @@ Using Go 1.27.3:
 
 The probe interval is still provisional. The current Core compiler normalizes invalid values to 30 seconds, divides the configured seconds by the total selected subject count, and applies a 100 ms floor. HRweb static analysis found a candidate interval arithmetic path at `main.rebuildXRayConfigs`, but the source field is a `*int` and the observed stack value is not yet proven to be the dereferenced configured value. The divisor appears to be the length of a dynamically grown string slice, but its exact semantic role was not conclusively established. Do not describe the current interval formula as exact HRweb parity until that dataflow is closed.
 
-The strategy surface discovered in HRweb is `leastPing`, `random`, and `roundRobin`. Core has actual Xray runtime tests for leastPing and roundRobin; random still needs a deterministic/behavioral test strategy, plus update/restart/subscription-removal lifecycle parity checks.
+The strategy surface discovered in HRweb is `leastPing`, `random`, and `roundRobin`. Core now has actual Xray runtime tests for all three strategies: leastPing, roundRobin and random. The random integration test verifies that 30 separate connections reach all three healthy upstreams. Subscription refresh/removal, restart, pool-size changes and stale-observation lifecycle parity still need separate coverage.
 
 ## SmartDNS ARM64 runtime gate
 
