@@ -83,7 +83,7 @@ func TestChooseFallbackWithoutReferenceUsesFirstSelected(t *testing.T) {
 	ak, bk := a.CompilerKey(), b.CompilerKey()
 	input := ProfileInput{Fallback: ProfileFallback{
 		CandidateKey: bk,
-		Statuses:      map[string]FallbackStatus{ak: fallbackStatus(true, 80, 10, 10), bk: fallbackStatus(true, 1, 11, 11)},
+		Statuses:     map[string]FallbackStatus{ak: fallbackStatus(true, 80, 10, 10), bk: fallbackStatus(true, 1, 11, 11)},
 	}}
 	got := chooseFallbackKey([]parser.ParsedServer{a, b}, input, compiler.Profile{ID: "p", Enabled: true}, false)
 	if got != ak {
