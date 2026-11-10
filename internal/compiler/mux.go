@@ -58,14 +58,13 @@ func hasXTLSRPRXFlowValue(value any) bool {
 	return walk(value)
 }
 
-// HRweb uses concurrency=8 and xudpConcurrency=8. Its stripped binary carries
-// an opaque static value for xudpProxyUDP443; use Xray's safe reject default
-// until a live original config confirms a different value.
+// Static disassembly of HRweb 1.68.0-1 confirms its exact Mux defaults:
+// concurrency=8, xudpConcurrency=1 and xudpProxyUDP443="reject".
 func applyMux(outbound map[string]any) {
 	outbound["mux"] = map[string]any{
 		"enabled":         true,
 		"concurrency":     8,
-		"xudpConcurrency": 8,
+		"xudpConcurrency": 1,
 		"xudpProxyUDP443": "reject",
 	}
 }
