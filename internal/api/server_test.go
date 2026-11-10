@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hydraroute.local/core/internal/compiler"
 	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
+	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
 	"hydraroute.local/core/internal/service"
@@ -1673,6 +1674,90 @@ func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
 	}
 	if got, ok := publicProbeAddress(context.Background(), "1.1.1.1"); !ok || got != "1.1.1.1" {
 		t.Fatalf("public address rejected: %q %v", got, ok)
+	}
+}
+
+func TestSmartDNSAPIStoresConfigAndRebuildsPreparedGeneration(t *testing.T) {
+	stateDir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	profile := profiles.Profile{
+		ID: "profile1", SourceID: "source1", Enabled: true, Listen: "127.0.0.1", Port: 16001,
+		Links: []string{"vless://example.invalid"},
+	}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
+	cfg := hrsmartdns.Config{
+		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 15354, CacheSize: 32,
+		Upstreams: []hrsmartdns.Upstream{{
+			ID: "upstream1", ProfileID: "profile1", Protocol: "doh",
+			Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
+		}},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns/smartdns", string(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("prepare SmartDNS config status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if h.smartDNSRuntime == nil || h.smartDNSRuntime.Status().Running {
+		t.Fatal("SmartDNS should be prepared but not auto-started")
+	}
+	if h.smartDNSRuntime.Status().ConfigPath == "" {
+		t.Fatalf("prepared SmartDNS config path missing: %+v", h.smartDNSRuntime.Status())
+	}
+	if _, err := os.Stat(h.smartDNSConfigPath); err != nil {
+		t.Fatalf("persisted SmartDNS settings missing: %v", err)
+	}
+	info, err := os.Stat(h.smartDNSConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("SmartDNS settings mode=%o, want 600", info.Mode().Perm())
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/dns/smartdns"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"profile_id":"profile1"`) {
+		t.Fatalf("SmartDNS GET status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !reloaded.smartDNSConfig.Enabled || reloaded.smartDNSErr != "" || reloaded.smartDNSRuntime.Status().Running {
+		t.Fatalf("SmartDNS settings were not safely reconstructed: config=%+v err=%q status=%+v", reloaded.smartDNSConfig, reloaded.smartDNSErr, reloaded.smartDNSRuntime.Status())
+	}
+	if reloaded.smartDNSRuntime.Status().ConfigPath == "" {
+		t.Fatal("reloaded SmartDNS generation was not prepared")
+	}
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localPost("/v1/dns/smartdns/stop", `{}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("SmartDNS stop idempotence status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSmartDNSAPIRejectsProfileReferencesThatCannotBePinned(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	cfg := hrsmartdns.Config{
+		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 15354,
+		Upstreams: []hrsmartdns.Upstream{{
+			ID: "upstream1", ProfileID: "missing", Protocol: "doh",
+			Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
+		}},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns/smartdns", string(body)))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("missing profile reference status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if h.smartDNSConfig.Enabled {
+		t.Fatal("rejected SmartDNS config became active in memory")
 	}
 }
 

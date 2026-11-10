@@ -27,6 +27,7 @@ import (
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/dnsservice"
 	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
+	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 	"hydraroute.local/core/internal/events"
 	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
@@ -42,6 +43,7 @@ import (
 
 const maxRequestBytes = 8 << 20
 const maxGeoDataAssetBytes = 128 << 20
+const smartDNSBinaryPath = "/usr/local/libexec/hydraroute/smartdns"
 
 type geoDataAssetStatus struct {
 	Name      string `json:"name"`
@@ -82,6 +84,10 @@ type Server struct {
 	dns                 *dnsservice.Manager
 	blocklists          *dnsblocklist.Manager
 	blocklistsErr       string
+	smartDNSRuntime     *hrsmartdns.Runtime
+	smartDNSConfig      hrsmartdns.Config
+	smartDNSConfigPath  string
+	smartDNSErr         string
 	opMu                sync.Mutex
 	refreshMu           sync.Mutex
 	refreshOpts         Options
@@ -139,6 +145,29 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
 		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
+		s.smartDNSConfig = hrsmartdns.DefaultConfig()
+		s.smartDNSConfigPath = filepath.Join(stateDir, "dns", "smartdns", "config.json")
+		if runtime, err := hrsmartdns.NewRuntime(hrsmartdns.RuntimeConfig{
+			BinaryPath: smartDNSBinaryPath,
+			StateDir:   filepath.Join(stateDir, "dns", "smartdns", "runtime"),
+			ListenAddr: net.JoinHostPort("127.0.0.1", strconv.Itoa(s.smartDNSConfig.ListenPort)),
+		}); err != nil {
+			s.smartDNSErr = err.Error()
+		} else {
+			s.smartDNSRuntime = runtime
+		}
+		if data, err := os.ReadFile(s.smartDNSConfigPath); err == nil {
+			if err := json.Unmarshal(data, &s.smartDNSConfig); err != nil {
+				s.smartDNSErr = "saved SmartDNS configuration is invalid"
+			}
+		} else if !os.IsNotExist(err) {
+			s.smartDNSErr = "saved SmartDNS configuration could not be read"
+		}
+		if s.smartDNSRuntime != nil {
+			if err := s.smartDNSRuntime.Apply(context.Background(), s.smartDNSConfig, s.smartDNSProfileRefs()); err != nil {
+				s.smartDNSErr = err.Error()
+			}
+		}
 		if manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), nil); err != nil {
 			s.blocklistsErr = err.Error()
 		} else {
@@ -189,6 +218,8 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
 	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
 	s.mux.HandleFunc("/v1/dns/check", s.dnsCheck)
+	s.mux.HandleFunc("/v1/dns/smartdns", s.smartDNSHandler)
+	s.mux.HandleFunc("/v1/dns/smartdns/", s.smartDNSAction)
 	s.mux.HandleFunc("/v1/dns/blocklists", s.dnsBlocklists)
 	s.mux.HandleFunc("/v1/dns/blocklists/", s.dnsBlocklistItem)
 	s.mux.Handle("/", ui.Handler())
@@ -3444,6 +3475,168 @@ func (s *Server) applyDNSBlocklists() {
 	}
 	snapshot := s.blocklists.Snapshot()
 	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
+}
+
+func (s *Server) smartDNSProfileRefs() []hrsmartdns.ProfileRef {
+	if s.profileStore == nil {
+		return nil
+	}
+	items, err := s.profileStore.List()
+	if err != nil {
+		return nil
+	}
+	out := make([]hrsmartdns.ProfileRef, 0, len(items))
+	for _, item := range items {
+		if !item.Enabled {
+			continue
+		}
+		listen := item.Listen
+		if listen == "" {
+			listen = "127.0.0.1"
+		}
+		out = append(out, hrsmartdns.ProfileRef{ID: item.ID, Enabled: item.Enabled, Listen: listen, Port: int(item.Port)})
+	}
+	return out
+}
+
+func (s *Server) persistSmartDNSConfig(cfg hrsmartdns.Config) error {
+	if s.smartDNSConfigPath == "" {
+		return fmt.Errorf("SmartDNS state path is not configured")
+	}
+	dir := filepath.Dir(s.smartDNSConfigPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+		return fmt.Errorf("SmartDNS configuration directory must be private and must not be a symlink")
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".smartdns-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(name, s.smartDNSConfigPath); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
+	if s.smartDNSRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "SmartDNS runtime is unavailable")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var cfg hrsmartdns.Config
+		if err := decodeStrictJSON(w, r, &cfg, 256<<10); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid SmartDNS configuration")
+			return
+		}
+		cfg.CAPath = hrsmartdns.DefaultConfig().CAPath
+		cfg.DataDir = ""
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
+		previous := s.smartDNSConfig
+		if err := s.persistSmartDNSConfig(cfg); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot persist SmartDNS configuration")
+			return
+		}
+		if err := s.smartDNSRuntime.Apply(r.Context(), cfg, s.smartDNSProfileRefs()); err != nil {
+			if restoreErr := s.persistSmartDNSConfig(previous); restoreErr != nil {
+				s.smartDNSErr = "SmartDNS apply failed and saved configuration rollback failed: " + restoreErr.Error()
+			} else {
+				s.smartDNSErr = err.Error()
+			}
+			writeError(w, http.StatusUnprocessableEntity, s.smartDNSErr)
+			return
+		}
+		s.smartDNSConfig = cfg
+		s.smartDNSErr = ""
+		s.recordEvent("info", "dns", "smartdns_config_prepared", "SmartDNS configuration prepared")
+		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": ""})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
+	if s.smartDNSRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "SmartDNS runtime is unavailable")
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalJSONRequest(r) {
+		writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+		return
+	}
+	action := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/dns/smartdns/"), "/")
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	switch action {
+	case "start":
+		if !s.smartDNSConfig.Enabled {
+			writeError(w, http.StatusConflict, "SmartDNS is disabled")
+			return
+		}
+		if err := s.smartDNSRuntime.Start(r.Context()); err != nil {
+			s.smartDNSErr = err.Error()
+			writeError(w, http.StatusBadGateway, "SmartDNS failed to start")
+			return
+		}
+		s.smartDNSErr = ""
+		s.recordEvent("info", "dns", "smartdns_started", "SmartDNS sidecar started")
+	case "stop":
+		if err := s.smartDNSRuntime.Stop(r.Context()); err != nil {
+			s.smartDNSErr = err.Error()
+			writeError(w, http.StatusBadGateway, "SmartDNS failed to stop")
+			return
+		}
+		s.recordEvent("info", "dns", "smartdns_stopped", "SmartDNS sidecar stopped")
+	default:
+		writeError(w, http.StatusNotFound, "SmartDNS action not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
 }
 
 func (s *Server) dnsBlocklists(w http.ResponseWriter, r *http.Request) {

@@ -24,42 +24,46 @@ type ProfileRef struct {
 }
 
 type Upstream struct {
-	ID          string
-	ProfileID   string
-	Protocol    string // doh or dot
-	Host        string
-	Port        int
-	Path        string // DoH only
-	BootstrapIP string
-	Enabled     bool
+	ID          string `json:"id"`
+	ProfileID   string `json:"profile_id"`
+	Protocol    string `json:"protocol"` // doh or dot
+	Host        string `json:"host"`
+	Port        int    `json:"port,omitempty"`
+	Path        string `json:"path,omitempty"` // DoH only
+	BootstrapIP string `json:"bootstrap_ip"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type DomainRule struct {
-	ID        string
-	MatchType string // exact or suffix
-	Pattern   string
-	ProfileID string
-	Enabled   bool
+	ID        string `json:"id"`
+	MatchType string `json:"match_type"` // exact or suffix
+	Pattern   string `json:"pattern"`
+	ProfileID string `json:"profile_id"`
+	Enabled   bool   `json:"enabled"`
 }
 
 type DomainSet struct {
-	ID        string
-	Kind      string // block, allow or route
-	ProfileID string // required for route sets
-	Domains   []string
-	Enabled   bool
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind"` // block, allow or route
+	ProfileID string   `json:"profile_id,omitempty"` // required for route sets
+	Domains   []string `json:"domains"`
+	Enabled   bool     `json:"enabled"`
 }
 
 type Config struct {
-	Enabled    bool
-	ListenHost string
-	ListenPort int
-	CacheSize  int
-	CAPath     string
-	DataDir    string
-	Upstreams  []Upstream
-	Rules      []DomainRule
-	DomainSets []DomainSet
+	Enabled    bool         `json:"enabled"`
+	ListenHost string       `json:"listen_host"`
+	ListenPort int          `json:"listen_port"`
+	CacheSize  int          `json:"cache_size"`
+	CAPath     string       `json:"-"`
+	DataDir    string       `json:"-"`
+	Upstreams  []Upstream   `json:"upstreams"`
+	Rules      []DomainRule `json:"rules"`
+	DomainSets []DomainSet  `json:"domain_sets"`
+}
+
+func DefaultConfig() Config {
+	return Config{ListenHost: "127.0.0.1", ListenPort: 5354, CAPath: "/etc/ssl/certs"}
 }
 
 type Output struct {
