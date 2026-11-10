@@ -137,6 +137,43 @@ func TestManagerRemovedEntriesOnlySuppressBlockedDomains(t *testing.T) {
 	}
 }
 
+func TestManagerReportsRemovedEntriesMissingFromRefreshedSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocklists.json")
+	refresh := 0
+	fetcher := func(context.Context, string) (Result, error) {
+		refresh++
+		if refresh == 1 {
+			return Result{Blocked: []string{"old-ads.example.com"}, Allowed: []string{"safe.example.com"}}, nil
+		}
+		return Result{Blocked: []string{"new-ads.example.com"}, Allowed: []string{"safe.example.com"}}, nil
+	}
+	manager, err := NewManager(path, fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := manager.SaveSource(Source{Name: "Ads", URL: "https://lists.example/ads.txt", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Refresh(context.Background(), source.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RemoveEntry(source.ID, "old-ads.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Refresh(context.Background(), source.ID); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := manager.Snapshot()
+	missing := snapshot.Missing[source.ID]
+	if len(missing) != 1 || missing[0] != "old-ads.example.com" {
+		t.Fatalf("removed entry missing from source was not reported: %v", missing)
+	}
+	if len(snapshot.Allowed) != 1 || snapshot.Allowed[0] != "safe.example.com" {
+		t.Fatalf("source allow exception changed after refresh: %v", snapshot.Allowed)
+	}
+}
+
 func TestManagerRejectsUnsafeSourceURLs(t *testing.T) {
 	manager, err := NewManager(filepath.Join(t.TempDir(), "blocklists.json"), nil)
 	if err != nil {

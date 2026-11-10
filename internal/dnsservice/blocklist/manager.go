@@ -49,9 +49,10 @@ type Source struct {
 }
 
 type Snapshot struct {
-	Sources []Source `json:"sources"`
-	Blocked []string `json:"blocked"`
-	Allowed []string `json:"allowed"`
+	Sources []Source           `json:"sources"`
+	Blocked []string           `json:"blocked"`
+	Allowed []string           `json:"allowed"`
+	Missing map[string][]string `json:"missing,omitempty"`
 }
 
 type Fetcher func(context.Context, string) (Result, error)
@@ -321,7 +322,7 @@ func (m *Manager) RestoreEntry(id, rawDomain string) error {
 func (m *Manager) Snapshot() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := Snapshot{Sources: cloneSources(m.sources)}
+	out := Snapshot{Sources: cloneSources(m.sources), Missing: make(map[string][]string)}
 	blocked := make(map[string]struct{})
 	allowed := make(map[string]struct{})
 	for _, source := range m.sources {
@@ -332,9 +333,17 @@ func (m *Manager) Snapshot() Snapshot {
 		if !ok {
 			continue
 		}
+		blockedSource := make(map[string]struct{}, len(result.Blocked))
+		for _, domain := range result.Blocked {
+			blockedSource[domain] = struct{}{}
+		}
 		removed := make(map[string]struct{}, len(source.Removed))
+		missing := make(map[string]struct{})
 		for _, entry := range source.Removed {
 			removed[entry.Entry] = struct{}{}
+			if _, present := blockedSource[entry.Entry]; !present {
+				missing[entry.Entry] = struct{}{}
+			}
 		}
 		for _, domain := range result.Blocked {
 			if _, skip := removed[domain]; !skip {
@@ -343,6 +352,9 @@ func (m *Manager) Snapshot() Snapshot {
 		}
 		for _, domain := range result.Allowed {
 			allowed[domain] = struct{}{}
+		}
+		if len(missing) > 0 {
+			out.Missing[source.ID] = sortedKeys(missing)
 		}
 	}
 	out.Blocked = sortedKeys(blocked)
