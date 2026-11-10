@@ -191,3 +191,15 @@ jobs:
           SMARTDNS_STARTUP_TIMEOUT: "30"
           SMARTDNS_NO_STRACE: "0"
         run: python3 tests/integration/smartdns_profile_pinned_socks.py
+
+      - name: Upload ARM64 QEMU runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartdns-arm64-qemu-diagnostics
+          path: |
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.log
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.strace
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.conf
+          if-no-files-found: warn
+          retention-days: 7
