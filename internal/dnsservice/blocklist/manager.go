@@ -49,9 +49,9 @@ type Source struct {
 }
 
 type Snapshot struct {
-	Sources []Source           `json:"sources"`
-	Blocked []string           `json:"blocked"`
-	Allowed []string           `json:"allowed"`
+	Sources []Source            `json:"sources"`
+	Blocked []string            `json:"blocked"`
+	Allowed []string            `json:"allowed"`
 	Missing map[string][]string `json:"missing,omitempty"`
 }
 
@@ -326,9 +326,6 @@ func (m *Manager) Snapshot() Snapshot {
 	blocked := make(map[string]struct{})
 	allowed := make(map[string]struct{})
 	for _, source := range m.sources {
-		if !source.Enabled {
-			continue
-		}
 		result, ok := m.results[source.ID]
 		if !ok {
 			continue
@@ -345,6 +342,12 @@ func (m *Manager) Snapshot() Snapshot {
 				missing[entry.Entry] = struct{}{}
 			}
 		}
+		if len(missing) > 0 {
+			out.Missing[source.ID] = sortedKeys(missing)
+		}
+		if !source.Enabled {
+			continue
+		}
 		for _, domain := range result.Blocked {
 			if _, skip := removed[domain]; !skip {
 				blocked[domain] = struct{}{}
@@ -352,9 +355,6 @@ func (m *Manager) Snapshot() Snapshot {
 		}
 		for _, domain := range result.Allowed {
 			allowed[domain] = struct{}{}
-		}
-		if len(missing) > 0 {
-			out.Missing[source.ID] = sortedKeys(missing)
 		}
 	}
 	out.Blocked = sortedKeys(blocked)

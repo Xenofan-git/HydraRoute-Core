@@ -172,6 +172,16 @@ func TestManagerReportsRemovedEntriesMissingFromRefreshedSource(t *testing.T) {
 	if len(snapshot.Allowed) != 1 || snapshot.Allowed[0] != "safe.example.com" {
 		t.Fatalf("source allow exception changed after refresh: %v", snapshot.Allowed)
 	}
+	if _, err := manager.SetEnabled(source.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	disabled := manager.Snapshot()
+	if len(disabled.Missing[source.ID]) != 1 || disabled.Missing[source.ID][0] != "old-ads.example.com" {
+		t.Fatalf("disabled source lost its removed-entry status: %+v", disabled.Missing)
+	}
+	if len(disabled.Blocked) != 0 || len(disabled.Allowed) != 0 {
+		t.Fatalf("disabled source still contributes active domains: blocked=%v allowed=%v", disabled.Blocked, disabled.Allowed)
+	}
 }
 
 func TestManagerRejectsUnsafeSourceURLs(t *testing.T) {
