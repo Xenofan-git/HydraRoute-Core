@@ -60,13 +60,13 @@ type CompileResult struct {
 }
 
 type PreviewNode struct {
-	Key      parser.ServerKey `json:"key"`
-	Name     string           `json:"name"`
-	Protocol string           `json:"protocol"`
-	Host     string           `json:"host,omitempty"`
-	Picked   bool             `json:"picked"`
-	Excluded bool             `json:"excluded"`
-	Filtered      bool             `json:"filtered"`
+	Key          parser.ServerKey `json:"key"`
+	Name         string           `json:"name"`
+	Protocol     string           `json:"protocol"`
+	Host         string           `json:"host,omitempty"`
+	Picked       bool             `json:"picked"`
+	Excluded     bool             `json:"excluded"`
+	Filtered     bool             `json:"filtered"`
 	ReferenceURI string           `json:"-"`
 }
 
