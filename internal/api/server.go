@@ -100,6 +100,8 @@ type Server struct {
 	watchlistPartial    bool
 	watchlistExcluded   int
 	observatoryInterval int
+	observatoryAddress  string
+	subscriptionFetcher func(context.Context, string) (string, error)
 	l7Settings          compiler.L7SniffingConfig
 	mux                 *http.ServeMux
 }
@@ -122,7 +124,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if opts.RetryMax < opts.RetryMin {
 		opts.RetryMax = opts.RetryMin
 	}
-	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
+	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, subscriptionFetcher: parser.FetchSubscription, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
 	s.events = events.New("")
 	healthSettings := health.DefaultSettings()
 	if stateDir != "" {
@@ -599,7 +601,7 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 			add("xray", "warning", "Xray process is stopped")
 		default:
 			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
-			_, err := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
+			_, err := xrayapi.GetOutboundStatus(probeCtx, s.observatoryAPIAddress())
 			cancel()
 			if err != nil {
 				add("xray", "failed", "Xray control API did not respond")
@@ -1388,14 +1390,73 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := service.DeleteSelection(s.stateDir, req.ID); err != nil {
-			writeError(w, http.StatusUnprocessableEntity, err.Error())
+		previous, err := s.profileStore.Get(req.ID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "profile not found")
 			return
+		}
+		oldSelection, selectionErr := service.LoadSelection(s.stateDir, req.ID)
+		hadSelection := selectionErr == nil
+		if selectionErr != nil && !os.IsNotExist(selectionErr) {
+			writeError(w, http.StatusInternalServerError, "cannot read previous server selection")
+			return
+		}
+		var previousConfig []byte
+		if s.supervisor != nil {
+			previousConfig, err = s.supervisor.SnapshotConfig()
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "cannot snapshot current Xray configuration")
+				return
+			}
 		}
 		if err := s.profileStore.Delete(req.ID); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
+		if err := service.DeleteSelection(s.stateDir, req.ID); err != nil {
+			_ = s.profileStore.Save(previous)
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		rollbackDelete := func() {
+			_ = s.profileStore.Save(previous)
+			if hadSelection {
+				_ = service.SaveSelection(s.stateDir, oldSelection)
+			}
+			if s.supervisor != nil && len(previousConfig) > 0 {
+				_ = s.supervisor.Prepare(context.Background(), previousConfig)
+			}
+		}
+		if s.supervisor != nil && s.supervisor.Status().Configured {
+			remaining, listErr := s.profileStore.ListProfiles()
+			if listErr == nil {
+				if len(remaining) == 0 {
+					emptyConfig, compileErr := compiler.Compile(compiler.CompileRequest{})
+					if compileErr != nil {
+						listErr = compileErr
+					} else {
+						prepareCtx, prepareCancel := context.WithTimeout(r.Context(), 20*time.Second)
+						listErr = s.supervisor.Prepare(prepareCtx, emptyConfig)
+						prepareCancel()
+					}
+				} else {
+					refreshCtx, refreshCancel := context.WithTimeout(r.Context(), 90*time.Second)
+					_, listErr = s.refreshProfilesCachedLocked(refreshCtx)
+					refreshCancel()
+				}
+			}
+			if listErr != nil {
+				rollbackDelete()
+				writeError(w, http.StatusUnprocessableEntity, "profile deletion could not rebuild the remaining Xray configuration: "+listErr.Error())
+				return
+			}
+		}
+		if err := s.deleteProbeCache(req.ID); err != nil {
+			rollbackDelete()
+			writeError(w, http.StatusInternalServerError, "profile deleted but Observatory cache cleanup failed; previous profile/configuration restored")
+			return
+		}
+		s.syncWatchlist()
 		s.recordEvent("warning", "profiles", "profile_deleted", "Profile deleted: "+req.ID)
 		writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "profile_id": req.ID})
 	default:
@@ -1457,6 +1518,35 @@ func profileIDPatternForCache(id string) bool {
 func (s *Server) saveProbeCache() error {
 	s.probeSaveMu.Lock()
 	defer s.probeSaveMu.Unlock()
+	return s.saveProbeCacheLocked()
+}
+
+func (s *Server) deleteProbeCache(profileID string) error {
+	s.probeSaveMu.Lock()
+	defer s.probeSaveMu.Unlock()
+	s.probeMu.Lock()
+	previous, existed := s.probeCache[profileID]
+	if existed {
+		copied := make(map[string]xrayapi.OutboundStatus, len(previous))
+		for key, status := range previous {
+			copied[key] = status
+		}
+		previous = copied
+	}
+	delete(s.probeCache, profileID)
+	s.probeMu.Unlock()
+	if err := s.saveProbeCacheLocked(); err != nil {
+		if existed {
+			s.probeMu.Lock()
+			s.probeCache[profileID] = previous
+			s.probeMu.Unlock()
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Server) saveProbeCacheLocked() error {
 	if s.stateDir == "" {
 		return nil
 	}
@@ -1599,6 +1689,13 @@ func resolveBalancerCandidate(profileID string, nodes []service.PreviewNode, tag
 	return "", ""
 }
 
+func (s *Server) observatoryAPIAddress() string {
+	if address := strings.TrimSpace(s.observatoryAddress); address != "" {
+		return address
+	}
+	return xrayapi.DefaultAddress
+}
+
 func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string, since int64) (observatoryStatusResponse, error) {
 	if s.profileStore == nil {
 		return observatoryStatusResponse{}, fmt.Errorf("profile store is not configured")
@@ -1618,7 +1715,7 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 	if !s.supervisor.Status().Running {
 		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, eligibleNodes), Error: "Xray is stopped; showing last known measurements"}, nil
 	}
-	items, err := xrayapi.GetOutboundStatus(ctx, xrayapi.DefaultAddress)
+	items, err := xrayapi.GetOutboundStatus(ctx, s.observatoryAPIAddress())
 	if err != nil {
 		return observatoryStatusResponse{ProfileID: profileID, Available: false, Statuses: s.cachedProbeStatuses(profileID, eligibleNodes), Error: "Xray Observatory is unavailable; showing last known measurements"}, nil
 	}
@@ -1629,7 +1726,7 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 	result := observatoryStatusResponse{ProfileID: profileID, Available: true, Refreshed: true, Statuses: make(map[string]xrayapi.OutboundStatus)}
 	// RoutingService exposes the balancer's principle-target candidates. Keep
 	// Observatory measurements available even if this optional API is absent.
-	if tags, candidateErr := xrayapi.GetBalancerPrincipleTargetTags(ctx, xrayapi.DefaultAddress, "hr_bal_"+profileID); candidateErr == nil {
+	if tags, candidateErr := xrayapi.GetBalancerPrincipleTargetTags(ctx, s.observatoryAPIAddress(), "hr_bal_"+profileID); candidateErr == nil {
 		result.BalancerCandidateKey, result.BalancerCandidateName = resolveBalancerCandidate(profileID, eligibleNodes, tags)
 	}
 	s.probeMu.Lock()
@@ -1960,7 +2057,7 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 		case <-poll.C:
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-		items, probeErr := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
+		items, probeErr := xrayapi.GetOutboundStatus(probeCtx, s.observatoryAPIAddress())
 		cancel()
 		if probeErr != nil {
 			continue
@@ -2192,13 +2289,13 @@ func (s *Server) profileFallbackSnapshot(ctx context.Context, profile profiles.P
 		return buildProfileFallbackSnapshot(profile.ID, preview.Nodes, cached, nil, nil)
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	live, probeErr := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
+	live, probeErr := xrayapi.GetOutboundStatus(probeCtx, s.observatoryAPIAddress())
 	cancel()
 	if probeErr != nil {
 		live = nil
 	}
 	tagCtx, tagCancel := context.WithTimeout(ctx, 3*time.Second)
-	candidateTags, tagErr := xrayapi.GetBalancerPrincipleTargetTags(tagCtx, xrayapi.DefaultAddress, "hr_bal_"+profile.ID)
+	candidateTags, tagErr := xrayapi.GetBalancerPrincipleTargetTags(tagCtx, s.observatoryAPIAddress(), "hr_bal_"+profile.ID)
 	tagCancel()
 	if tagErr != nil {
 		candidateTags = nil
@@ -2241,7 +2338,11 @@ func (s *Server) refreshProfilesModeWithFallbacks(ctx context.Context, forceFetc
 		if p.SubscriptionURL != "" {
 			due := forceFetch || p.ID == targetProfile || p.CachedSubscription == "" || (p.AutoUpdateEnabled && (p.LastSubscriptionUpdate == 0 || nowUnix-p.LastSubscriptionUpdate >= int64(p.AutoUpdateInterval*60)))
 			if due {
-				body, fetchErr := parser.FetchSubscription(ctx, p.SubscriptionURL)
+				fetcher := s.subscriptionFetcher
+				if fetcher == nil {
+					fetcher = parser.FetchSubscription
+				}
+				body, fetchErr := fetcher(ctx, p.SubscriptionURL)
 				if fetchErr != nil {
 					return nil, fmt.Errorf("profile %s subscription refresh failed: %w", p.ID, fetchErr)
 				}
