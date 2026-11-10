@@ -59,6 +59,12 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 	if len(balSelector) != 1 {
 		t.Fatalf("balancer must still contain only eligible nodes: %#v", balSelector)
 	}
+	if got := bals[0].(map[string]any)["fallbackTag"]; got != OutboundTag("alpha", "a1") {
+		t.Fatalf("fallback must be the first eligible outbound in the same profile, got %v", got)
+	}
+	if got := bals[1].(map[string]any)["fallbackTag"]; got != OutboundTag("beta", "b1") {
+		t.Fatalf("second profile fallback leaked or was not profile-local: %v", got)
+	}
 	for _, raw := range ins {
 		in := raw.(map[string]any)
 		if in["listen"] != "127.0.0.1" {
@@ -543,4 +549,22 @@ func TestObservatoryProbeIntervalRespectsMinimumAndPoolSize(t *testing.T) {
 			t.Errorf("ObservatoryProbeIntervalMS(%d,%d)=%d want %d", tt.seconds, tt.subjects, got, tt.want)
 		}
 	}
+}
+
+
+func TestCompileUsesExplicitProfileLocalFallback(t *testing.T) {
+	got, err := Compile(CompileRequest{Profiles: []Profile{
+		{ID: "alpha", Enabled: true, Port: 23101, FallbackKey: "a2", Nodes: []Node{node("a1", "vless"), node("a2", "vmess")}},
+		{ID: "beta", Enabled: true, Port: 23102, FallbackKey: "b1", Nodes: []Node{node("b1", "trojan"), node("b2", "vless")}},
+	}})
+	if err != nil { t.Fatal(err) }
+	routing := decode(t, got)["routing"].(map[string]any)
+	balancers := routing["balancers"].([]any)
+	if got := balancers[0].(map[string]any)["fallbackTag"]; got != OutboundTag("alpha", "a2") { t.Fatalf("alpha fallback mismatch: %v", got) }
+	if got := balancers[1].(map[string]any)["fallbackTag"]; got != OutboundTag("beta", "b1") { t.Fatalf("beta fallback mismatch: %v", got) }
+}
+
+func TestCompileRejectsFallbackOutsideEligiblePool(t *testing.T) {
+	_, err := Compile(CompileRequest{Profiles: []Profile{{ID: "alpha", Enabled: true, Port: 23103, FallbackKey: "a2", Nodes: []Node{node("a1", "vless"), node("a2", "vmess")}, Excluded: []string{"a2"}}}})
+	if err == nil || !strings.Contains(err.Error(), "fallback node is not an eligible balancer member") { t.Fatalf("expected profile-local fallback validation error, got %v", err) }
 }
