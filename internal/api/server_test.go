@@ -1069,6 +1069,53 @@ func TestResolveBalancerCandidateUsesLastKnownEligibleStrategyTag(t *testing.T) 
 	}
 }
 
+func TestBuildProfileFallbackSnapshotMapsFullPreviewAndCurrentTags(t *testing.T) {
+	profileID := "fallback-snapshot"
+	selected := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "selected"}, Name: "Selected", ReferenceURI: "vless://shared@example.test:443#selected", Picked: true}
+	removedCandidate := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "removed"}, Name: "Removed", ReferenceURI: "vless://shared@example.test:443#removed", Excluded: true}
+	stale := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "stale"}, Name: "Stale", ReferenceURI: "vless://stale@example.test:443#stale", Filtered: true}
+	keyOf := func(node service.PreviewNode) string {
+		raw, _ := json.Marshal(node.Key)
+		return string(raw)
+	}
+	selectedKey, removedKey, staleKey := keyOf(selected), keyOf(removedCandidate), keyOf(stale)
+	selectedTag := compiler.OutboundTag(profileID, selectedKey)
+	removedTag := compiler.OutboundTag(profileID, removedKey)
+	staleTag := compiler.OutboundTag(profileID, staleKey)
+
+	cached := map[string]xrayapi.OutboundStatus{
+		selectedKey: {Tag: selectedTag, Alive: true, DelayMS: 90, LastTryTime: 10},
+		staleKey:    {Tag: "outbound-from-old-profile-generation", Alive: true, DelayMS: 1, LastTryTime: 12},
+	}
+	live := []xrayapi.OutboundStatus{
+		{Tag: selectedTag, Alive: false, DelayMS: 0, LastTryTime: 20},
+		{Tag: removedTag, Alive: true, DelayMS: 25, LastTryTime: 21},
+		{Tag: staleTag, Alive: true, DelayMS: 5, LastTryTime: 0},
+	}
+	got := buildProfileFallbackSnapshot(profileID, []service.PreviewNode{selected, removedCandidate, stale}, cached, live, []string{selectedTag, removedTag})
+
+	if got.CandidateKey != removedKey || got.ReferenceURI != removedCandidate.ReferenceURI {
+		t.Fatalf("candidate snapshot=(%q,%q), want full-preview candidate (%q,%q)", got.CandidateKey, got.ReferenceURI, removedKey, removedCandidate.ReferenceURI)
+	}
+	if got.ReferenceURIs[staleKey] != stale.ReferenceURI {
+		t.Fatalf("full preview URI map lost filtered node: %#v", got.ReferenceURIs)
+	}
+	if status := got.Statuses[selectedKey]; status.Alive || status.LastTryTime != 20 {
+		t.Fatalf("live status did not replace cached status: %+v", status)
+	}
+	if status := got.Statuses[removedKey]; !status.Alive || status.LastTryTime != 21 {
+		t.Fatalf("removed candidate live status missing: %+v", status)
+	}
+	if _, ok := got.Statuses[staleKey]; ok {
+		t.Fatalf("stale cached tag or zero-timestamp live status was accepted: %+v", got.Statuses[staleKey])
+	}
+
+	unknown := buildProfileFallbackSnapshot(profileID, []service.PreviewNode{selected}, cached, nil, []string{"unknown-outbound-tag"})
+	if unknown.CandidateKey != "" || unknown.ReferenceURI != "" {
+		t.Fatalf("unknown candidate tag leaked into snapshot: %+v", unknown)
+	}
+}
+
 func TestObservatoryCachePersistsAcrossCoreRestart(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
