@@ -577,4 +577,3 @@ func cloneResults(values map[string]Result) map[string]Result {
 	}
 	return out
 }
-
