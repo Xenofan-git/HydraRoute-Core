@@ -336,24 +336,29 @@ func (execLauncher) Start(ctx context.Context, binary, config string) (Process, 
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0111 == 0 {
 		return nil, fmt.Errorf("SmartDNS binary must be a regular executable file")
 	}
-	cmd := exec.CommandContext(ctx, binary, "-f", "-c", config, "-p", "-")
+	cmd := exec.Command(binary, "-f", "-c", config, "-p", "-")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &execProcess{cmd: cmd, done: make(chan error, 1)}, nil
+	return &execProcess{cmd: cmd, done: make(chan struct{})}, nil
 }
 
 type execProcess struct {
-	cmd  *exec.Cmd
-	once sync.Once
-	done chan error
+	cmd      *exec.Cmd
+	waitOnce sync.Once
+	done     chan struct{}
+	waitErr  error
 }
 
 func (p *execProcess) Wait() error {
-	p.once.Do(func() { p.done <- p.cmd.Wait(); close(p.done) })
-	return <-p.done
+	p.waitOnce.Do(func() {
+		p.waitErr = p.cmd.Wait()
+		close(p.done)
+	})
+	<-p.done
+	return p.waitErr
 }
 
 func (p *execProcess) Stop(ctx context.Context) error {

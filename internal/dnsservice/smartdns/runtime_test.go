@@ -31,13 +31,14 @@ func (p *fakeProcess) Stop(context.Context) error {
 type fakeLauncher struct {
 	mu       sync.Mutex
 	processes []*fakeProcess
-	failAt   int
+	failNext bool
 }
 
 func (l *fakeLauncher) Start(context.Context, string, string) (Process, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.failAt > 0 && len(l.processes)+1 == l.failAt {
+	if l.failNext {
+		l.failNext = false
 		return nil, errors.New("simulated launch failure")
 	}
 	p := newFakeProcess()
@@ -107,7 +108,7 @@ func TestRuntimeApplyRollsBackToPreviousGenerationWhenCandidateFails(t *testing.
 	}
 	oldGeneration := r.Status().Generation
 	launcher.mu.Lock()
-	launcher.failAt = 2
+	launcher.failNext = true
 	launcher.mu.Unlock()
 	cfg.CacheSize = 128
 	if err := r.Apply(context.Background(), cfg, profile); err == nil {
@@ -117,8 +118,8 @@ func TestRuntimeApplyRollsBackToPreviousGenerationWhenCandidateFails(t *testing.
 	if !status.Running || status.Generation != oldGeneration {
 		t.Fatalf("previous SmartDNS generation was not restored: %+v", status)
 	}
-	if len(launcher.processes) != 1 {
-		t.Fatalf("expected previous generation restart, got %d launches", len(launcher.processes))
+	if len(launcher.processes) != 2 {
+		t.Fatalf("expected candidate failure and previous generation restart, got %d successful launches", len(launcher.processes))
 	}
 }
 
