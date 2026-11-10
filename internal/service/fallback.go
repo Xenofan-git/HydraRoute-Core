@@ -82,6 +82,8 @@ func chooseFallbackKey(servers []parser.ParsedServer, input ProfileInput, profil
 		return status, true
 	}
 
+	reference := normalizedReferenceURI(input.Fallback.ReferenceURI)
+
 	// First retain the previous runtime candidate if it still belongs to this
 	// profile's selected pool and its last observation was alive.
 	if reference != "" && input.Fallback.CandidateKey != "" {
@@ -99,7 +101,6 @@ func chooseFallbackKey(servers []parser.ParsedServer, input ProfileInput, profil
 	// If the previous candidate disappeared from the selected set, retain the
 	// last alive member from the same URI family (the original HRweb pool order
 	// is the deterministic tie-breaker).
-	reference := normalizedReferenceURI(input.Fallback.ReferenceURI)
 	if reference != "" {
 		lastAliveMatch := ""
 		for _, server := range eligible {
