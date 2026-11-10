@@ -155,8 +155,22 @@ func Compile(req CompileRequest) ([]byte, error) {
 		rules = append(rules, map[string]any{
 			"type": "field", "inboundTag": []string{inTag}, "balancerTag": balTag,
 		})
+		fallbackTag := selectors[0]
+		if p.FallbackKey != "" {
+			fallbackTag = OutboundTag(p.ID, p.FallbackKey)
+			found := false
+			for _, selectedTag := range selectors {
+				if selectedTag == fallbackTag {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("profile %s: fallback node is not an eligible balancer member", p.ID)
+			}
+		}
 		balancers = append(balancers, map[string]any{
-			"tag": balTag, "selector": selectors, "strategy": map[string]any{"type": strategy},
+			"tag": balTag, "selector": selectors, "fallbackTag": fallbackTag, "strategy": map[string]any{"type": strategy},
 		})
 	}
 
