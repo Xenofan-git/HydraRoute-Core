@@ -205,6 +205,7 @@ jobs:
           name: smartdns-arm64-qemu-diagnostics
           path: |
             /tmp/hrcore-smartdns-sandbox-*/smartdns.log
+            /tmp/hrcore-smartdns-sandbox-*/smartdns-internal.log
             /tmp/hrcore-smartdns-sandbox-*/smartdns.strace
             /tmp/hrcore-smartdns-sandbox-*/smartdns.conf
           if-no-files-found: warn
