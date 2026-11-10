@@ -86,3 +86,11 @@ HRweb's internal `metaServer.Filtered` flag (field offset +16 in the recovered l
 ## Deployment boundary
 
 No NanoPi deployment or service restart was performed. No Keenetic/Entware/HRNeo, 3x-ui/Xray, Tailscale, resolver, firewall, route, iptables/nftables, or conntrack state was changed.
+
+
+## 2026-11-10 CI follow-up
+
+- Rechecked the historical SmartDNS workflow run 42828062739. AMD64 build, ARM64 build, and AMD64 runtime sandbox passed. The only genuine failed job was ARM64 QEMU runtime sandbox (job 129871071201); the Core workflow run 42828062629 was cancelled during concurrency after formatting, Go tests, routing validation, L7 tests, Observatory runtime and vet had passed. Playwright setup was cancelled, not a test failure.
+- The failed ARM64 job ran commit 76a153d, before QEMU guest syscall tracing was added. Its log shows the old wrapper invoked QEMU without `-strace`; SmartDNS exited early with an empty captured log, so that run does not establish a SmartDNS code defect or a current diagnostic result.
+- Current branch HEAD is `45b08f32c388d611b5e4d88917b0b18e1c7dc565`. The SmartDNS workflow now runs both QEMU guest syscall tracing and host `strace` capture (`SMARTDNS_NO_STRACE=0`) so the next ARM64 failure will preserve guest and host syscall evidence. This commit triggers the SmartDNS workflow through its configured push path. The available GitHub status connector does not expose push-triggered run listings; no current run result is claimed here.
+- Revalidated the current API fallback snapshot helper/test and full Go package suite in the isolated temporary copy on VPS: `go test -count=1 ./...` PASS; `go vet ./...` PASS. This is local validation, not a substitute for current-head GitHub CI.
