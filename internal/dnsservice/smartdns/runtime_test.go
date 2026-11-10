@@ -53,7 +53,8 @@ func TestRuntimeApplyStagesGenerationAndStartsOnlyAfterConfigIsWritten(t *testin
 		t.Fatal(err)
 	}
 	launcher := &fakeLauncher{}
-	probe := func(_ context.Context, _ string) error { return nil }
+	var probedAddress string
+	probe := func(_ context.Context, address string) error { probedAddress = address; return nil }
 	r.setTestHooks(launcher, probe)
 	cfg := Config{Enabled: true, ListenPort: 15353, DataDir: filepath.Join(root, "ignored"), Upstreams: []Upstream{{
 		ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
@@ -80,6 +81,9 @@ func TestRuntimeApplyStagesGenerationAndStartsOnlyAfterConfigIsWritten(t *testin
 	}
 	if !r.Status().Running || len(launcher.processes) != 1 {
 		t.Fatal("SmartDNS did not start")
+	}
+	if probedAddress != "127.0.0.1:15353" {
+		t.Fatalf("readiness probe used %q, want 127.0.0.1:15353", probedAddress)
 	}
 	if err := r.Stop(context.Background()); err != nil {
 		t.Fatal(err)

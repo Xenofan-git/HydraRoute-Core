@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -142,6 +143,9 @@ func (r *Runtime) Apply(ctx context.Context, cfg Config, profiles []ProfileRef) 
 	if err != nil {
 		r.status.LastError = err.Error()
 		return err
+	}
+	if cfg.ListenPort > 0 {
+		r.cfg.ListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.ListenPort))
 	}
 	if err := writeGeneration(generationDir, output); err != nil {
 		r.status.LastError = err.Error()

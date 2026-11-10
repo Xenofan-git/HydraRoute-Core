@@ -288,8 +288,15 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		s.opMu.Lock()
+		var smartDNSErr error
+		if s.smartDNSRuntime != nil {
+			smartDNSErr = s.smartDNSRuntime.Stop(stopCtx)
+		}
 		runtimeErr := s.supervisor.Stop(stopCtx)
 		s.opMu.Unlock()
+		if smartDNSErr != nil {
+			return fmt.Errorf("API stopped unexpectedly (%v); stop SmartDNS: %w", err, smartDNSErr)
+		}
 		if runtimeErr != nil {
 			return fmt.Errorf("API stopped unexpectedly (%v); stop managed Xray: %w", err, runtimeErr)
 		}
@@ -309,9 +316,16 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		s.opMu.Lock()
+		var smartDNSErr error
+		if s.smartDNSRuntime != nil {
+			smartDNSErr = s.smartDNSRuntime.Stop(stopCtx)
+		}
 		runtimeErr := s.supervisor.Stop(stopCtx)
 		s.opMu.Unlock()
 		shutdownErr := srv.Shutdown(stopCtx)
+		if smartDNSErr != nil {
+			return fmt.Errorf("stop SmartDNS: %w", smartDNSErr)
+		}
 		if runtimeErr != nil {
 			return fmt.Errorf("stop managed Xray: %w", runtimeErr)
 		}
