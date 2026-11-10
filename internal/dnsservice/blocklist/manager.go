@@ -423,8 +423,8 @@ func (m *Manager) persistLocked() error {
 		return err
 	}
 	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
-		return fmt.Errorf("blocklist state directory must be private and must not be a symlink")
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 {
+		return fmt.Errorf("blocklist state directory must not be group/world writable or a symlink")
 	}
 	state := persistedState{Version: 1, Sources: cloneSources(m.sources), Results: cloneResults(m.results)}
 	data, err := json.MarshalIndent(state, "", "  ")
