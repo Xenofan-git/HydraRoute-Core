@@ -82,6 +82,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 
 		excluded := stringSet(p.Excluded)
 		picked := stringSet(p.Picked)
+		muxCompatible := profileSupportsMux(p)
 		nodeKeys := map[string]bool{}
 		eligible := make([]any, 0)
 		selectors := make([]string, 0)
@@ -118,6 +119,9 @@ func Compile(req CompileRequest) ([]byte, error) {
 					stream["sockopt"] = sockopt
 				}
 				sockopt["interface"] = p.OutboundInterface
+			}
+			if p.MuxEnabled && muxCompatible {
+				applyMux(outbound)
 			}
 			if excluded[n.Key] || ((p.ManualSelection || len(picked) > 0) && !picked[n.Key]) {
 				continue
