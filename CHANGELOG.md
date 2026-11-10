@@ -150,3 +150,17 @@
 - Classified all 114 regular HRweb 1.68.0 methods individually in `research/2026-11-10-HRWEB-114-METHOD-COMPATIBILITY-MATRIX.md`; separately mapped the `proxy.pingServers` stream. The audit explicitly records pending modules and Keenetic/RCI exclusions.
 - Hardened ICMP probe destinations to reject CGNAT and reserved/documentation ranges using the same strict public-IP classifier as subscription fetching.
 - No NanoPi deployment. No changes to Keenetic/Entware, 3x-ui/Xray, Tailscale, Direct rules, system DNS, host routes or firewall.
+
+
+### DNS architecture clarification — 2026-11-10
+
+- The current Go DNS resolver is classified as an interim basic resolver only. It is not full HRDNS parity and does not yet pin each DNS upstream group to its corresponding profile SOCKS5 endpoint.
+- The target design remains the separately managed SmartDNS Release48.4 sidecar from the earlier DNS subsystem specification: typed config, one proxy/group per Core profile, explicit bootstrap, TLS verification, fail-closed behavior and no host resolver/network-policy changes.
+- The pinned ARM64 SmartDNS artifact and SHA-256 have been confirmed on the VPS, but it has not been executed or deployed. Isolated validation and the D1 typed config compiler are still required.
+
+
+### SmartDNS D1 compiler started — 2026-11-10
+
+- Added a typed SmartDNS Release48.4 config compiler with per-profile SOCKS5 proxy/group isolation, DoH/DoT bootstrap and TLS identity validation, exact/suffix rules, deterministic block/allow/route domain-set files, and fail-closed default behavior.
+- Added an upstream patch to suppress NETLINK_ROUTE neighbor-cache setup when MAC client rules are absent; compiler disables local-PTR, mDNS and system resolv-file loading.
+- D1 compiler unit tests pass. Sidecar lifecycle, patched build, sandbox runtime and data-plane tests remain pending; the earlier unpatched ARM64 binary is not a release artifact.
