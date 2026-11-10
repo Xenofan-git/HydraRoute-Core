@@ -53,13 +53,13 @@ Using Go 1.27.3:
 - `go vet ./...` — PASS.
 - `HRCORE_XRAY_INTEGRATION=1 XRAY_BINARY=/root/hr-hydraroute-build/toolchain/xray-v26.10.31-amd64/xray go test -count=1 -v ./tests/integration` — PASS; actual Xray 26.10.31 Observatory/balancer/fail-closed and leastPing/roundRobin/random runtime tests passed; random sent 30 independent requests and all three upstreams received traffic.
 
-**Validation caveat:** the VPS source worktree is still the preserved older `integration/nanopi-ui-20261109` worktree with local modifications. Only the exact current-branch fallback implementation and its tests were overlaid in the temporary copy. These local results are useful but do not replace GitHub CI on the current branch head.
+**Validation caveat:** the VPS source worktree is still the preserved older `integration/nanopi-ui-20261109` worktree with local modifications. The exact current-branch fallback implementation/tests, API fallback-snapshot helper/test, and Observatory integration test were overlaid into the temporary copy. These local results are useful but do not replace GitHub CI on the current branch head.
 
 ## Observatory items still not proven at exact HRweb parity
 
 The probe interval is still provisional. The current Core compiler normalizes invalid values to 30 seconds, divides the configured seconds by the total selected subject count, and applies a 100 ms floor. HRweb static analysis found a candidate interval arithmetic path at `main.rebuildXRayConfigs`, but the source field is a `*int` and the observed stack value is not yet proven to be the dereferenced configured value. The divisor appears to be the length of a dynamically grown string slice, but its exact semantic role was not conclusively established. Do not describe the current interval formula as exact HRweb parity until that dataflow is closed.
 
-The strategy surface discovered in HRweb is `leastPing`, `random`, and `roundRobin`. Core now has actual Xray runtime tests for all three strategies: leastPing, roundRobin and random. The random integration test verifies that 30 separate connections reach all three healthy upstreams. Subscription refresh/removal, restart, pool-size changes and stale-observation lifecycle parity still need separate coverage.
+The strategy surface discovered in HRweb is `leastPing`, `random`, and `roundRobin`. Core now has actual Xray runtime tests for all three strategies: leastPing, roundRobin and random. The random integration test verifies that 30 separate connections reach all three healthy upstreams. API snapshot tests also verify full-preview candidate mapping when the candidate is no longer selected, rejection of stale outbound tags, live-over-cache precedence only for timestamped measurements, and ignoring unknown candidate tags. Subscription refresh/removal, restart, pool-size changes and stale-observation lifecycle parity still need separate coverage.
 
 ## SmartDNS ARM64 runtime gate
 
