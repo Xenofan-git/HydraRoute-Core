@@ -1329,6 +1329,9 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		fallbackCtx, fallbackCancel := context.WithTimeout(r.Context(), 6*time.Second)
+		previousFallback := s.profileFallbackSnapshot(fallbackCtx, previous)
+		fallbackCancel()
 		if err := s.profileStore.Save(p); err != nil {
 			writeError(w, http.StatusInternalServerError, "cannot save profile settings")
 			return
@@ -1343,7 +1346,7 @@ func (s *Server) profileCollection(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		if s.supervisor.Status().Configured {
-			if _, err := s.refreshProfilesCachedLocked(ctx); err != nil {
+			if _, err := s.refreshProfilesModeWithFallbacks(ctx, false, "", map[string]service.ProfileFallback{p.ID: previousFallback}); err != nil {
 				_ = s.profileStore.Save(previous)
 				if selectionChanged {
 					_ = service.SaveSelection(s.stateDir, oldSelection)
@@ -2135,7 +2138,65 @@ func (s *Server) refreshProfileLocked(ctx context.Context, profileID string) (ma
 	return s.refreshProfilesMode(ctx, false, profileID)
 }
 
+func (s *Server) profileFallbackSnapshot(ctx context.Context, profile profiles.Profile) service.ProfileFallback {
+	preview, err := service.PreviewProfileCached(ctx, profile, s.stateDir)
+	if err != nil {
+		return service.ProfileFallback{}
+	}
+	fallback := service.ProfileFallback{Statuses: make(map[string]service.FallbackStatus), ReferenceURIs: make(map[string]string)}
+	for _, node := range preview.Nodes {
+		keyBytes, _ := json.Marshal(node.Key)
+		fallback.ReferenceURIs[string(keyBytes)] = node.ReferenceURI
+	}
+	s.probeMu.RLock()
+	for key, status := range s.probeCache[profile.ID] {
+		if status.Tag == compiler.OutboundTag(profile.ID, key) {
+			fallback.Statuses[key] = service.FallbackStatus{Alive: status.Alive, DelayMS: status.DelayMS, LastTryTime: status.LastTryTime, LastSeenTime: status.LastSeenTime}
+		}
+	}
+	s.probeMu.RUnlock()
+	if !s.supervisor.Status().Running {
+		return fallback
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	items, probeErr := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
+	cancel()
+	if probeErr == nil {
+		byTag := make(map[string]xrayapi.OutboundStatus, len(items))
+		for _, item := range items {
+			byTag[item.Tag] = item
+		}
+		for _, node := range preview.Nodes {
+			keyBytes, _ := json.Marshal(node.Key)
+			key := string(keyBytes)
+			if item, ok := byTag[compiler.OutboundTag(profile.ID, key)]; ok && item.LastTryTime > 0 {
+				fallback.Statuses[key] = service.FallbackStatus{Alive: item.Alive, DelayMS: item.DelayMS, LastTryTime: item.LastTryTime, LastSeenTime: item.LastSeenTime}
+			}
+		}
+	}
+	tagCtx, tagCancel := context.WithTimeout(ctx, 3*time.Second)
+	tags, tagErr := xrayapi.GetBalancerPrincipleTargetTags(tagCtx, xrayapi.DefaultAddress, "hr_bal_"+profile.ID)
+	tagCancel()
+	if tagErr == nil && len(tags) > 0 {
+		candidateTag := tags[len(tags)-1]
+		for _, node := range preview.Nodes {
+			keyBytes, _ := json.Marshal(node.Key)
+			key := string(keyBytes)
+			if compiler.OutboundTag(profile.ID, key) == candidateTag {
+				fallback.CandidateKey = key
+				fallback.ReferenceURI = node.ReferenceURI
+				break
+			}
+		}
+	}
+	return fallback
+}
+
 func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targetProfile string) (map[string]any, error) {
+	return s.refreshProfilesModeWithFallbacks(ctx, forceFetch, targetProfile, nil)
+}
+
+func (s *Server) refreshProfilesModeWithFallbacks(ctx context.Context, forceFetch bool, targetProfile string, suppliedFallbacks map[string]service.ProfileFallback) (map[string]any, error) {
 	if s.profileStore == nil {
 		return nil, fmt.Errorf("profile store is not configured")
 	}
@@ -2145,6 +2206,16 @@ func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targe
 	}
 	if len(stored) == 0 {
 		return nil, fmt.Errorf("no profiles are stored")
+	}
+	fallbacks := make(map[string]service.ProfileFallback, len(stored))
+	for _, p := range stored {
+		if supplied, ok := suppliedFallbacks[p.ID]; ok {
+			fallbacks[p.ID] = supplied
+			continue
+		}
+		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, 6*time.Second)
+		fallbacks[p.ID] = s.profileFallbackSnapshot(fallbackCtx, p)
+		fallbackCancel()
 	}
 	inputs := make([]service.ProfileRequest, 0, len(stored))
 	nowUnix := time.Now().Unix()
@@ -2167,7 +2238,7 @@ func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targe
 			}
 			subscription = p.CachedSubscription
 		}
-		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: compiler.DPIBypass{NoiseTraffic: p.DPIBypass.NoiseTraffic, TLSFragmentation: p.DPIBypass.TLSFragmentation, RandomTLSFingerprint: p.DPIBypass.RandomTLSFingerprint}, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval}, Links: p.Links, Subscription: subscription, SubscriptionURL: ""})
+		inputs = append(inputs, service.ProfileRequest{Source: p.SourceID, Profile: service.ProfileInput{ID: p.ID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: compiler.DPIBypass{NoiseTraffic: p.DPIBypass.NoiseTraffic, TLSFragmentation: p.DPIBypass.TLSFragmentation, RandomTLSFingerprint: p.DPIBypass.RandomTLSFingerprint}, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval, Fallback: fallbacks[p.ID]}, Links: p.Links, Subscription: subscription, SubscriptionURL: ""})
 	}
 	var routing *compiler.RoutingConfig
 	if s.routingStore != nil {
