@@ -65,6 +65,11 @@ jobs:
           XRAY_BINARY: ${{ runner.temp }}/xray/xray
           XRAY_LOCATION_ASSET: ${{ runner.temp }}/xray
         run: python tests/integration/l7_quic_sni.py
+      - name: Exercise Observatory and profile balancer runtime failover
+        env:
+          HRCORE_XRAY_INTEGRATION: "1"
+          XRAY_BINARY: ${{ runner.temp }}/xray/xray
+        run: go test -count=1 -v ./tests/integration
       - name: Run go vet
         run: go vet ./...
       - name: Set up Node.js for browser tests
