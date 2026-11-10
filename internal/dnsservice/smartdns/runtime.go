@@ -107,9 +107,27 @@ func (r *Runtime) setTestHooks(launcher Launcher, probe Probe) {
 func (r *Runtime) Status() RuntimeStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.reapLocked()
 	status := r.status
 	status.Running = r.process != nil
 	return status
+}
+
+func (r *Runtime) reapLocked() {
+	if r.process == nil || r.waitDone == nil {
+		return
+	}
+	select {
+	case processErr := <-r.waitDone:
+		r.process = nil
+		r.waitDone = nil
+		r.status.Running = false
+		r.status.PID = 0
+		if processErr != nil {
+			r.status.LastError = fmt.Sprintf("SmartDNS process exited: %v", processErr)
+		}
+	default:
+	}
 }
 
 // Apply compiles and stages a complete immutable generation, then swaps the
@@ -118,6 +136,7 @@ func (r *Runtime) Status() RuntimeStatus {
 func (r *Runtime) Apply(ctx context.Context, cfg Config, profiles []ProfileRef) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.reapLocked()
 
 	if !cfg.Enabled {
 		if r.process != nil {
@@ -162,6 +181,7 @@ func (r *Runtime) Apply(ctx context.Context, cfg Config, profiles []ProfileRef) 
 func (r *Runtime) Start(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.reapLocked()
 	if r.process != nil {
 		return nil
 	}
@@ -179,6 +199,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 func (r *Runtime) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.reapLocked()
 	if r.process == nil {
 		return nil
 	}

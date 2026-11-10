@@ -156,12 +156,16 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		} else {
 			s.smartDNSRuntime = runtime
 		}
-		if data, err := os.ReadFile(s.smartDNSConfigPath); err == nil {
-			if err := json.Unmarshal(data, &s.smartDNSConfig); err != nil {
+		if info, err := os.Lstat(s.smartDNSConfigPath); err == nil {
+			if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+				s.smartDNSErr = "saved SmartDNS configuration must be a private regular file"
+			} else if data, readErr := os.ReadFile(s.smartDNSConfigPath); readErr != nil {
+				s.smartDNSErr = "saved SmartDNS configuration could not be read"
+			} else if err := json.Unmarshal(data, &s.smartDNSConfig); err != nil {
 				s.smartDNSErr = "saved SmartDNS configuration is invalid"
 			}
 		} else if !os.IsNotExist(err) {
-			s.smartDNSErr = "saved SmartDNS configuration could not be read"
+			s.smartDNSErr = "saved SmartDNS configuration could not be inspected"
 		}
 		if s.smartDNSRuntime != nil {
 			if err := s.smartDNSRuntime.Apply(context.Background(), s.smartDNSConfig, s.smartDNSProfileRefs()); err != nil {
@@ -3572,6 +3576,8 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "local request required")
 			return
 		}
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
 	case http.MethodPut:
 		if !validLocalJSONRequest(r) {
