@@ -15,7 +15,7 @@ func TestParseMixedHRWebDomainSources(t *testing.T) {
 		"||video.example.net^$third-party",
 		"@@||safe.example.net^",
 		"*.wild.example.net",
-		"bad domain entry",
+		"bad_domain_entry",
 		"https://example.net/path",
 		"",
 	}, "\n")
