@@ -74,6 +74,10 @@ The QEMU root cause remains unresolved until a fresh job log is inspected. Do no
 
 Original HRNeo's DNS capture is a passive `AF_PACKET SOCK_DGRAM/ETH_P_ALL` + L3-BPF path that observes DNS answers on LAN/VPN/tunnel interfaces and adds addresses to ipset; `ConntrackFlush` optionally triggers asynchronous conntrack cleanup. The optional Core SmartDNS sidecar is a separate profile-pinned DoH/DoT and domain-set feature. It is not a replacement for HRNeo's passive DNS capture, ipset population, or conntrack behavior. Keep this distinction explicit in the compatibility matrix.
 
+## Filter flag polarity: do not map names literally
+
+HRweb's internal `metaServer.Filtered` flag (field offset +16 in the recovered layout) is tested positively by `activeBalancerLinks` when building the balancer-link set. It is not the same semantic field as Core's `PreviewNode.Filtered`, where true means the name was rejected by the source filter. Core's `serverFiltered` reproduces the HRweb `ServerFilter.rejects` behavior (newline-delimited case-insensitive name substrings, keep-any/exclude-any, exclude precedence, direct-source bypass); `eligibleObservatoryNodes` then includes nodes for which this rejection flag is false and which are picked/not excluded. Keep these polarity differences explicit and never port the field name alone.
+
 ## Deployment boundary
 
 No NanoPi deployment or service restart was performed. No Keenetic/Entware/HRNeo, 3x-ui/Xray, Tailscale, resolver, firewall, route, iptables/nftables, or conntrack state was changed.
