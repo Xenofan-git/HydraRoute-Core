@@ -47,3 +47,45 @@ func TestProfileSupportsMuxRequiresSelectedNode(t *testing.T) {
 		t.Fatal("empty selected pool must be mux-incompatible")
 	}
 }
+
+func TestCompileAppliesMuxOnlyForCompatibleProfilePool(t *testing.T) {
+	cases := []struct {
+		name       string
+		outbound   string
+		wantMux    bool
+	}{
+		{name: "compatible", outbound: `{"protocol":"vmess","settings":{}}`, wantMux: true},
+		{name: "xtls flow", outbound: `{"protocol":"vless","settings":{"vnext":[{"users":[{"flow":"xtls-rprx-vision"}]}]}}`, wantMux: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := Compile(CompileRequest{Profiles: []Profile{{
+				ID: "mux-test", Enabled: true, Port: 16091, Strategy: "leastPing",
+				MuxEnabled: true,
+				Nodes: []Node{{Key: "node-1", Outbound: json.RawMessage(tc.outbound)}},
+			}}})
+			if err != nil {
+				t.Fatalf("Compile() error = %v", err)
+			}
+			var config map[string]any
+			if err := json.Unmarshal(raw, &config); err != nil {
+				t.Fatalf("decode compiled config: %v", err)
+			}
+			outbounds, ok := config["outbounds"].([]any)
+			if !ok {
+				t.Fatal("compiled outbounds missing")
+			}
+			found := false
+			for _, item := range outbounds {
+				outbound, ok := item.(map[string]any)
+				if !ok || outbound["tag"] != OutboundTag("mux-test", "node-1") {
+					continue
+				}
+				_, found = outbound["mux"]
+			}
+			if found != tc.wantMux {
+				t.Fatalf("mux present = %v, want %v", found, tc.wantMux)
+			}
+		})
+	}
+}
