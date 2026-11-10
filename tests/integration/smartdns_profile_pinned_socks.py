@@ -294,7 +294,8 @@ def start_smartdns(config_path: Path) -> tuple[subprocess.Popen, Path | None, ob
     log_path = ROOT / "smartdns.log"
     log_file = open(log_path, "w", encoding="utf-8")
     strace_path = ROOT / "smartdns.strace"
-    if shutil.which("strace") and os.environ.get("SMARTDNS_NO_STRACE") != "1":
+    use_strace = bool(shutil.which("strace")) and os.environ.get("SMARTDNS_NO_STRACE") != "1"
+    if use_strace:
         command = [
             "strace", "-f", "-qq", "-e", "trace=socket,bind,connect,sendto,sendmsg,openat,execve",
             "-o", str(strace_path), SMARTDNS, "-f", "-c", str(config_path), "-p", "-",
@@ -302,7 +303,7 @@ def start_smartdns(config_path: Path) -> tuple[subprocess.Popen, Path | None, ob
     else:
         command = [SMARTDNS, "-f", "-c", str(config_path), "-p", "-"]
     process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
-    return process, (strace_path if shutil.which("strace") else None), log_file
+    return process, (strace_path if use_strace else None), log_file
 
 
 def verify_strace(trace_path: Path | None) -> None:
