@@ -599,9 +599,9 @@ func TestXrayRandomLeastPingAndRoundRobinDistribution(t *testing.T) {
 			t.Fatalf("random request %d failed: status=%d err=%v", i+1, code, err)
 		}
 	}
-	slowDelta := slow.userHits.Load() - slowBefore
-	mediumDelta := medium.userHits.Load() - mediumBefore
-	fastDelta := fast.userHits.Load() - fastBefore
+	slowDelta = slow.userHits.Load() - slowBefore
+	mediumDelta = medium.userHits.Load() - mediumBefore
+	fastDelta = fast.userHits.Load() - fastBefore
 	if slowDelta == 0 || mediumDelta == 0 || fastDelta == 0 || slowDelta+mediumDelta+fastDelta != 30 {
 		t.Fatalf("random did not distribute 30 requests across all three members: slow=%d medium=%d fast=%d", slowDelta, mediumDelta, fastDelta)
 	}
