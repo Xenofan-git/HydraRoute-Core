@@ -199,7 +199,7 @@ func previewProfile(ctx context.Context, profile profiles.Profile, stateDir stri
 		selected := picked[key] || (selection.PickMode == "auto" && !excluded[key])
 		if selected && !excluded[key] && !serverFiltered(server.Name, profile.FilterKeep, profile.FilterExclude, len(profile.Links) > 0 && profile.Subscription == "" && profile.SubscriptionURL == "" || server.Key.Source == "direct") {
 			muxNodeCount++
-			if strings.Contains(strings.ToLower(server.ReferenceURI), "flow=xtls-rprx") {
+			if !compiler.SupportsMuxOutbound(server.Outbound) {
 				muxCompatible = false
 			}
 		}
