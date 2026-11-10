@@ -44,7 +44,7 @@ type DomainRule struct {
 
 type DomainSet struct {
 	ID        string   `json:"id"`
-	Kind      string   `json:"kind"` // block, allow or route
+	Kind      string   `json:"kind"`                 // block, allow or route
 	ProfileID string   `json:"profile_id,omitempty"` // required for route sets
 	Domains   []string `json:"domains"`
 	Enabled   bool     `json:"enabled"`
