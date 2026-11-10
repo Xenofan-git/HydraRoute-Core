@@ -8,6 +8,12 @@ on:
       - 'third_party/smartdns/**'
       - 'tests/integration/smartdns_profile_pinned_socks.py'
       - '.github/workflows/smartdns.yml'
+  pull_request:
+    paths:
+      - 'internal/dnsservice/smartdns/**'
+      - 'third_party/smartdns/**'
+      - 'tests/integration/smartdns_profile_pinned_socks.py'
+      - '.github/workflows/smartdns.yml'
 
 permissions:
   contents: read
