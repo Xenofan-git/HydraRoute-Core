@@ -68,6 +68,13 @@ func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
 	if !filepath.IsAbs(cfg.StateDir) || filepath.Clean(cfg.StateDir) != cfg.StateDir {
 		return nil, fmt.Errorf("SmartDNS state directory must be absolute and clean")
 	}
+	if err := os.MkdirAll(cfg.StateDir, 0700); err != nil {
+		return nil, fmt.Errorf("create SmartDNS state directory: %w", err)
+	}
+	stateInfo, err := os.Lstat(cfg.StateDir)
+	if err != nil || !stateInfo.IsDir() || stateInfo.Mode()&os.ModeSymlink != 0 || stateInfo.Mode().Perm()&0077 != 0 {
+		return nil, fmt.Errorf("SmartDNS state directory must be a private non-symlink directory")
+	}
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = "127.0.0.1:5353"
 	}
@@ -111,6 +118,19 @@ func (r *Runtime) Apply(ctx context.Context, cfg Config, profiles []ProfileRef) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if !cfg.Enabled {
+		if r.process != nil {
+			if err := r.process.Stop(ctx); err != nil {
+				return fmt.Errorf("stop SmartDNS while disabling: %w", err)
+			}
+			r.process = nil
+			r.waitDone = nil
+		}
+		r.current = ""
+		r.status = RuntimeStatus{Enabled: false}
+		return nil
+	}
+	r.status.Enabled = true
 	generation, err := newGenerationID()
 	if err != nil {
 		return err
@@ -251,8 +271,8 @@ func writeGeneration(dir string, output Output) error {
 	if err := os.MkdirAll(parent, 0700); err != nil {
 		return err
 	}
-	if info, err := os.Lstat(parent); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 {
-		return fmt.Errorf("SmartDNS generation parent must be a non-writable-by-others directory")
+	if info, err := os.Lstat(parent); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+		return fmt.Errorf("SmartDNS generation parent must be a private directory")
 	}
 	stage, err := os.MkdirTemp(parent, ".candidate-")
 	if err != nil {
@@ -379,7 +399,7 @@ func (p *execProcess) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		_ = p.cmd.Process.Kill()
 		<-done
-		return ctx.Err()
+		return nil
 	case <-time.After(2 * time.Second):
 		_ = p.cmd.Process.Kill()
 		<-done
