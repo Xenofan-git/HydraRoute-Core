@@ -40,6 +40,24 @@ jobs:
       - name: Install ARM64 cross-build dependencies
         if: matrix.arch == 'arm64'
         run: |
+          # The runner's default archive/security mirrors are native-architecture only.
+          # Keep them amd64-only and resolve ARM64 packages from Ubuntu Ports.
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i '/^Architectures:/d; /^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
+          elif [ -f /etc/apt/sources.list ]; then
+            sudo sed -i -E '/^deb /{ /\\[arch=/! s/^deb /deb [arch=amd64] /; }' /etc/apt/sources.list
+          else
+            echo 'Could not locate the Ubuntu APT source list to scope native repositories' >&2
+            exit 1
+          fi
+          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports/
+          Suites: noble noble-updates noble-backports noble-security
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
           sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install -y build-essential binutils git file \
