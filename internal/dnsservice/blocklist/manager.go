@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -512,7 +511,7 @@ func normalizeDomainList(values []string, dropped *int) []string {
 	for _, raw := range values {
 		domain, ok := normalizeDomain(raw)
 		if !ok {
-			*dropped++
+			(*dropped)++
 			continue
 		}
 		set[domain] = struct{}{}
@@ -579,11 +578,3 @@ func cloneResults(values map[string]Result) map[string]Result {
 	return out
 }
 
-func sortedKeys(values map[string]struct{}) []string {
-	out := make([]string, 0, len(values))
-	for value := range values {
-		out = append(out, value)
-	}
-	sort.Strings(out)
-	return out
-}
