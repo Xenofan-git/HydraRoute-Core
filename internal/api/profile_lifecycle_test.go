@@ -189,10 +189,10 @@ func (s *lifecycleObservatoryServer) GetOutboundStatus(context.Context, *command
 		return &command.GetOutboundStatusResponse{Status: &xrayobservatory.ObservationResult{}}, nil
 	}
 	copy := &xrayobservatory.OutboundStatus{
-		OutboundTag: s.status.OutboundTag,
-		Alive:       s.status.Alive,
-		Delay:       s.status.Delay,
-		LastTryTime: s.status.LastTryTime,
+		OutboundTag:  s.status.OutboundTag,
+		Alive:        s.status.Alive,
+		Delay:        s.status.Delay,
+		LastTryTime:  s.status.LastTryTime,
 		LastSeenTime: s.status.LastSeenTime,
 	}
 	return &command.GetOutboundStatusResponse{Status: &xrayobservatory.ObservationResult{Status: []*xrayobservatory.OutboundStatus{copy}}}, nil
