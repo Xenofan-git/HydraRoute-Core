@@ -265,6 +265,7 @@ mdns-lookup no
 expand-ptr-from-address no
 audit-enable no
 log-level error
+log-file {ROOT / "smartdns-internal.log"}
 speed-check-mode none
 ca-path {CERTS}
 proxy-server socks5://127.0.0.1:{SOCKS_PORTS[0]} -name hr_proxy_foreign
