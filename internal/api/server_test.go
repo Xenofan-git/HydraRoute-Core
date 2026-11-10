@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,39 @@ func localPut(path, body string) *http.Request {
 	r.RemoteAddr = "127.0.0.1:12345"
 	r.Header.Set("Content-Type", "application/json")
 	return r
+}
+
+type synchronizedStreamRecorder struct {
+	mu      sync.Mutex
+	inner   *httptest.ResponseRecorder
+	flushed chan struct{}
+	once    sync.Once
+}
+
+func newSynchronizedStreamRecorder() *synchronizedStreamRecorder {
+	return &synchronizedStreamRecorder{inner: httptest.NewRecorder(), flushed: make(chan struct{})}
+}
+func (r *synchronizedStreamRecorder) Header() http.Header { return r.inner.Header() }
+func (r *synchronizedStreamRecorder) WriteHeader(status int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.inner.WriteHeader(status)
+}
+func (r *synchronizedStreamRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inner.Write(data)
+}
+func (r *synchronizedStreamRecorder) Flush() {
+	r.mu.Lock()
+	r.inner.Flush()
+	r.mu.Unlock()
+	r.once.Do(func() { close(r.flushed) })
+}
+func (r *synchronizedStreamRecorder) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inner.Body.String()
 }
 
 func apiSupervisor(t *testing.T) *hrruntime.Supervisor {
@@ -1366,21 +1400,18 @@ func TestEventJournalAPIListsClearsAndStreamsStructuredEvents(t *testing.T) {
 	streamReq := localGet("/v1/events/stream")
 	streamReq.Header.Set("Last-Event-ID", "1")
 	streamReq = streamReq.WithContext(ctx)
-	streamRR := httptest.NewRecorder()
+	streamRR := newSynchronizedStreamRecorder()
 	finished := make(chan struct{})
 	go func() {
 		h.mux.ServeHTTP(streamRR, streamReq)
 		close(finished)
 	}()
-	deadline := time.After(2 * time.Second)
-	for !strings.Contains(streamRR.Body.String(), "event: message") {
-		select {
-		case <-deadline:
-			cancel()
-			<-finished
-			t.Fatalf("stream did not emit initial event: %s", streamRR.Body.String())
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-streamRR.flushed:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-finished
+		t.Fatalf("stream did not emit initial event: %s", streamRR.String())
 	}
 	cancel()
 	select {
@@ -1388,8 +1419,9 @@ func TestEventJournalAPIListsClearsAndStreamsStructuredEvents(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("event stream did not stop after request cancellation")
 	}
-	if !strings.Contains(streamRR.Body.String(), `"message":"Xray process stopped"`) || strings.Contains(streamRR.Body.String(), `"message":"Xray process started"`) {
-		t.Fatalf("Last-Event-ID was not respected: %s", streamRR.Body.String())
+	streamBody := streamRR.String()
+	if !strings.Contains(streamBody, `"message":"Xray process stopped"`) || strings.Contains(streamBody, `"message":"Xray process started"`) {
+		t.Fatalf("Last-Event-ID was not respected: %s", streamBody)
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/events", nil)
@@ -1447,5 +1479,85 @@ func TestHealthMonitorStatusAndSettingsPersist(t *testing.T) {
 	h.mux.ServeHTTP(rr, localPost("/v1/health/check", `{}`))
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status"`) {
 		t.Fatalf("manual check=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDNSRoutesReturnUnavailableWithoutStateDirectory(t *testing.T) {
+	h := New(apiSupervisor(t))
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodGet, "/v1/dns", ""},
+		{http.MethodPost, "/v1/dns/service", `{"action":"start"}`},
+		{http.MethodPost, "/v1/dns/check", `{"domain":"example.com"}`},
+	} {
+		var req *http.Request
+		if tc.method == http.MethodGet {
+			req = localGet(tc.path)
+		} else {
+			req = localPost(tc.path, tc.body)
+		}
+		rr := httptest.NewRecorder()
+		h.mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s status=%d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestDNSConfigStartFailureRestoresPreviousConfiguration(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	cfg := h.dns.Config()
+	reservation, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Port = reservation.LocalAddr().(*net.UDPAddr).Port
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Enabled = true
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns", string(body)))
+	_ = reservation.Close()
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected DNS bind failure, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	got := h.dns.Config()
+	if got.Enabled || h.dns.Status()["running"].(bool) {
+		t.Fatalf("failed DNS transaction left service enabled/running: enabled=%v status=%v", got.Enabled, h.dns.Status())
+	}
+	reloaded := h.dns.Config()
+	if reloaded.Port != cfg.Port {
+		t.Fatalf("rollback lost previous port: got=%d want=%d", reloaded.Port, cfg.Port)
+	}
+}
+
+func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	_ = udp.Close()
+	cfg := h.dns.Config()
+	cfg.Port = port
+	cfg.Enabled = true
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	apiListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer apiListener.Close()
+	if err := h.Serve(context.Background(), apiListener.Addr().String()); err == nil {
+		t.Fatal("expected API listener bind failure")
+	}
+	if h.dns.Status()["running"].(bool) {
+		t.Fatal("DNS service leaked after API listener bind failure")
 	}
 }

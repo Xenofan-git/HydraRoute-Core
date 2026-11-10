@@ -121,3 +121,21 @@ func TestSubscriberLimitIsBounded(t *testing.T) {
 		cancel()
 	}
 }
+
+func TestAppendPersistenceFailureDoesNotPublishOrConsumeID(t *testing.T) {
+	root := t.TempDir()
+	blocked := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(filepath.Join(blocked, "events.json"))
+	if _, err := s.Append("info", "test", "write", "must fail"); err == nil {
+		t.Fatal("expected persistence failure")
+	}
+	if got := s.List(10, 0); len(got) != 0 {
+		t.Fatalf("failed event was published in memory: %+v", got)
+	}
+	if s.nextID != 1 {
+		t.Fatalf("failed append consumed ID: next=%d", s.nextID)
+	}
+}

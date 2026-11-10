@@ -47,7 +47,7 @@ Validation after this phase:
 - `go test -count=1 ./internal/health ./internal/events ./internal/api ./internal/ui ./internal/dnsservice` — PASS.
 - Full `go test -count=1 ./...` — PASS after the latest Observatory changes.
 - `go vet ./...`, gofmt and `git diff --check` — PASS.
-- GitHub Actions #196 and #197 — PASS for Go, JS syntax, Playwright, Xray config, HTTP/TLS/QUIC E2E and AMD64/ARM64 builds. A subsequent Observatory stream/cache patch is queued for CI #198.
+- GitHub Actions #196, #197 and #198 — PASS for Go, JS syntax, Playwright, Xray config, HTTP/TLS/QUIC E2E and AMD64/ARM64 builds. CI #198 validated the Observatory cache/write-deadline/ICMP-bounding patch.
 - Local VPS has no Node.js and only ~190 MiB free disk; JS/browser/build validation is delegated to GitHub CI.
 
 ## Read-only NanoPi baseline check — 2026-11-10
@@ -69,3 +69,28 @@ This phase made source/CI changes only. The pre-existing NanoPi Core API service
 - The manual ping SSE clears the API server's global 60-second write deadline so configured Observatory cycles longer than one minute are not silently cut off.
 - ICMP probing is bounded to 8 concurrent workers and a 20-second overall phase; remaining echo results are explicitly reported as unavailable rather than leaving nodes indefinitely pending.
 - Disabled profiles now return stale cached Observatory data and do not wait for probe results that cannot arrive.
+
+## Additional DNS correctness and lifecycle hardening — 2026-11-10
+
+- Fixed blocked AAAA and non-A DNS query handling: blocked names now return an empty NOERROR answer for AAAA and do not fall through to upstream resolution. A records retain the explicit `0.0.0.0` sink response.
+- Added a live UDP resolver integration test with a separate upstream: verifies blocked A/AAAA requests never reach upstream and an allowed AAAA request does.
+- Do53 now retries over TCP when the upstream UDP response has the TC bit set; a paired UDP/TCP upstream test verifies the fallback.
+- DoH endpoints must be HTTPS, have a valid host and no embedded userinfo/fragment; redirects are rejected if they downgrade from HTTPS.
+- DNS configuration changes are transactional across the resolver config and Core Xray DNS settings. Failed listener startup restores the previous persisted configuration; DNS stop/start failures attempt to restore the previous service/runtime state.
+- DNS service/check API calls now return 503 rather than dereferencing an absent DNS manager when no state directory is configured.
+- API service startup now closes a DNS listener it started if the API listener cannot bind; unexpected API listener termination also stops the DNS service and managed Xray runtime.
+- Corrected DNS check UI copy: the operation uses the configured Core upstreams, not the host system resolver.
+- Added regression tests for failed DNS startup rollback and API bind-failure cleanup.
+
+Latest local validation after these changes:
+- `go test -count=1 ./...` — PASS.
+- `go vet ./...` — PASS.
+- `go test -race -count=1 ./internal/dnsservice ./internal/events ./internal/health ./internal/api` — PASS.
+- `gofmt` and `git diff --check` — PASS.
+- Node.js is not installed on the VPS; dashboard syntax and Playwright remain GitHub CI gates. CI #198 passed before the additional DNS hardening in this section; a new CI run is still required for these final changes.
+- Root filesystem has only about 92 MiB free; no existing cache, archive, backup or research material was deleted.
+
+## Compatibility audit expansion
+
+- Added `2026-11-10-HRWEB-114-METHOD-COMPATIBILITY-MATRIX.md`: all 114 regular HRweb 1.68.0 methods are individually classified, with Core endpoint mapping, adaptation status, known gaps and explicit Keenetic/RCI exclusions. The separate `proxy.pingServers` stream is included as item 115.
+- The matrix is conservative: no 1:1 compatibility is claimed from a similar endpoint name alone. Phobos, FQDN groups, speed tests, file APIs, system update workflow, full Geo list management and DNS blocklist lifecycle remain open.

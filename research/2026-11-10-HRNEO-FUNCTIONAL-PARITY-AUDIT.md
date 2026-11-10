@@ -71,6 +71,10 @@ Core's current semantics are narrower and explicit:
 - SSE write deadline is cleared for long configured Observatory cycles; disabled profiles return stale cached measurements without waiting for impossible fresh results.
 - Remaining tests: very large subscription/pool behavior, stale cache expiry, subscription refresh while probes are in flight, profile disable/delete while stream is open, Xray process/API failure, per-profile isolation under overlapping node keys, and exact strategy/fallback parity against HRNeo.
 
+## Method-by-method audit expansion
+
+The complete 114-method classification is now in `2026-11-10-HRWEB-114-METHOD-COMPATIBILITY-MATRIX.md`. It maps every regular method to a Core route or explicit pending/omitted disposition and separately records `proxy.pingServers`. This supersedes the earlier family-level-only coverage statement; it does not claim byte-for-byte API compatibility.
+
 ## Verification state
 
 - VPS full Go suite: PASS after DNS/events/health changes.

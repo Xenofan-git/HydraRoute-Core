@@ -202,13 +202,18 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		return fmt.Errorf("API listen address must be a literal loopback IP")
 	}
 	defer s.closeWatchlist()
+	dnsStarted := false
 	if s.dns != nil && s.dns.Config().Enabled {
 		if err := s.dns.Start(); err != nil {
 			return fmt.Errorf("start saved DNS service: %w", err)
 		}
+		dnsStarted = true
 	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
+		if dnsStarted {
+			_ = s.dns.Stop()
+		}
 		return err
 	}
 	s.recordEvent("info", "api", "started", "HydraRoute Core API started")
@@ -231,6 +236,19 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	defer func() { schedulerCancel(); <-schedulerDone }()
 	select {
 	case err := <-serveErr:
+		if s.dns != nil {
+			_ = s.dns.Stop()
+		}
+		schedulerCancel()
+		<-schedulerDone
+		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		s.opMu.Lock()
+		runtimeErr := s.supervisor.Stop(stopCtx)
+		s.opMu.Unlock()
+		if runtimeErr != nil {
+			return fmt.Errorf("API stopped unexpectedly (%v); stop managed Xray: %w", err, runtimeErr)
+		}
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
@@ -1722,6 +1740,32 @@ func probeICMPEcho(ctx context.Context, host string) map[string]any {
 // echo (host-to-server, outside Xray) and proxy delay (Xray Observatory) are
 // separate events and separate measurements. Observatory has no force-probe
 // RPC, so the stream waits for the next real configured observation cycle.
+func (s *Server) observatorySubjectCount(ctx context.Context, currentProfileID string, currentNodes []service.PreviewNode) (int, error) {
+	profiles, err := s.profileStore.ListProfiles()
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, profile := range profiles {
+		if !profile.Enabled {
+			continue
+		}
+		if profile.ID == currentProfileID {
+			total += len(currentNodes)
+			continue
+		}
+		preview, previewErr := service.PreviewProfileCached(ctx, profile, s.stateDir)
+		if previewErr != nil {
+			continue
+		}
+		total += len(eligibleObservatoryNodes(preview))
+	}
+	if total < 1 {
+		total = 1
+	}
+	return total, nil
+}
+
 func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -1866,7 +1910,14 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 	if cycleSeconds < 5 || cycleSeconds > 3600 {
 		cycleSeconds = 30
 	}
-	deadline := time.Now().Add(time.Duration(cycleSeconds+10) * time.Second)
+	subjectCount, countErr := s.observatorySubjectCount(ctx, profileID, eligibleNodes)
+	if countErr != nil {
+		send(pingStreamEvent{Done: true, Error: "Не удалось определить размер пула Observatory"})
+		return
+	}
+	probeIntervalMS := compiler.ObservatoryProbeIntervalMS(cycleSeconds, subjectCount)
+	cycleDuration := time.Duration(probeIntervalMS*subjectCount) * time.Millisecond
+	deadline := time.Now().Add(cycleDuration + 10*time.Second)
 	sent := map[string]bool{}
 	poll := time.NewTicker(500 * time.Millisecond)
 	heartbeat := time.NewTicker(10 * time.Second)
@@ -2555,6 +2606,27 @@ func (s *Server) applyCoreDNSRuntime(enabled bool) error {
 	return nil
 }
 
+func (s *Server) restoreDNSConfig(previous dnsservice.Config, wasRunning bool) error {
+	var failures []string
+	if running, _ := s.dns.Status()["running"].(bool); running {
+		if err := s.dns.Stop(); err != nil {
+			failures = append(failures, "stop new DNS service: "+err.Error())
+		}
+	}
+	if err := s.dns.Save(previous); err != nil {
+		failures = append(failures, "restore DNS settings: "+err.Error())
+	}
+	if wasRunning && previous.Enabled {
+		if err := s.dns.Start(); err != nil {
+			failures = append(failures, "restart previous DNS service: "+err.Error())
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
 func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 	if s.dns == nil {
 		writeError(w, 503, "DNS state directory is not configured")
@@ -2588,15 +2660,16 @@ func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "invalid DNS configuration")
 			return
 		}
-		was := s.dns.Status()["running"].(bool)
-		if was {
+		previous := s.dns.Config()
+		wasRunning, _ := s.dns.Status()["running"].(bool)
+		if wasRunning {
 			if err := s.dns.Stop(); err != nil {
-				writeError(w, 500, "cannot stop DNS service for configuration update")
+				writeError(w, 500, "cannot stop DNS service for configuration update: "+err.Error())
 				return
 			}
 		}
 		if err := s.dns.Save(c); err != nil {
-			if was {
+			if wasRunning && previous.Enabled {
 				_ = s.dns.Start()
 			}
 			writeError(w, 422, err.Error())
@@ -2604,20 +2677,36 @@ func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if c.Enabled {
 			if err := s.dns.Start(); err != nil {
-				writeError(w, 500, "DNS settings saved but service restart failed: "+err.Error())
+				rollbackErr := s.restoreDNSConfig(previous, wasRunning)
+				if rollbackErr != nil {
+					writeError(w, 500, "DNS restart failed: "+err.Error()+"; rollback failed: "+rollbackErr.Error())
+					return
+				}
+				writeError(w, 500, "DNS restart failed; previous DNS settings restored: "+err.Error())
 				return
 			}
 		}
 		if err := s.applyCoreDNSRuntime(c.Enabled); err != nil {
-			writeError(w, 500, "DNS settings saved but Core Xray update failed: "+err.Error())
+			rollbackErr := s.restoreDNSConfig(previous, wasRunning)
+			if rollbackErr != nil {
+				writeError(w, 500, "Core DNS apply failed: "+err.Error()+"; DNS rollback failed: "+rollbackErr.Error())
+				return
+			}
+			writeError(w, 500, "Core DNS apply failed; previous DNS settings restored: "+err.Error())
 			return
 		}
+		s.recordEvent("info", "dns", "configuration_updated", "Core DNS configuration updated")
 		writeJSON(w, 200, map[string]any{"config": s.dns.Config(), "status": s.dns.Status(), "stats": s.dns.Stats()})
 	default:
 		methodNotAllowed(w)
 	}
 }
+
 func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
+	if s.dns == nil {
+		writeError(w, http.StatusServiceUnavailable, "DNS state directory is not configured")
+		return
+	}
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
 		return
@@ -2631,30 +2720,51 @@ func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid DNS service action")
 		return
 	}
-	c := s.dns.Config()
+	previous := s.dns.Config()
+	wasRunning, _ := s.dns.Status()["running"].(bool)
 	var err error
 	switch req.Action {
 	case "start":
-		c.Enabled = true
-		if err = s.dns.Save(c); err == nil {
+		next := previous
+		next.Enabled = true
+		if err = s.dns.Save(next); err == nil {
 			err = s.dns.Start()
 		}
 		if err == nil {
 			err = s.applyCoreDNSRuntime(true)
 		}
 		if err != nil {
-			_ = s.dns.Stop()
-			c.Enabled = false
-			_ = s.dns.Save(c)
+			rollbackErr := s.restoreDNSConfig(previous, wasRunning)
+			if rollbackErr != nil {
+				err = fmt.Errorf("start DNS failed: %v; rollback failed: %w", err, rollbackErr)
+			} else {
+				err = fmt.Errorf("start DNS failed; previous DNS settings restored: %w", err)
+			}
 		}
 	case "stop":
-		// First detach Xray from the listener; only then close the DNS socket.
-		if err = s.applyCoreDNSRuntime(false); err == nil {
-			err = s.dns.Stop()
+		if err = s.applyCoreDNSRuntime(false); err != nil {
+			break
 		}
-		if err == nil {
-			c.Enabled = false
-			err = s.dns.Save(c)
+		if err = s.dns.Stop(); err != nil {
+			if previous.Enabled {
+				if rollbackErr := s.applyCoreDNSRuntime(true); rollbackErr != nil {
+					err = fmt.Errorf("stop DNS failed: %v; Xray DNS rollback failed: %w", err, rollbackErr)
+				}
+			}
+			break
+		}
+		next := previous
+		next.Enabled = false
+		if err = s.dns.Save(next); err != nil {
+			rollbackErr := s.restoreDNSConfig(previous, wasRunning)
+			if previous.Enabled {
+				if xrayErr := s.applyCoreDNSRuntime(true); xrayErr != nil {
+					rollbackErr = errors.Join(rollbackErr, xrayErr)
+				}
+			}
+			if rollbackErr != nil {
+				err = fmt.Errorf("save DNS stop state failed: %v; rollback failed: %w", err, rollbackErr)
+			}
 		}
 	default:
 		writeError(w, 400, "action must be start or stop")
@@ -2672,7 +2782,12 @@ func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"status": s.dns.Status(), "config": s.dns.Config()})
 }
+
 func (s *Server) dnsCheck(w http.ResponseWriter, r *http.Request) {
+	if s.dns == nil {
+		writeError(w, http.StatusServiceUnavailable, "DNS state directory is not configured")
+		return
+	}
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
 		return

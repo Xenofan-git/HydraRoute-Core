@@ -114,6 +114,8 @@ func (s *Store) Append(level, component, eventType, message string) (Event, erro
 	if s.loadErr != nil {
 		return Event{}, s.loadErr
 	}
+	previousEvents := append([]Event(nil), s.events...)
+	previousNextID := s.nextID
 	event := Event{ID: s.nextID, Time: time.Now().UTC(), Level: level, Component: component, Type: eventType, Message: message}
 	s.nextID++
 	s.events = append(s.events, event)
@@ -121,7 +123,9 @@ func (s *Store) Append(level, component, eventType, message string) (Event, erro
 		s.events = append([]Event(nil), s.events[len(s.events)-maxEvents:]...)
 	}
 	if err := s.persistLocked(); err != nil {
-		return event, err
+		s.events = previousEvents
+		s.nextID = previousNextID
+		return Event{}, err
 	}
 	for _, ch := range s.subs {
 		select {
@@ -181,9 +185,16 @@ func (s *Store) Subscribe() (<-chan Event, func()) {
 func (s *Store) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	previousEvents := s.events
+	previousLoadErr := s.loadErr
 	s.events = nil
 	s.loadErr = nil
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.events = previousEvents
+		s.loadErr = previousLoadErr
+		return err
+	}
+	return nil
 }
 
 func (s *Store) persistLocked() error {

@@ -324,7 +324,7 @@ func applyL7Sniffing(inbound map[string]any, settings L7SniffingConfig) {
 	}
 }
 
-func observatoryProbeInterval(seconds, subjects int) string {
+func ObservatoryProbeIntervalMS(seconds, subjects int) int {
 	if seconds < 5 || seconds > 3600 {
 		seconds = 30
 	}
@@ -335,7 +335,11 @@ func observatoryProbeInterval(seconds, subjects int) string {
 	if intervalMS < 100 {
 		intervalMS = 100
 	}
-	return fmt.Sprintf("%dms", intervalMS)
+	return intervalMS
+}
+
+func observatoryProbeInterval(seconds, subjects int) string {
+	return fmt.Sprintf("%dms", ObservatoryProbeIntervalMS(seconds, subjects))
 }
 
 func validateRouteTarget(action, profileID string, enabled map[string]bool) error {

@@ -528,3 +528,18 @@ func TestObservatoryIntervalHasHundredMillisecondFloor(t *testing.T) {
 		t.Fatalf("probeInterval=%v, want 100ms", obs["probeInterval"])
 	}
 }
+
+func TestObservatoryProbeIntervalRespectsMinimumAndPoolSize(t *testing.T) {
+	tests := []struct{ seconds, subjects, want int }{
+		{30, 1, 30000},
+		{30, 100, 300},
+		{30, 500, 100},
+		{5, 1000, 100},
+		{1, 1, 30000},
+	}
+	for _, tt := range tests {
+		if got := ObservatoryProbeIntervalMS(tt.seconds, tt.subjects); got != tt.want {
+			t.Errorf("ObservatoryProbeIntervalMS(%d,%d)=%d want %d", tt.seconds, tt.subjects, got, tt.want)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,7 +85,15 @@ func DefaultConfig() Config {
 	return Config{Listen: "127.0.0.1", Port: 5353, AutoProvider: true, Servers: []Server{{Name: "Yandex DNS · Basic", Protocol: "DoH", Address: "https://common.dot.dns.yandex.net/dns-query", Enabled: true}, {Name: "AdGuard DNS · Default", Protocol: "DoH", Address: "https://dns.adguard-dns.com/dns-query", Enabled: true}, {Name: "Cloudflare · 1.1.1.1", Protocol: "DoH", Address: "https://cloudflare-dns.com/dns-query", Enabled: true}, {Name: "Quad9 · Standard", Protocol: "DoH", Address: "https://dns.quad9.net/dns-query", Enabled: true}}}
 }
 func New(path string) *Manager {
-	m := &Manager{path: path, client: &http.Client{Timeout: 8 * time.Second}, hosts: map[string]net.IP{}}
+	m := &Manager{path: path, client: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return fmt.Errorf("DoH redirect must remain HTTPS")
+		}
+		if len(via) >= 5 {
+			return fmt.Errorf("too many DoH redirects")
+		}
+		return nil
+	}}, hosts: map[string]net.IP{}}
 	m.cfg = DefaultConfig()
 	_ = m.Load()
 	return m
@@ -135,8 +144,14 @@ func (m *Manager) Save(c Config) error {
 		if p != "DO53" && p != "DOT" && p != "DOH" {
 			return fmt.Errorf("unsupported DNS protocol %q", s.Protocol)
 		}
-		if s.Address == "" {
-			return fmt.Errorf("DNS server %q has no address", s.Name)
+		if s.Address == "" || strings.ContainsAny(s.Address, " \t\r\n") {
+			return fmt.Errorf("DNS server %q has no valid address", s.Name)
+		}
+		if p == "DOH" {
+			u, err := url.Parse(s.Address)
+			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+				return fmt.Errorf("DNS server %q must use a valid HTTPS DoH URL", s.Name)
+			}
 		}
 	}
 	b, e := json.MarshalIndent(c, "", "  ")
@@ -322,6 +337,7 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 	}
 	reply := new(mdns.Msg)
 	reply.SetReply(r)
+	blocked := false
 	for _, q := range r.Question {
 		host := strings.TrimSuffix(strings.ToLower(q.Name), ".")
 		m.mu.RLock()
@@ -343,6 +359,7 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 			}
 		}
 		if m.blockedHost(host) {
+			blocked = true
 			if trackStats {
 				m.blocked.Add(1)
 			}
@@ -352,7 +369,7 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 			}
 		}
 	}
-	if len(reply.Answer) == 0 {
+	if !blocked && len(reply.Answer) == 0 {
 		if e := m.forward(r, reply); e != nil {
 			reply.Rcode = mdns.RcodeServerFailure
 			if trackStats {
@@ -426,6 +443,10 @@ func (m *Manager) exchange(req, resp *mdns.Msg, s Server) error {
 	q := req.Copy()
 	p := strings.ToUpper(s.Protocol)
 	if p == "DOH" {
+		u, err := url.Parse(s.Address)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+			return fmt.Errorf("DoH endpoint must be a valid HTTPS URL")
+		}
 		b, err := q.Pack()
 		if err != nil {
 			return err
@@ -470,6 +491,13 @@ func (m *Manager) exchange(req, resp *mdns.Msg, s Server) error {
 	a, _, err := cl.Exchange(q, address)
 	if err != nil {
 		return err
+	}
+	if p == "DO53" && a.Truncated {
+		tcpClient := &mdns.Client{Net: "tcp", Timeout: 5 * time.Second}
+		a, _, err = tcpClient.Exchange(q, address)
+		if err != nil {
+			return fmt.Errorf("DNS TCP retry after truncated UDP response: %w", err)
+		}
 	}
 	*resp = *a
 	resp.Id = req.Id
