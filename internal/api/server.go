@@ -2138,51 +2138,36 @@ func (s *Server) refreshProfileLocked(ctx context.Context, profileID string) (ma
 	return s.refreshProfilesMode(ctx, false, profileID)
 }
 
-func (s *Server) profileFallbackSnapshot(ctx context.Context, profile profiles.Profile) service.ProfileFallback {
-	preview, err := service.PreviewProfileCached(ctx, profile, s.stateDir)
-	if err != nil {
-		return service.ProfileFallback{}
-	}
+func buildProfileFallbackSnapshot(profileID string, nodes []service.PreviewNode, cached map[string]xrayapi.OutboundStatus, live []xrayapi.OutboundStatus, candidateTags []string) service.ProfileFallback {
 	fallback := service.ProfileFallback{Statuses: make(map[string]service.FallbackStatus), ReferenceURIs: make(map[string]string)}
-	for _, node := range preview.Nodes {
+	statusValue := func(status xrayapi.OutboundStatus) service.FallbackStatus {
+		return service.FallbackStatus{Alive: status.Alive, DelayMS: status.DelayMS, LastTryTime: status.LastTryTime, LastSeenTime: status.LastSeenTime}
+	}
+	liveByTag := make(map[string]xrayapi.OutboundStatus, len(live))
+	for _, status := range live {
+		liveByTag[status.Tag] = status
+	}
+	for _, node := range nodes {
 		keyBytes, _ := json.Marshal(node.Key)
-		fallback.ReferenceURIs[string(keyBytes)] = node.ReferenceURI
-	}
-	s.probeMu.RLock()
-	for key, status := range s.probeCache[profile.ID] {
-		if status.Tag == compiler.OutboundTag(profile.ID, key) {
-			fallback.Statuses[key] = service.FallbackStatus{Alive: status.Alive, DelayMS: status.DelayMS, LastTryTime: status.LastTryTime, LastSeenTime: status.LastSeenTime}
+		key := string(keyBytes)
+		tag := compiler.OutboundTag(profileID, key)
+		fallback.ReferenceURIs[key] = node.ReferenceURI
+		if status, ok := cached[key]; ok && status.Tag == tag {
+			fallback.Statuses[key] = statusValue(status)
+		}
+		if status, ok := liveByTag[tag]; ok && status.LastTryTime > 0 {
+			fallback.Statuses[key] = statusValue(status)
 		}
 	}
-	s.probeMu.RUnlock()
-	if !s.supervisor.Status().Running {
-		return fallback
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	items, probeErr := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
-	cancel()
-	if probeErr == nil {
-		byTag := make(map[string]xrayapi.OutboundStatus, len(items))
-		for _, item := range items {
-			byTag[item.Tag] = item
-		}
-		for _, node := range preview.Nodes {
+	// HRweb takes the last repeated principle_target tag. Resolve it against
+	// the complete source preview, including nodes no longer selected, so its
+	// URI can still guide the next pool compilation.
+	if len(candidateTags) > 0 {
+		candidateTag := candidateTags[len(candidateTags)-1]
+		for _, node := range nodes {
 			keyBytes, _ := json.Marshal(node.Key)
 			key := string(keyBytes)
-			if item, ok := byTag[compiler.OutboundTag(profile.ID, key)]; ok && item.LastTryTime > 0 {
-				fallback.Statuses[key] = service.FallbackStatus{Alive: item.Alive, DelayMS: item.DelayMS, LastTryTime: item.LastTryTime, LastSeenTime: item.LastSeenTime}
-			}
-		}
-	}
-	tagCtx, tagCancel := context.WithTimeout(ctx, 3*time.Second)
-	tags, tagErr := xrayapi.GetBalancerPrincipleTargetTags(tagCtx, xrayapi.DefaultAddress, "hr_bal_"+profile.ID)
-	tagCancel()
-	if tagErr == nil && len(tags) > 0 {
-		candidateTag := tags[len(tags)-1]
-		for _, node := range preview.Nodes {
-			keyBytes, _ := json.Marshal(node.Key)
-			key := string(keyBytes)
-			if compiler.OutboundTag(profile.ID, key) == candidateTag {
+			if compiler.OutboundTag(profileID, key) == candidateTag {
 				fallback.CandidateKey = key
 				fallback.ReferenceURI = node.ReferenceURI
 				break
@@ -2190,6 +2175,35 @@ func (s *Server) profileFallbackSnapshot(ctx context.Context, profile profiles.P
 		}
 	}
 	return fallback
+}
+
+func (s *Server) profileFallbackSnapshot(ctx context.Context, profile profiles.Profile) service.ProfileFallback {
+	preview, err := service.PreviewProfileCached(ctx, profile, s.stateDir)
+	if err != nil {
+		return service.ProfileFallback{}
+	}
+	cached := make(map[string]xrayapi.OutboundStatus)
+	s.probeMu.RLock()
+	for key, status := range s.probeCache[profile.ID] {
+		cached[key] = status
+	}
+	s.probeMu.RUnlock()
+	if !s.supervisor.Status().Running {
+		return buildProfileFallbackSnapshot(profile.ID, preview.Nodes, cached, nil, nil)
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	live, probeErr := xrayapi.GetOutboundStatus(probeCtx, xrayapi.DefaultAddress)
+	cancel()
+	if probeErr != nil {
+		live = nil
+	}
+	tagCtx, tagCancel := context.WithTimeout(ctx, 3*time.Second)
+	candidateTags, tagErr := xrayapi.GetBalancerPrincipleTargetTags(tagCtx, xrayapi.DefaultAddress, "hr_bal_"+profile.ID)
+	tagCancel()
+	if tagErr != nil {
+		candidateTags = nil
+	}
+	return buildProfileFallbackSnapshot(profile.ID, preview.Nodes, cached, live, candidateTags)
 }
 
 func (s *Server) refreshProfilesMode(ctx context.Context, forceFetch bool, targetProfile string) (map[string]any, error) {
