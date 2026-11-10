@@ -173,7 +173,7 @@ jobs:
           readelf -h "$RUNNER_TEMP/smartdns-arm64/smartdns" | grep -F AArch64
           cat > "$RUNNER_TEMP/smartdns-arm64/smartdns-qemu" <<EOF
           #!/usr/bin/env bash
-          exec qemu-aarch64-static -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" "\$@"
+          exec qemu-aarch64-static -strace -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" "\$@"
           EOF
           chmod +x "$RUNNER_TEMP/smartdns-arm64/smartdns-qemu"
           qemu-aarch64-static --version
