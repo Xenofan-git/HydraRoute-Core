@@ -291,7 +291,7 @@ func Compile(req CompileRequest) ([]byte, error) {
 		cfg["inbounds"] = inbounds
 		cfg["outbounds"] = outbounds
 		cfg["routing"] = map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers}
-		cfg["api"] = map[string]any{"tag": "hr_api", "services": []string{"ObservatoryService"}}
+		cfg["api"] = map[string]any{"tag": "hr_api", "services": []string{"ObservatoryService", "RoutingService"}}
 		cfg["observatory"] = map[string]any{
 			"subjectSelector": allOutboundTags,
 			"probeUrl":        "https://www.google.com/generate_204",

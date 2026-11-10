@@ -47,8 +47,9 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 		t.Fatalf("want direct+block+3 eligible pool nodes plus private API outbound, got %d", len(outbounds))
 	}
 	api := cfg["api"].(map[string]any)
-	if api["tag"] != "hr_api" || api["services"].([]any)[0] != "ObservatoryService" {
-		t.Fatalf("private Observatory API not enabled: %#v", api)
+	services := api["services"].([]any)
+	if api["tag"] != "hr_api" || len(services) != 2 || services[0] != "ObservatoryService" || services[1] != "RoutingService" {
+		t.Fatalf("private Observatory and Routing APIs not enabled: %#v", api)
 	}
 	obs := cfg["observatory"].(map[string]any)
 	if len(obs["subjectSelector"].([]any)) != 3 {

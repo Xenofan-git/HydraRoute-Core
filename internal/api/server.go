@@ -1536,11 +1536,13 @@ func (s *Server) saveProbeCache() error {
 }
 
 type observatoryStatusResponse struct {
-	ProfileID string                            `json:"profile_id"`
-	Available bool                              `json:"available"`
-	Refreshed bool                              `json:"refreshed"`
-	Statuses  map[string]xrayapi.OutboundStatus `json:"statuses"`
-	Error     string                            `json:"error,omitempty"`
+	ProfileID             string                            `json:"profile_id"`
+	Available             bool                              `json:"available"`
+	Refreshed             bool                              `json:"refreshed"`
+	BalancerCandidateKey  string                            `json:"balancer_candidate_key,omitempty"`
+	BalancerCandidateName string                            `json:"balancer_candidate_name,omitempty"`
+	Statuses              map[string]xrayapi.OutboundStatus `json:"statuses"`
+	Error                 string                            `json:"error,omitempty"`
 }
 
 func (s *Server) cachedProbeStatuses(profileID string, nodes []service.PreviewNode) map[string]xrayapi.OutboundStatus {
@@ -1576,6 +1578,24 @@ func eligibleObservatoryNodes(preview service.ProfilePreview) []service.PreviewN
 	return nodes
 }
 
+// resolveBalancerCandidate maps Xray's last principle-target candidate back
+// to the stable node identity used by this profile. Unknown/stale tags are
+// deliberately ignored; a strategy candidate is not proof of an active socket.
+func resolveBalancerCandidate(profileID string, nodes []service.PreviewNode, tags []string) (string, string) {
+	if len(tags) == 0 {
+		return "", ""
+	}
+	candidateTag := tags[len(tags)-1]
+	for _, node := range nodes {
+		keyBytes, _ := json.Marshal(node.Key)
+		key := string(keyBytes)
+		if compiler.OutboundTag(profileID, key) == candidateTag {
+			return key, node.Name
+		}
+	}
+	return "", ""
+}
+
 func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string, since int64) (observatoryStatusResponse, error) {
 	if s.profileStore == nil {
 		return observatoryStatusResponse{}, fmt.Errorf("profile store is not configured")
@@ -1604,6 +1624,11 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 		byTag[item.Tag] = item
 	}
 	result := observatoryStatusResponse{ProfileID: profileID, Available: true, Refreshed: true, Statuses: make(map[string]xrayapi.OutboundStatus)}
+	// RoutingService exposes the balancer's principle-target candidates. Keep
+	// Observatory measurements available even if this optional API is absent.
+	if tags, candidateErr := xrayapi.GetBalancerPrincipleTargetTags(ctx, xrayapi.DefaultAddress, "hr_bal_"+profileID); candidateErr == nil {
+		result.BalancerCandidateKey, result.BalancerCandidateName = resolveBalancerCandidate(profileID, eligibleNodes, tags)
+	}
 	s.probeMu.Lock()
 	cache := s.probeCache[profileID]
 	if cache == nil {
@@ -2920,6 +2945,75 @@ func (s *Server) loadObservatorySettings() {
 	}
 }
 
+// applyObservatoryInterval updates only the managed Xray Observatory interval.
+// If Xray is running it is restarted transactionally; on failure the previous
+// validated config is restored and the previous runtime state is recovered.
+func (s *Server) applyObservatoryInterval(seconds int) (bool, error) {
+	previous, err := s.supervisor.SnapshotConfig()
+	if err != nil || len(previous) == 0 {
+		return false, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(previous, &cfg); err != nil {
+		return false, fmt.Errorf("cannot read prepared Xray config: %w", err)
+	}
+	observatory, ok := cfg["observatory"].(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	subjects := 1
+	if selector, ok := observatory["subjectSelector"].([]any); ok && len(selector) > 0 {
+		subjects = len(selector)
+	}
+	observatory["probeInterval"] = fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(seconds, subjects))
+	next, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	wasRunning := s.supervisor.Status().Running
+	if wasRunning {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		err = s.supervisor.Stop(stopCtx)
+		cancel()
+		if err != nil {
+			return false, fmt.Errorf("cannot stop Xray to apply Observatory interval: %w", err)
+		}
+	}
+	applyCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	err = s.supervisor.Prepare(applyCtx, next)
+	if err == nil && wasRunning {
+		err = s.supervisor.Start(applyCtx)
+		if err == nil {
+			time.Sleep(350 * time.Millisecond)
+			if !s.supervisor.Status().Running {
+				err = fmt.Errorf("Xray exited immediately after applying Observatory settings")
+			}
+		}
+	}
+	cancel()
+	if err == nil {
+		return true, nil
+	}
+	if wasRunning && s.supervisor.Status().Running {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 8*time.Second)
+		stopErr := s.supervisor.Stop(stopCtx)
+		stopCancel()
+		if stopErr != nil {
+			return false, fmt.Errorf("apply Observatory interval failed: %v; cannot stop failed runtime for rollback: %w", err, stopErr)
+		}
+	}
+	restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	restoreErr := s.supervisor.Prepare(restoreCtx, previous)
+	if restoreErr == nil && wasRunning {
+		restoreErr = s.supervisor.Start(restoreCtx)
+	}
+	restoreCancel()
+	if restoreErr != nil {
+		return false, fmt.Errorf("apply Observatory interval failed: %v; previous config/runtime restore failed: %w", err, restoreErr)
+	}
+	return false, fmt.Errorf("apply Observatory interval failed; previous Xray config restored: %w", err)
+}
+
 func (s *Server) observatorySettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -2960,6 +3054,7 @@ func (s *Server) observatorySettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "cannot secure Observatory state directory")
 			return
 		}
+		previousInterval := s.observatoryInterval
 		data, _ := json.Marshal(req)
 		tmp, err := os.CreateTemp(dir, ".settings-*.json")
 		if err != nil {
@@ -2978,15 +3073,34 @@ func (s *Server) observatorySettings(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			err = closeErr
 		}
-		if err == nil {
-			err = os.Rename(name, filepath.Join(dir, "settings.json"))
-		}
 		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot prepare Observatory settings")
+			return
+		}
+		wasRunning := s.supervisor.Status().Running
+		runtimeUpdated, applyErr := s.applyObservatoryInterval(req.ProbeIntervalSeconds)
+		if applyErr != nil {
+			writeError(w, http.StatusServiceUnavailable, applyErr.Error())
+			return
+		}
+		if err = os.Rename(name, filepath.Join(dir, "settings.json")); err != nil {
+			if runtimeUpdated {
+				if _, rollbackErr := s.applyObservatoryInterval(previousInterval); rollbackErr != nil {
+					writeError(w, http.StatusInternalServerError, "cannot persist Observatory settings; runtime rollback failed: "+rollbackErr.Error())
+					return
+				}
+			}
 			writeError(w, http.StatusInternalServerError, "cannot persist Observatory settings")
 			return
 		}
 		s.observatoryInterval = req.ProbeIntervalSeconds
-		writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "probe_interval_seconds": s.observatoryInterval, "applies": "next configuration build"})
+		applies := "saved for next configuration build"
+		if runtimeUpdated && wasRunning {
+			applies = "active Xray runtime restarted"
+		} else if runtimeUpdated {
+			applies = "prepared Xray configuration updated"
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "saved", "probe_interval_seconds": s.observatoryInterval, "applies": applies})
 	default:
 		methodNotAllowed(w)
 	}

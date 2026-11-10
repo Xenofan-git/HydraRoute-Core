@@ -1052,6 +1052,23 @@ func TestEligibleObservatoryNodesOnlyIncludesBalancerMembers(t *testing.T) {
 	}
 }
 
+func TestResolveBalancerCandidateUsesLastKnownEligibleStrategyTag(t *testing.T) {
+	profileID := "candidate"
+	first := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "first"}, Name: "First"}
+	last := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "last"}, Name: "Last"}
+	firstKey, _ := json.Marshal(first.Key)
+	lastKey, _ := json.Marshal(last.Key)
+	firstTag := compiler.OutboundTag(profileID, string(firstKey))
+	lastTag := compiler.OutboundTag(profileID, string(lastKey))
+	key, name := resolveBalancerCandidate(profileID, []service.PreviewNode{first, last}, []string{firstTag, lastTag})
+	if key != string(lastKey) || name != "Last" {
+		t.Fatalf("candidate=(%q,%q), want last strategy target (%q,Last)", key, name, lastKey)
+	}
+	if key, name = resolveBalancerCandidate(profileID, []service.PreviewNode{first}, []string{"unknown-outbound-tag"}); key != "" || name != "" {
+		t.Fatalf("unknown/stale candidate tag must not leak: (%q,%q)", key, name)
+	}
+}
+
 func TestObservatoryCachePersistsAcrossCoreRestart(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
@@ -1202,6 +1219,44 @@ func TestObservatorySettingsPersistAndValidate(t *testing.T) {
 	h.mux.ServeHTTP(rr, localPut("/v1/observatory/settings", `{"probe_interval_seconds":3601}`))
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid interval status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestObservatorySettingsImmediatelyUpdatePreparedXrayConfig(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	node := func(key string) compiler.Node {
+		return compiler.Node{Key: key, Outbound: json.RawMessage(`{"protocol":"freedom"}`)}
+	}
+	config, err := compiler.Compile(compiler.CompileRequest{Profiles: []compiler.Profile{{
+		ID: "obs", Enabled: true, Port: 16242, Nodes: []compiler.Node{node("one"), node("two")},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.supervisor.Prepare(context.Background(), config); err != nil {
+		t.Fatalf("prepare Xray config: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/observatory/settings", `{"probe_interval_seconds":137}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"applies":"prepared Xray configuration updated"`) {
+		t.Fatalf("response did not report immediate prepared-config update: %s", rr.Body.String())
+	}
+	updated, err := h.supervisor.SnapshotConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(updated, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	observatory := decoded["observatory"].(map[string]any)
+	want := fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(137, 2))
+	if observatory["probeInterval"] != want {
+		t.Fatalf("probeInterval=%v want %s", observatory["probeInterval"], want)
 	}
 }
 
