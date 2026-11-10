@@ -23,12 +23,12 @@ const (
 )
 
 type Result struct {
-	Blocked []string
-	Allowed []string
-	Lines   int
-	Parsed  int
-	Ignored int
-	Dropped int
+	Blocked []string `json:"blocked,omitempty"`
+	Allowed []string `json:"allowed,omitempty"`
+	Lines   int      `json:"lines"`
+	Parsed  int      `json:"parsed"`
+	Ignored int      `json:"ignored"`
+	Dropped int      `json:"dropped"`
 }
 
 // Parse reads the domain-oriented formats used by HRweb DNS block sources:
