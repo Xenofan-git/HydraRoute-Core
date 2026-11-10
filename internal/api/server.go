@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"hydraroute.local/core/internal/compiler"
-	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
 	"hydraroute.local/core/internal/dnsservice"
+	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
 	"hydraroute.local/core/internal/events"
 	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
