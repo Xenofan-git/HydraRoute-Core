@@ -36,7 +36,7 @@ func TestApplyMuxUsesHRNeoProfileDefaults(t *testing.T) {
 	if !ok {
 		t.Fatal("mux object was not added")
 	}
-	if mux["enabled"] != true || mux["concurrency"] != 8 || mux["xudpConcurrency"] != 8 || mux["xudpProxyUDP443"] != "reject" {
+	if mux["enabled"] != true || mux["concurrency"] != 8 || mux["xudpConcurrency"] != 1 || mux["xudpProxyUDP443"] != "reject" {
 		t.Fatalf("unexpected mux config: %#v", mux)
 	}
 }
