@@ -30,6 +30,8 @@ Commits:
 - `98981d499552161f5e11d99b938003b804ad5577` — fix declaration ordering after the behavior change.
 - `04712ee4bb4991d2392870070029937959bf220f` — real Xray random-strategy distribution test (30 connections across three healthy upstreams).
 - `7b6f4a7792f72a6edf6f8b8edc8eb5d85c76879b` — record the random runtime result and remaining lifecycle gaps.
+- `ffb217cfdaae5e49652c14ffdedabbc81677cf03` — isolate the profile fallback snapshot builder without changing runtime semantics.
+- `252b23ae18824ae5529cc7749e9570e3503eb83c` — test full-preview candidate mapping, stale-tag rejection, and live-over-cache precedence.
 
 Current intended sequence:
 - Retain the previous runtime candidate only if it remains selected, alive, URI-compatible, and belongs to the active reference family.
@@ -42,13 +44,14 @@ URI identity remains compared without the display fragment after `#`; stale Obse
 
 ## Validation performed
 
-A temporary test directory was created under `/tmp/hrcore-fallback-check`; the VPS worktree itself was not modified. The exact `fallback.go` and `fallback_test.go` contents were fetched from the GitHub branch and overlaid into that temporary copy.
+A temporary test directory was created under `/tmp/hrcore-fallback-check`; the VPS worktree itself was not modified. The exact `fallback.go`, `fallback_test.go`, `server.go` fallback-snapshot block, `server_test.go` snapshot test, and integration test from the GitHub branch were overlaid into that temporary copy.
 
 Using Go 1.27.3:
+- `go test -race -count=1 ./internal/api ./internal/service` — PASS.
 - `go test -count=1 ./internal/service` — PASS.
 - `go test -count=1 ./...` — PASS for the temporary test tree.
 - `go vet ./...` — PASS.
-- `HRCORE_XRAY_INTEGRATION=1 XRAY_BINARY=/root/hr-hydraroute-build/toolchain/xray-v26.10.31-amd64/xray go test -count=1 -v ./tests/integration` — PASS; actual Xray 26.10.31 Observatory/balancer/fail-closed and leastPing/roundRobin runtime tests passed.
+- `HRCORE_XRAY_INTEGRATION=1 XRAY_BINARY=/root/hr-hydraroute-build/toolchain/xray-v26.10.31-amd64/xray go test -count=1 -v ./tests/integration` — PASS; actual Xray 26.10.31 Observatory/balancer/fail-closed and leastPing/roundRobin/random runtime tests passed; random sent 30 independent requests and all three upstreams received traffic.
 
 **Validation caveat:** the VPS source worktree is still the preserved older `integration/nanopi-ui-20261109` worktree with local modifications. Only the exact current-branch fallback implementation and its tests were overlaid in the temporary copy. These local results are useful but do not replace GitHub CI on the current branch head.
 
