@@ -334,7 +334,11 @@ func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var after uint64
-	if raw := r.URL.Query().Get("after_id"); raw != "" {
+	lastEventID := r.Header.Get("Last-Event-ID")
+	if lastEventID == "" {
+		lastEventID = r.URL.Query().Get("after_id")
+	}
+	if raw := lastEventID; raw != "" {
 		value, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "after_id must be an unsigned integer")
@@ -343,11 +347,18 @@ func (s *Server) eventStream(w http.ResponseWriter, r *http.Request) {
 		after = value
 	}
 	ch, cancel := s.events.Subscribe()
+	if ch == nil {
+		writeError(w, http.StatusServiceUnavailable, "event stream subscriber limit reached")
+		return
+	}
 	defer cancel()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+	if controller := http.NewResponseController(w); controller != nil {
+		_ = controller.SetWriteDeadline(time.Time{})
+	}
 	send := func(event events.Event) bool {
 		data, err := json.Marshal(event)
 		if err != nil {

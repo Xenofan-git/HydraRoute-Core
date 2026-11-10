@@ -63,7 +63,7 @@ type Monitor struct {
 }
 
 func New(settings Settings) *Monitor {
-	if settings == (Settings{}) {
+	if settings.Validate() != nil {
 		settings = DefaultSettings()
 	}
 	return &Monitor{settings: settings, states: make(map[string]string), failures: make(map[string]int), recovery: make(map[string]int)}

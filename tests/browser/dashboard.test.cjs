@@ -80,6 +80,7 @@ before(async () => {
       if (url.pathname === '/v1/health/settings' && req.method === 'PUT') { savedHealthSettings = await readBody(req); return json(res, 200, savedHealthSettings); }
       if (url.pathname === '/v1/events' && req.method === 'GET') return json(res, 200, { events: eventItems.slice(-Number(url.searchParams.get('limit') || 50)) });
       if (url.pathname === '/v1/events' && req.method === 'DELETE') { eventItems = []; return json(res, 200, { status: 'cleared' }); }
+      if (url.pathname === '/v1/events/stream' && req.method === 'GET') { res.writeHead(204); res.end(); return; }
       if (url.pathname === '/v1/profiles' && req.method === 'GET') return json(res, 200, { profiles });
       if (url.pathname === '/v1/profiles' && req.method === 'PUT') {
         const update = await readBody(req);

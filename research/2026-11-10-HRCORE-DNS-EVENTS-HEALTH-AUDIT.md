@@ -29,9 +29,9 @@ Validation:
 
 - Added `internal/events` with monotonic IDs, UTC timestamps, level/component/type/message fields, bounded 500-event history, atomic private JSON persistence, and subscriber channels.
 - State is stored under `<stateDir>/events/events.json` with directory mode 0700 and file mode 0600; journal file size is capped at 1 MiB.
-- Added local-only `GET /v1/events`, `DELETE /v1/events`, and SSE `GET /v1/events/stream`.
+- Added local-only `GET /v1/events`, `DELETE /v1/events`, and SSE `GET /v1/events/stream` with `Last-Event-ID` reconnection, a 16-subscriber cap, heartbeat and write-deadline clearing. `after_id` pagination returns the next page rather than skipping to the newest page.
 - Integrated safe, non-secret events for API start, configuration prepare/rejection, profile create/update/delete, runtime start/stop, subscription refresh and DNS lifecycle.
-- UI now renders a structured event history and explicitly does not pretend to show Xray stdout/stderr.
+- UI now renders a structured event history and consumes the live SSE stream; it explicitly does not pretend to show Xray stdout/stderr.
 
 ## Health Monitor
 

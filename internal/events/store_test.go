@@ -85,3 +85,39 @@ func TestClearRemovesEventsButKeepsMonotonicIDs(t *testing.T) {
 		t.Fatalf("IDs not monotonic: first=%d second=%d err=%v", first.ID, second.ID, err)
 	}
 }
+
+func TestListAfterIDReturnsNextPageNotLatestPage(t *testing.T) {
+	s := New("")
+	for i := 0; i < 200; i++ {
+		if _, err := s.Append("info", "test", "tick", fmt.Sprintf("event %d", i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items := s.List(10, 1)
+	if len(items) != 10 || items[0].ID != 2 || items[9].ID != 11 {
+		t.Fatalf("after_id pagination returned wrong range: len=%d first=%d last=%d", len(items), items[0].ID, items[len(items)-1].ID)
+	}
+}
+
+func TestSubscriberLimitIsBounded(t *testing.T) {
+	s := New("")
+	cancels := make([]func(), 0, maxSubscribers)
+	for i := 0; i < maxSubscribers; i++ {
+		ch, cancel := s.Subscribe()
+		if ch == nil {
+			t.Fatalf("subscriber %d was rejected", i)
+		}
+		cancels = append(cancels, cancel)
+	}
+	if ch, _ := s.Subscribe(); ch != nil {
+		t.Fatal("subscriber limit was not enforced")
+	}
+	for _, cancel := range cancels {
+		cancel()
+	}
+	if ch, cancel := s.Subscribe(); ch == nil {
+		t.Fatal("subscriber slot was not released")
+	} else {
+		cancel()
+	}
+}

@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	maxEvents = 500
-	maxBytes  = 1 << 20
+	maxEvents      = 500
+	maxBytes       = 1 << 20
+	maxSubscribers = 16
 )
 
 type Event struct {
@@ -138,21 +139,30 @@ func (s *Store) List(limit int, afterID uint64) []Event {
 		limit = 100
 	}
 	result := make([]Event, 0, limit)
+	if afterID > 0 {
+		for _, event := range s.events {
+			if event.ID > afterID {
+				result = append(result, event)
+				if len(result) == limit {
+					break
+				}
+			}
+		}
+		return result
+	}
 	start := len(s.events) - limit
 	if start < 0 {
 		start = 0
 	}
-	for _, event := range s.events[start:] {
-		if event.ID > afterID {
-			result = append(result, event)
-		}
-	}
-	return result
+	return append(result, s.events[start:]...)
 }
 
 func (s *Store) Subscribe() (<-chan Event, func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.subs) >= maxSubscribers {
+		return nil, func() {}
+	}
 	s.nextSub++
 	id := s.nextSub
 	ch := make(chan Event, 32)

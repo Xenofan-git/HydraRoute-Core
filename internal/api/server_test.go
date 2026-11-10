@@ -1354,6 +1354,7 @@ func TestRoutingPublishesCoreOwnedWatchlistSocketAndStatus(t *testing.T) {
 func TestEventJournalAPIListsClearsAndStreamsStructuredEvents(t *testing.T) {
 	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
 	h.recordEvent("info", "runtime", "started", "Xray process started")
+	h.recordEvent("warning", "runtime", "stopped", "Xray process stopped")
 
 	rr := httptest.NewRecorder()
 	h.mux.ServeHTTP(rr, localGet("/v1/events?limit=10"))
@@ -1362,7 +1363,8 @@ func TestEventJournalAPIListsClearsAndStreamsStructuredEvents(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	streamReq := localGet("/v1/events/stream?after_id=0")
+	streamReq := localGet("/v1/events/stream")
+	streamReq.Header.Set("Last-Event-ID", "1")
 	streamReq = streamReq.WithContext(ctx)
 	streamRR := httptest.NewRecorder()
 	finished := make(chan struct{})
@@ -1386,8 +1388,8 @@ func TestEventJournalAPIListsClearsAndStreamsStructuredEvents(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("event stream did not stop after request cancellation")
 	}
-	if !strings.Contains(streamRR.Body.String(), `"message":"Xray process started"`) {
-		t.Fatalf("stream body=%s", streamRR.Body.String())
+	if !strings.Contains(streamRR.Body.String(), `"message":"Xray process stopped"`) || strings.Contains(streamRR.Body.String(), `"message":"Xray process started"`) {
+		t.Fatalf("Last-Event-ID was not respected: %s", streamRR.Body.String())
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/events", nil)
