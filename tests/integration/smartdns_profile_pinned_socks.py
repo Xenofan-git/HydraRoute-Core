@@ -294,7 +294,7 @@ def start_smartdns(config_path: Path) -> tuple[subprocess.Popen, Path | None, ob
     log_path = ROOT / "smartdns.log"
     log_file = open(log_path, "w", encoding="utf-8")
     strace_path = ROOT / "smartdns.strace"
-    if shutil.which("strace"):
+    if shutil.which("strace") and os.environ.get("SMARTDNS_NO_STRACE") != "1":
         command = [
             "strace", "-f", "-qq", "-e", "trace=socket,bind,connect,sendto,sendmsg,openat,execve",
             "-o", str(strace_path), SMARTDNS, "-f", "-c", str(config_path), "-p", "-",
@@ -362,7 +362,9 @@ def main() -> None:
             if dns_query("allowed.example.test", 1) == "203.0.113.5":
                 break
             if SMARTDNS_PROCESS.poll() is not None:
-                raise AssertionError(f"SmartDNS exited early; log: {(ROOT / 'smartdns.log').read_text(errors='replace')}")
+                log_text = (ROOT / "smartdns.log").read_text(errors="replace")
+                trace_text = Path(trace_path).read_text(errors="replace")[-8000:] if trace_path else "(strace disabled)"
+                raise AssertionError(f"SmartDNS exited early rc={SMARTDNS_PROCESS.returncode}; log: {log_text}; trace: {trace_text}")
             time.sleep(0.2)
         assert dns_query("allowed.example.test") == "203.0.113.5", "static allow response failed"
         before_ads = len(HITS)
