@@ -272,8 +272,8 @@ func (m *Manager) RemoveEntry(id, rawDomain string) error {
 		return ErrSourceNotFound
 	}
 	result, exists := m.results[id]
-	if !exists || (!contains(result.Blocked, domain) && !contains(result.Allowed, domain)) {
-		return fmt.Errorf("domain is not present in blocklist source")
+	if !exists || !contains(result.Blocked, domain) {
+		return fmt.Errorf("domain is not present in the blocklist entries for this source")
 	}
 	for _, removed := range m.sources[index].Removed {
 		if removed.Entry == domain {
@@ -342,9 +342,7 @@ func (m *Manager) Snapshot() Snapshot {
 			}
 		}
 		for _, domain := range result.Allowed {
-			if _, skip := removed[domain]; !skip {
-				allowed[domain] = struct{}{}
-			}
+			allowed[domain] = struct{}{}
 		}
 	}
 	out.Blocked = sortedKeys(blocked)

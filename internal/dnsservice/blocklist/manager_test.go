@@ -103,6 +103,40 @@ func TestManagerRemoveRestoreToggleAndDelete(t *testing.T) {
 	}
 }
 
+func TestManagerRemovedEntriesOnlySuppressBlockedDomains(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocklists.json")
+	fetcher := func(context.Context, string) (Result, error) {
+		return Result{
+			Blocked: []string{"ads.example.com"},
+			Allowed: []string{"safe.example.com"},
+		}, nil
+	}
+	manager, err := NewManager(path, fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := manager.SaveSource(Source{Name: "Ads", URL: "https://lists.example/ads.txt", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Refresh(context.Background(), source.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RemoveEntry(source.ID, "safe.example.com"); err == nil {
+		t.Fatal("source allow exception was incorrectly removable as a blocked entry")
+	}
+	if err := manager.RemoveEntry(source.ID, "ads.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := manager.Snapshot()
+	if len(snapshot.Blocked) != 0 {
+		t.Fatalf("removed blocked domain is still active: %v", snapshot.Blocked)
+	}
+	if len(snapshot.Allowed) != 1 || snapshot.Allowed[0] != "safe.example.com" {
+		t.Fatalf("removing a blocked entry changed source allow exceptions: %v", snapshot.Allowed)
+	}
+}
+
 func TestManagerRejectsUnsafeSourceURLs(t *testing.T) {
 	manager, err := NewManager(filepath.Join(t.TempDir(), "blocklists.json"), nil)
 	if err != nil {
