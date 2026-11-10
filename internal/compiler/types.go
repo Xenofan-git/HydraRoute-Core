@@ -18,7 +18,7 @@ type Profile struct {
 	ManualSelection   bool      `json:"manual_selection,omitempty"`
 	// FallbackKey is resolved internally from this profile runtime state.
 	// It must never be accepted from an external compile request.
-	FallbackKey       string    `json:"-"`
+	FallbackKey string `json:"-"`
 }
 
 // Node contains a stable identity and a validated Xray outbound object.
