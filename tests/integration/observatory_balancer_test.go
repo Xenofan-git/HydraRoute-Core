@@ -45,16 +45,18 @@ func newProbeServer() *probeServer {
 type socksUpstream struct {
 	listener    net.Listener
 	connections atomic.Int64
+	userHits    atomic.Int64
 	healthy     atomic.Bool
+	delay       time.Duration
 }
 
-func startSOCKSUpstream(t *testing.T) *socksUpstream {
+func startSOCKSUpstream(t *testing.T, delay time.Duration) *socksUpstream {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &socksUpstream{listener: ln}
+	s := &socksUpstream{listener: ln, delay: delay}
 	s.healthy.Store(true)
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
@@ -123,6 +125,9 @@ func (s *socksUpstream) handle(conn net.Conn) {
 		_, _ = conn.Write([]byte{5, 5, 0, 1, 127, 0, 0, 1, 0, 0})
 		return
 	}
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	destination := net.JoinHostPort(host, fmt.Sprint(binary.BigEndian.Uint16(rawPort[:])))
 	upstream, err := net.DialTimeout("tcp", destination, 4*time.Second)
 	if err != nil {
@@ -135,8 +140,19 @@ func (s *socksUpstream) handle(conn net.Conn) {
 	}
 	_ = conn.SetDeadline(time.Time{})
 	_ = upstream.SetDeadline(time.Time{})
+	reader := bufio.NewReader(conn)
+	requestLine, err := reader.ReadString('\n')
+	if err != nil {
+		return
+	}
+	if strings.Contains(requestLine, " /user ") {
+		s.userHits.Add(1)
+	}
+	if _, err := io.WriteString(upstream, requestLine); err != nil {
+		return
+	}
 	finished := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(upstream, conn); finished <- struct{}{} }()
+	go func() { _, _ = io.Copy(upstream, reader); finished <- struct{}{} }()
 	go func() { _, _ = io.Copy(conn, upstream); finished <- struct{}{} }()
 	<-finished
 }
@@ -265,7 +281,7 @@ func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
 
 	probe := newProbeServer()
 	defer probe.http.Close()
-	live := startSOCKSUpstream(t)
+	live := startSOCKSUpstream(t, 0)
 	rrPort, lpPort := freeTCPPort(t), freeTCPPort(t)
 	for rrPort == lpPort {
 		lpPort = freeTCPPort(t)
@@ -433,5 +449,144 @@ func TestXrayObservatoryBalancerRuntimeAndFailClosedFallback(t *testing.T) {
 	}
 	if got := probe.userHits.Load(); got != before {
 		t.Fatalf("all-dead leastPing reached the direct HTTP endpoint: user hits %d -> %d", before, got)
+	}
+}
+
+func TestXrayLeastPingAndRoundRobinDistribution(t *testing.T) {
+	if os.Getenv("HRCORE_XRAY_INTEGRATION") != "1" {
+		t.Skip("set HRCORE_XRAY_INTEGRATION=1 to run the real Xray data-plane test")
+	}
+	xrayBinary := os.Getenv("XRAY_BINARY")
+	if xrayBinary == "" {
+		t.Fatal("XRAY_BINARY is required")
+	}
+	if _, err := os.Stat(xrayBinary); err != nil {
+		t.Fatalf("Xray binary is unavailable: %v", err)
+	}
+	if ln, err := net.Listen("tcp", "127.0.0.1:16285"); err == nil {
+		_ = ln.Close()
+	} else {
+		t.Skipf("Xray API test port %d is already in use: %v", xrayAPIPort, err)
+	}
+
+	probe := newProbeServer()
+	defer probe.http.Close()
+	slow := startSOCKSUpstream(t, 250*time.Millisecond)
+	medium := startSOCKSUpstream(t, 90*time.Millisecond)
+	fast := startSOCKSUpstream(t, 20*time.Millisecond)
+	rrPort, lpPort := freeTCPPort(t), freeTCPPort(t)
+	for rrPort == lpPort {
+		lpPort = freeTCPPort(t)
+	}
+	outbound := func(key string, port uint16) compiler.Node {
+		data, _ := json.Marshal(map[string]any{"protocol": "socks", "settings": map[string]any{"servers": []any{map[string]any{"address": "127.0.0.1", "port": port}}}})
+		return compiler.Node{Key: key, Outbound: data}
+	}
+	compiled, err := compiler.Compile(compiler.CompileRequest{ObservatoryProbeIntervalSeconds: 5, Profiles: []compiler.Profile{
+		{ID: "rrdist", Enabled: true, Port: rrPort, Strategy: "roundRobin", FallbackKey: "rr-slow", Nodes: []compiler.Node{outbound("rr-slow", uint16(slow.listener.Addr().(*net.TCPAddr).Port)), outbound("rr-medium", uint16(medium.listener.Addr().(*net.TCPAddr).Port)), outbound("rr-fast", uint16(fast.listener.Addr().(*net.TCPAddr).Port))}},
+		{ID: "lpfast", Enabled: true, Port: lpPort, Strategy: "leastPing", FallbackKey: "lp-slow", Nodes: []compiler.Node{outbound("lp-slow", uint16(slow.listener.Addr().(*net.TCPAddr).Port)), outbound("lp-medium", uint16(medium.listener.Addr().(*net.TCPAddr).Port)), outbound("lp-fast", uint16(fast.listener.Addr().(*net.TCPAddr).Port))}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(compiled, &config); err != nil {
+		t.Fatal(err)
+	}
+	config["log"] = map[string]any{"loglevel": "warning", "access": filepath.Join(t.TempDir(), "access.log"), "error": filepath.Join(t.TempDir(), "error.log")}
+	observatory := config["observatory"].(map[string]any)
+	observatory["probeUrl"] = probe.http.URL + "/generate_204"
+	observatory["probeInterval"] = "500ms"
+	configPath := filepath.Join(t.TempDir(), "xray.json")
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(xrayBinary, "run", "-test", "-config", configPath).CombinedOutput(); err != nil {
+		t.Fatalf("Xray rejected strategy config: %v\n%s", err, output)
+	}
+	logFile, err := os.OpenFile(config["log"].(map[string]any)["error"].(string), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(xrayBinary, "run", "-config", configPath)
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait(); _ = logFile.Close() })
+
+	wantTags := []string{
+		compiler.OutboundTag("rrdist", "rr-slow"), compiler.OutboundTag("rrdist", "rr-medium"), compiler.OutboundTag("rrdist", "rr-fast"),
+		compiler.OutboundTag("lpfast", "lp-slow"), compiler.OutboundTag("lpfast", "lp-medium"), compiler.OutboundTag("lpfast", "lp-fast"),
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	ready := false
+	for time.Now().Before(deadline) {
+		statuses, statusErr := readOutboundStatuses()
+		if statusErr == nil {
+			ready = true
+			for _, tag := range wantTags {
+				if status, ok := statuses[tag]; !ok || !status.Alive || status.LastTryTime == 0 {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				break
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !ready {
+		t.Fatal("Observatory did not mark all three test upstreams alive for both strategies")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	leastPingTargets, err := xrayapi.GetBalancerPrincipleTargetTags(ctx, "127.0.0.1:16285", "hr_bal_lpfast")
+	cancel()
+	if err != nil {
+		t.Fatalf("GetBalancerInfo failed for leastPing: %v", err)
+	}
+	if len(leastPingTargets) != 1 || leastPingTargets[0] != compiler.OutboundTag("lpfast", "lp-fast") {
+		t.Fatalf("leastPing did not choose the lowest-delay outbound: %q", leastPingTargets)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	roundRobinTargets, err := xrayapi.GetBalancerPrincipleTargetTags(ctx, "127.0.0.1:16285", "hr_bal_rrdist")
+	cancel()
+	if err != nil {
+		t.Fatalf("GetBalancerInfo failed for roundRobin: %v", err)
+	}
+	if len(roundRobinTargets) != 3 {
+		t.Fatalf("roundRobin candidate set mismatch: %q", roundRobinTargets)
+	}
+
+	slowBefore, mediumBefore, fastBefore := slow.userHits.Load(), medium.userHits.Load(), fast.userHits.Load()
+	for i := 0; i < 6; i++ {
+		code, err := socksGET(rrPort, probe.http.URL+"/user")
+		if err != nil || code != http.StatusNoContent {
+			t.Fatalf("roundRobin request %d failed: status=%d err=%v", i+1, code, err)
+		}
+	}
+	slowDelta := slow.userHits.Load() - slowBefore
+	mediumDelta := medium.userHits.Load() - mediumBefore
+	fastDelta := fast.userHits.Load() - fastBefore
+	if slowDelta == 0 || mediumDelta == 0 || fastDelta == 0 || slowDelta+mediumDelta+fastDelta != 6 {
+		t.Fatalf("roundRobin did not distribute six requests across all three members: slow=%d medium=%d fast=%d", slowDelta, mediumDelta, fastDelta)
+	}
+
+	slowBefore, mediumBefore, fastBefore = slow.userHits.Load(), medium.userHits.Load(), fast.userHits.Load()
+	for i := 0; i < 3; i++ {
+		code, err := socksGET(lpPort, probe.http.URL+"/user")
+		if err != nil || code != http.StatusNoContent {
+			t.Fatalf("leastPing request %d failed: status=%d err=%v", i+1, code, err)
+		}
+	}
+	if slow.userHits.Load() != slowBefore || medium.userHits.Load() != mediumBefore || fast.userHits.Load()-fastBefore != 3 {
+		t.Fatalf("leastPing traffic did not stay on the fastest member: slow=%d medium=%d fast=%d", slow.userHits.Load()-slowBefore, medium.userHits.Load()-mediumBefore, fast.userHits.Load()-fastBefore)
 	}
 }
