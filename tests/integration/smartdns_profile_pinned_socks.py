@@ -51,6 +51,14 @@ def free_port(sock_type: int = socket.SOCK_STREAM) -> int:
         return int(sock.getsockname()[1])
 
 
+def free_dns_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        tcp.bind(("127.0.0.1", 0))
+        port = int(tcp.getsockname()[1])
+        udp.bind(("127.0.0.1", port))
+        return port
+
+
 def allocate_test_ports() -> None:
     global DNS_PORT, DOH_PORTS, SOCKS_PORTS
     used: set[int] = set()
@@ -62,7 +70,7 @@ def allocate_test_ports() -> None:
                 used.add(port)
                 return port
 
-    DNS_PORT = pick(socket.SOCK_DGRAM)
+    DNS_PORT = free_dns_port()
     DOH_PORTS = [pick(), pick()]
     SOCKS_PORTS = [pick(), pick()]
     print(f"SmartDNS sandbox ports: DNS={DNS_PORT}, DoH={DOH_PORTS}, SOCKS={SOCKS_PORTS}")
