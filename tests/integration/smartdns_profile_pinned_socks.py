@@ -24,6 +24,9 @@ if not SMARTDNS or not Path(SMARTDNS).is_file():
     raise SystemExit("SMARTDNS_BINARY must point to the built SmartDNS executable")
 
 ROOT = Path(tempfile.mkdtemp(prefix="hrcore-smartdns-sandbox-"))
+DNS_PORT = 0
+DOH_PORTS: list[int] = []
+SOCKS_PORTS: list[int] = []
 CERTS = ROOT / "certs"
 DATA = ROOT / "data"
 CERTS.mkdir(); DATA.mkdir()
@@ -40,6 +43,37 @@ LOG_FILE = None
 
 def run_checked(args: list[str]) -> None:
     subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def free_port(sock_type: int = socket.SOCK_STREAM) -> int:
+    with socket.socket(socket.AF_INET, sock_type) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def free_dns_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as udp:
+        tcp.bind(("127.0.0.1", 0))
+        port = int(tcp.getsockname()[1])
+        udp.bind(("127.0.0.1", port))
+        return port
+
+
+def allocate_test_ports() -> None:
+    global DNS_PORT, DOH_PORTS, SOCKS_PORTS
+    used: set[int] = set()
+
+    def pick(sock_type: int = socket.SOCK_STREAM) -> int:
+        while True:
+            port = free_port(sock_type)
+            if port not in used:
+                used.add(port)
+                return port
+
+    DNS_PORT = free_dns_port()
+    DOH_PORTS = [pick(), pick()]
+    SOCKS_PORTS = [pick(), pick()]
+    print(f"SmartDNS sandbox ports: DNS={DNS_PORT}, DoH={DOH_PORTS}, SOCKS={SOCKS_PORTS}")
 
 
 def create_test_ca() -> None:
@@ -130,7 +164,7 @@ class DoHHandler(BaseHTTPRequestHandler):
 
 
 def start_doh_servers() -> None:
-    for port in (18443, 18444):
+    for port in DOH_PORTS:
         server = ThreadingHTTPServer(("127.0.0.1", port), DoHHandler)
         server.daemon_threads = True
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -214,15 +248,15 @@ class SocksServer(socketserver.ThreadingTCPServer):
 
 
 def start_socks_servers() -> None:
-    for port in (16081, 16082):
+    for port in SOCKS_PORTS:
         server = SocksServer(("127.0.0.1", port), SocksHandler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         SOCKS_SERVERS.append(server)
 
 
 def build_config() -> Path:
-    config = f"""bind 127.0.0.1:16053
-bind-tcp 127.0.0.1:16053
+    config = f"""bind 127.0.0.1:{DNS_PORT}
+bind-tcp 127.0.0.1:{DNS_PORT}
 cache-size 4096
 cache-persist no
 resolv-file /dev/null
@@ -231,12 +265,13 @@ mdns-lookup no
 expand-ptr-from-address no
 audit-enable no
 log-level error
+log-file {ROOT / "smartdns-internal.log"}
 speed-check-mode none
 ca-path {CERTS}
-proxy-server socks5://127.0.0.1:16081 -name hr_proxy_foreign
-proxy-server socks5://127.0.0.1:16082 -name hr_proxy_torrent
-server-https https://dns-foreign.example.test:18443/dns-query -group hr_dns_foreign -exclude-default-group -proxy hr_proxy_foreign -host-name dns-foreign.example.test -tls-host-verify dns-foreign.example.test -host-ip 127.0.0.1 -http-host dns-foreign.example.test
-server-https https://dns-torrent.example.test:18444/dns-query -group hr_dns_torrent -exclude-default-group -proxy hr_proxy_torrent -host-name dns-torrent.example.test -tls-host-verify dns-torrent.example.test -host-ip 127.0.0.1 -http-host dns-torrent.example.test
+proxy-server socks5://127.0.0.1:{SOCKS_PORTS[0]} -name hr_proxy_foreign
+proxy-server socks5://127.0.0.1:{SOCKS_PORTS[1]} -name hr_proxy_torrent
+server-https https://dns-foreign.example.test:{DOH_PORTS[0]}/dns-query -group hr_dns_foreign -exclude-default-group -proxy hr_proxy_foreign -host-name dns-foreign.example.test -tls-host-verify dns-foreign.example.test -host-ip 127.0.0.1 -http-host dns-foreign.example.test
+server-https https://dns-torrent.example.test:{DOH_PORTS[1]}/dns-query -group hr_dns_torrent -exclude-default-group -proxy hr_proxy_torrent -host-name dns-torrent.example.test -tls-host-verify dns-torrent.example.test -host-ip 127.0.0.1 -http-host dns-torrent.example.test
 domain-set -name hr_set_ads -type list -file {DATA / 'ads.txt'}
 address /domain-set:hr_set_ads/#
 address /allowed.example.test/203.0.113.5
@@ -258,7 +293,7 @@ def dns_query(name: str, timeout: float | None = None) -> str | None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout)
     try:
-        sock.sendto(packet, ("127.0.0.1", 16053))
+        sock.sendto(packet, ("127.0.0.1", DNS_PORT))
         response, _ = sock.recvfrom(4096)
         if len(response) < 12:
             return None
@@ -317,7 +352,7 @@ def verify_strace(trace_path: Path | None) -> None:
         raise AssertionError("SmartDNS read the host /etc/resolv.conf")
     if re.search(r'execve\(".*/(ip|iptables|ip6tables|nft|ipset|conntrack)"', trace):
         raise AssertionError("SmartDNS attempted to execute a host networking tool")
-    dns_binds = [line for line in trace.splitlines() if "bind(" in line and "htons(16053)" in line]
+    dns_binds = [line for line in trace.splitlines() if "bind(" in line and f"htons({DNS_PORT})" in line]
     if not dns_binds or any('inet_addr("127.0.0.1")' not in line for line in dns_binds):
         raise AssertionError(f"SmartDNS DNS listener is not loopback-only: {dns_binds}")
     network_binds = [line for line in trace.splitlines() if "bind(" in line and ("AF_INET" in line or "AF_INET6" in line)]
@@ -352,6 +387,9 @@ def cleanup() -> None:
 
 def main() -> None:
     global SMARTDNS_PROCESS, LOG_FILE
+    print(f"SmartDNS executable: {SMARTDNS}")
+    print(f"SmartDNS sandbox root: {ROOT}")
+    allocate_test_ports()
     create_test_ca()
     start_doh_servers()
     start_socks_servers()
@@ -376,19 +414,19 @@ def main() -> None:
         assert dns_query("login.foreign.test") == "203.0.113.77", "DoH over foreign profile SOCKS failed"
         assert dns_query("tracker.torrent.test") == "203.0.113.77", "DoH over torrent profile SOCKS failed"
         with LOCK:
-            assert any(port == 18443 and name == "login.foreign.test" for port, name in HITS), HITS
-            assert any(port == 18444 and name == "tracker.torrent.test" for port, name in HITS), HITS
-            assert any(proxy == 16081 and target_port == 18443 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
-            assert any(proxy == 16082 and target_port == 18444 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
+            assert any(port == DOH_PORTS[0] and name == "login.foreign.test" for port, name in HITS), HITS
+            assert any(port == DOH_PORTS[1] and name == "tracker.torrent.test" for port, name in HITS), HITS
+            assert any(proxy == SOCKS_PORTS[0] and target_port == DOH_PORTS[0] for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
+            assert any(proxy == SOCKS_PORTS[1] and target_port == DOH_PORTS[1] for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
             assert "dns-foreign.example.test" in SNI and "dns-torrent.example.test" in SNI, SNI
             before_foreign_failure = len(HITS)
-        DISABLED_PROXIES.add(16081)
+        DISABLED_PROXIES.add(SOCKS_PORTS[0])
         assert dns_query("login2.foreign.test") != "203.0.113.77", "foreign DNS bypassed its failed profile SOCKS proxy"
         with LOCK:
             assert len(HITS) == before_foreign_failure, f"foreign query reached DoH after its proxy was disabled: {HITS[before_foreign_failure:]}"
         assert dns_query("tracker2.torrent.test") == "203.0.113.77", "torrent profile was affected by foreign proxy failure"
         with LOCK:
-            assert any(port == 18444 and name == "tracker2.torrent.test" for port, name in HITS), HITS
+            assert any(port == DOH_PORTS[1] and name == "tracker2.torrent.test" for port, name in HITS), HITS
             before_unmatched = len(HITS)
         assert dns_query("unmatched.test") != "203.0.113.77", "unmatched domain unexpectedly resolved"
         with LOCK:

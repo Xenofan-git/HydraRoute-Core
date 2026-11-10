@@ -31,6 +31,10 @@ jobs:
           files="$(gofmt -l $(find cmd internal -type f -name '*.go' -print))"
           if [[ -n "$files" ]]; then
             printf 'These Go files are not gofmt-clean:\n%s\n' "$files"
+            while IFS= read -r file; do
+              printf '\n--- gofmt diff: %s ---\n' "$file"
+              gofmt -d "$file"
+            done <<< "$files"
             exit 1
           fi
       - name: Check dashboard JavaScript
