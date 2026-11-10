@@ -103,7 +103,7 @@ before(async () => {
       if (url.pathname === '/v1/profiles/preview' && req.method === 'POST') return json(res, 200, preview);
       if (url.pathname === '/v1/observatory/status' && req.method === 'GET') return json(res, 200, { available: false, statuses: {} });
       if (url.pathname === '/v1/observatory/settings' && req.method === 'GET') return json(res, 200, savedObservatorySettings);
-      if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, savedObservatorySettings); }
+      if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, { ...savedObservatorySettings, applies: 'prepared Xray configuration updated' }); }
       if (url.pathname === '/v1/geodata/status' && req.method === 'GET') return json(res, 200, { ready: true, assets: [{ name: 'geoip.dat', available: true, size: 3312784, sha256: 'a'.repeat(64) }, { name: 'geosite.dat', available: true, size: 7554929, sha256: 'b'.repeat(64) }] });
       if (url.pathname === '/v1/watchlist/status' && req.method === 'GET') return json(res, 200, { ready: true, path: '/var/lib/hydraroute/state/watchlist.sock', targets: 3, keys: 178, partial: true, excluded_patterns: 12 });
       if (url.pathname === '/v1/l7/settings' && req.method === 'GET') return json(res, 200, savedL7Settings);
@@ -322,7 +322,7 @@ test('Observatory interval loads and persists through its settings API', async (
     assert.equal(await interval.inputValue(), '30');
     await interval.fill('120');
     await page.locator('#saveObservatorySettings').click();
-    await page.getByText('Интервал Observatory сохранён').waitFor();
+    await page.getByText('Интервал применён к конфигурации Xray').waitFor();
     assert.equal(savedObservatorySettings.probe_interval_seconds, 120);
   } finally {
     await page.close();
