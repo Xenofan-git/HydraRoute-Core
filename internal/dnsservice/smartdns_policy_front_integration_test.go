@@ -64,8 +64,12 @@ func TestPolicyFrontAgainstRunningSmartDNS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query more-specific block under parent allow: %v", err)
 	}
-	if got := answerA(blocked); got != "0.0.0.0" {
-		t.Fatalf("Core policy front did not block child under allow parent: answer=%q rcode=%d", got, blocked.Rcode)
+	if blocked.Rcode != mdns.RcodeSuccess || len(blocked.Answer) != 0 || len(blocked.Ns) != 1 {
+		t.Fatalf("Core policy front did not return an HRDNS-style SOA for child block under allow parent: rcode=%d answers=%v authority=%v", blocked.Rcode, blocked.Answer, blocked.Ns)
+	}
+	soa, ok := blocked.Ns[0].(*mdns.SOA)
+	if !ok || soa.Hdr.Ttl != 30 || soa.Ns != "a.gtld-servers.net." || soa.Mbox != "nstld.verisign-grs.com." {
+		t.Fatalf("Core policy front returned a non-HRDNS SOA: %+v", blocked.Ns[0])
 	}
 
 	allowed, err := queryA("policy.safe.ads.example.test")
