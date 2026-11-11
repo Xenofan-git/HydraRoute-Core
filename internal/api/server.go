@@ -3994,7 +3994,11 @@ func (s *Server) dnsBlocklistItem(w http.ResponseWriter, r *http.Request) {
 		for _, err := range failures {
 			messages = append(messages, err.Error())
 		}
-		s.recordEvent("info", "dns", "blocklist_refresh_all", "DNS blocklist refresh completed")
+		if len(failures) > 0 {
+			s.recordEvent("warning", "dns", "blocklist_refresh_all_partial", "One or more DNS blocklist sources failed to refresh; last known-good data was retained")
+		} else {
+			s.recordEvent("info", "dns", "blocklist_refresh_all", "DNS blocklist refresh completed")
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"snapshot": s.blocklists.Snapshot(), "failures": messages})
 		return
 	}
@@ -4083,6 +4087,7 @@ func (s *Server) dnsBlocklistItem(w http.ResponseWriter, r *http.Request) {
 		source, err := s.blocklists.Refresh(r.Context(), id)
 		s.applyDNSBlocklists()
 		if err != nil {
+			s.recordEvent("warning", "dns", "blocklist_source_refresh_failed", "DNS blocklist source refresh failed; last known-good data was retained")
 			writeJSON(w, http.StatusBadGateway, map[string]any{"source": source, "snapshot": s.blocklists.Snapshot(), "error": err.Error()})
 			return
 		}
