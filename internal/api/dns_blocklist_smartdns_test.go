@@ -44,6 +44,7 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 		{ID: "custom-set", Kind: "route", ProfileID: "foreign", Domains: []string{"tracker.example.test"}, Enabled: true},
 	}}
 	server := &Server{blocklists: manager, dns: resolver, smartDNSConfig: base}
+	server.setSmartDNSPolicyConfig(base)
 	server.applyDNSBlocklists()
 	for _, host := range []string{"ads.example.test", "blocked.allow-parent.example.test"} {
 		if !resolver.IsBlockedHost(host) {
@@ -59,6 +60,7 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 		t.Fatalf("SmartDNS profile-routing domain sets unexpectedly changed: %+v", server.smartDNSConfig.DomainSets)
 	}
 	server.smartDNSConfig.Enabled = false
+	server.setSmartDNSPolicyConfig(server.smartDNSConfig)
 	server.applyDNSBlocklists()
 	if resolver.IsBlockedHost("blocked.allow-parent.example.test") {
 		t.Fatal("disabled SmartDNS configuration still applied its custom block set")
