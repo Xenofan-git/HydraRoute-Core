@@ -1839,3 +1839,43 @@ func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
 		t.Fatalf("delete source failed: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	get := httptest.NewRecorder()
+	server.mux.ServeHTTP(get, localGet("/v1/dns/blocklists/settings"))
+	if get.Code != http.StatusOK {
+		t.Fatalf("settings GET status=%d body=%s", get.Code, get.Body.String())
+	}
+	var initial struct {
+		Settings dnsblocklist.RefreshSettings `json:"settings"`
+	}
+	if err := json.Unmarshal(get.Body.Bytes(), &initial); err != nil {
+		t.Fatal(err)
+	}
+	if !initial.Settings.AutoUpdate || initial.Settings.UpdateTime != "04:30" {
+		t.Fatalf("HRNeo default daily refresh settings mismatch: %+v", initial.Settings)
+	}
+
+	put := httptest.NewRecorder()
+	server.mux.ServeHTTP(put, localPut("/v1/dns/blocklists/settings", `{"autoUpdate":false,"updateTime":"05:15","iface":"eth1"}`))
+	if put.Code != http.StatusOK {
+		t.Fatalf("settings PUT status=%d body=%s", put.Code, put.Body.String())
+	}
+	if got := server.blocklists.Settings(); got.AutoUpdate || got.UpdateTime != "05:15" || got.Iface != "eth1" {
+		t.Fatalf("settings PUT not persisted: %+v", got)
+	}
+	select {
+	case <-server.blocklistWake:
+	default:
+		t.Fatal("saving schedule did not wake the daily scheduler")
+	}
+
+	loc := time.FixedZone("test", 3*60*60)
+	now := time.Date(2026, 11, 11, 4, 30, 0, 0, loc)
+	next := nextDailyBlocklistUpdate(now, "04:30")
+	if !next.Equal(time.Date(2026, 11, 12, 4, 30, 0, 0, loc)) {
+		t.Fatalf("daily schedule next run=%s", next)
+	}
+}
