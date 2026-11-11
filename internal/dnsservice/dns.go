@@ -429,11 +429,24 @@ func (m *Manager) blockedHost(host string) bool {
 			return !strings.EqualFold(rule.Action, "allow")
 		}
 	}
-	// HRweb checks allow exceptions before applying the block source result.
-	if matchesBlocklistDomain(host, m.blocklistAllowed) {
-		return false
+	// HRDNS evaluates the most-specific matching suffix first. At each
+	// candidate suffix an allow entry is checked before a block entry, so an
+	// exact allow wins an exact duplicate, but a more-specific block wins over
+	// a broader allow (and vice versa for a more-specific allow).
+	for candidate := host; candidate != ""; {
+		if _, ok := m.blocklistAllowed[candidate]; ok {
+			return false
+		}
+		if _, ok := m.blocklistBlocked[candidate]; ok {
+			return true
+		}
+		separator := strings.IndexByte(candidate, '.')
+		if separator < 0 {
+			break
+		}
+		candidate = candidate[separator+1:]
 	}
-	return matchesBlocklistDomain(host, m.blocklistBlocked)
+	return false
 }
 
 func normalizeBlocklistDomain(raw string) string {
@@ -457,19 +470,6 @@ func normalizeBlocklistDomain(raw string) string {
 	return domain
 }
 
-func matchesBlocklistDomain(host string, domains map[string]struct{}) bool {
-	for candidate := host; candidate != ""; {
-		if _, ok := domains[candidate]; ok {
-			return true
-		}
-		separator := strings.IndexByte(candidate, '.')
-		if separator < 0 {
-			break
-		}
-		candidate = candidate[separator+1:]
-	}
-	return false
-}
 func (m *Manager) forward(req, resp *mdns.Msg) error {
 	c := m.Config()
 	var candidates []Server
