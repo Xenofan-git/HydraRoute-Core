@@ -484,14 +484,14 @@ func (m *Manager) blockDecision(host string, qtype uint16) (bool, blockSource) {
 
 func blocklistSOA(name string) *mdns.SOA {
 	return &mdns.SOA{
-		Hdr: mdns.RR_Header{Name: mdns.Fqdn(name), Rrtype: mdns.TypeSOA, Class: mdns.ClassINET, Ttl: 30},
-		Ns: "a.gtld-servers.net.",
-		Mbox: "nstld.verisign-grs.com.",
-		Serial: 1800,
+		Hdr:     mdns.RR_Header{Name: mdns.Fqdn(name), Rrtype: mdns.TypeSOA, Class: mdns.ClassINET, Ttl: 30},
+		Ns:      "a.gtld-servers.net.",
+		Mbox:    "nstld.verisign-grs.com.",
+		Serial:  1800,
 		Refresh: 1800,
-		Retry: 900,
-		Expire: 604800,
-		Minttl: 86400,
+		Retry:   900,
+		Expire:  604800,
+		Minttl:  86400,
 	}
 }
 
