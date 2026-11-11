@@ -24,15 +24,16 @@ The configuration parser in `src/dns_conf/address.c` handles an address token be
 
 Therefore `address /domain-set:<allow-set>/-` is a real allow exception, not a no-op response:
 - allow entries suppress matching block address rules;
-- flags accumulate across matching suffixes, so parent and child exceptions both work;
-- exact overlap between a block and allow source is supported by SmartDNS itself.
+- flags accumulate across matching suffixes, so an allow child suppresses a matching parent block;
+- an identical domain key cannot safely carry both block and allow address actions in SmartDNS's single domain-rule entry. The compiler removes exact Block/Allow duplicates from the generated block set, and also removes block children covered by an allow parent. It retains allow children beneath block parents so SmartDNS's suffix flag performs the override.
 
-The Core compiler now permits block/allow suffix overlaps and emits block sets before allow sets for deterministic configuration. It does not discard block source entries: the SmartDNS resolver applies the allow flag during query rule resolution.
+The Core compiler permits Block/Allow suffix overlaps, normalizes the exact/allow-parent cases above, and emits block sets before allow sets for deterministic configuration. Source metadata and parsed source results remain intact; only the generated SmartDNS block-set file is normalized.
 
 ## Tests added
 
 - API-level test verifies that current manager Blocked/Allowed snapshots replace only the generated SmartDNS sets while preserving custom sets.
-- Compiler test verifies exact overlap, allow parent vs block child, and allow child vs block parent all compile without losing source domains.
+- Compiler test verifies exact overlap normalization, allow parent vs block child normalization, and preservation of allow child exceptions beneath a block parent.
+- The actual SmartDNS integration harness now tests a blocked parent domain and a child Allow exception against live mock DoH/SOCKS upstreams on AMD64 and ARM64, in addition to TLS, profile isolation and fail-closed behavior.
 - Existing SmartDNS actual-binary runtime integration tests continue to validate staged generation, process start, DNS readiness and stop on AMD64 and ARM64.
 
 ## Remaining DNS closeout gates
