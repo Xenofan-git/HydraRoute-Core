@@ -64,6 +64,26 @@ func TestParseHostsFilesOnlyAcceptHRDNSSinkholeAddresses(t *testing.T) {
 	}
 }
 
+func TestParseCustomListAcceptsHRWebDomainFormatsAndRejectsInvalidLines(t *testing.T) {
+	got, err := ParseCustomList(strings.NewReader(strings.Join([]string{
+		"example.com",
+		"||ads.example.test^",
+		"@@||safe.example.test^",
+		"0.0.0.0 hosts.example.test",
+		"# comment",
+	}, "\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ads.example.test", "example.com", "hosts.example.test", "safe.example.test"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("custom domains=%v, want %v", got, want)
+	}
+	if _, err := ParseCustomList(strings.NewReader("not a valid domain..\n")); err == nil {
+		t.Fatal("invalid custom domain line was silently accepted")
+	}
+}
+
 func TestParseDeduplicatesAndNormalizes(t *testing.T) {
 	got, err := Parse(strings.NewReader("Example.COM.\nexample.com\n*.Sub.Example.com\n"))
 	if err != nil {
