@@ -482,6 +482,7 @@ func (m *Manager) blockDecision(host string, qtype uint16) (bool, blockSource) {
 	return false, blockSourceNone
 }
 
+// blocklistSOA mirrors the pinned SmartDNS/HRDNS default negative SOA tuple.
 func blocklistSOA(name string) *mdns.SOA {
 	return &mdns.SOA{
 		Hdr:     mdns.RR_Header{Name: mdns.Fqdn(name), Rrtype: mdns.TypeSOA, Class: mdns.ClassINET, Ttl: 30},
