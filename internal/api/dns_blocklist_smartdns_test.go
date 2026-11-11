@@ -34,7 +34,10 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 	if err := resolver.Save(resolverConfig); err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{blocklists: manager, dns: resolver}
+	base := hrsmartdns.Config{DomainSets: []hrsmartdns.DomainSet{
+		{ID: "custom-set", Kind: "route", ProfileID: "foreign", Domains: []string{"tracker.example.test"}, Enabled: true},
+	}}
+	server := &Server{blocklists: manager, dns: resolver, smartDNSConfig: base}
 	server.applyDNSBlocklists()
 	if !resolver.IsBlockedHost("ads.example.test") {
 		t.Fatal("Core DNS policy resolver did not receive blocklist entries")
@@ -42,12 +45,8 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 	if resolver.IsBlockedHost("safe.example.test") {
 		t.Fatal("Core DNS policy resolver did not receive allowlist exceptions")
 	}
-
-	base := hrsmartdns.Config{DomainSets: []hrsmartdns.DomainSet{
-		{ID: "custom-set", Kind: "route", ProfileID: "foreign", Domains: []string{"tracker.example.test"}, Enabled: true},
-	}}
-	if len(base.DomainSets) != 1 || base.DomainSets[0].ID != "custom-set" {
-		t.Fatalf("SmartDNS profile-routing domain sets unexpectedly changed: %+v", base.DomainSets)
+	if len(server.smartDNSConfig.DomainSets) != 1 || server.smartDNSConfig.DomainSets[0].ID != "custom-set" {
+		t.Fatalf("SmartDNS profile-routing domain sets unexpectedly changed: %+v", server.smartDNSConfig.DomainSets)
 	}
 }
 
