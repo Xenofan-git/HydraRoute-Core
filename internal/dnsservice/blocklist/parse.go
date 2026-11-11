@@ -142,6 +142,25 @@ func parseLine(line string) (Action, []string, bool) {
 	return action, []string{line}, false
 }
 
+// ParseCustomList parses the HRweb custom block/allow textarea format.
+func ParseCustomList(reader io.Reader) ([]string, error) {
+	parsed, err := Parse(reader)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Dropped > 0 {
+		return nil, fmt.Errorf("custom DNS list contains %d invalid entries", parsed.Dropped)
+	}
+	seen := make(map[string]struct{}, len(parsed.Blocked)+len(parsed.Allowed))
+	for _, domain := range parsed.Blocked {
+		seen[domain] = struct{}{}
+	}
+	for _, domain := range parsed.Allowed {
+		seen[domain] = struct{}{}
+	}
+	return sortedKeys(seen), nil
+}
+
 func isBlocklistSinkholeAddress(value string) bool {
 	ip := net.ParseIP(value)
 	if ip == nil {
