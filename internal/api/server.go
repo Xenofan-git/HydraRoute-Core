@@ -93,6 +93,7 @@ type Server struct {
 	refreshOpts         Options
 	refreshState        RefreshStatus
 	refreshWake         chan struct{}
+	blocklistWake       chan struct{}
 	probeMu             sync.RWMutex
 	probeSaveMu         sync.Mutex
 	probeCache          map[string]map[string]xrayapi.OutboundStatus
@@ -133,7 +134,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if opts.RetryMax < opts.RetryMin {
 		opts.RetryMax = opts.RetryMin
 	}
-	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, subscriptionFetcher: parser.FetchSubscription, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
+	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), blocklistWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, subscriptionFetcher: parser.FetchSubscription, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
 	s.events = events.New("")
 	healthSettings := health.DefaultSettings()
 	if stateDir != "" {
@@ -225,6 +226,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/dns/smartdns", s.smartDNSHandler)
 	s.mux.HandleFunc("/v1/dns/smartdns/", s.smartDNSAction)
 	s.mux.HandleFunc("/v1/dns/blocklists", s.dnsBlocklists)
+	s.mux.HandleFunc("/v1/dns/blocklists/settings", s.dnsBlocklistSettings)
 	s.mux.HandleFunc("/v1/dns/blocklists/", s.dnsBlocklistItem)
 	s.mux.Handle("/", ui.Handler())
 	if s.supervisor != nil && s.supervisor.Status().Configured {
@@ -280,7 +282,14 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		s.refreshState.NextAttempt = &nextAttempt
 		s.refreshMu.Unlock()
 	}
-	go func() { defer close(schedulerDone); s.runRefreshScheduler(schedulerCtx) }()
+	go func() {
+		defer close(schedulerDone)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); s.runRefreshScheduler(schedulerCtx) }()
+		go func() { defer wg.Done(); s.runBlocklistScheduler(schedulerCtx) }()
+		wg.Wait()
+	}()
 	defer func() { schedulerCancel(); <-schedulerDone }()
 	select {
 	case err := <-serveErr:
@@ -2643,6 +2652,82 @@ func (s *Server) profileRefreshDelay() (time.Duration, bool) {
 	return earliest, found
 }
 
+func nextDailyBlocklistUpdate(now time.Time, updateTime string) time.Time {
+	parts := strings.Split(updateTime, ":")
+	if len(parts) != 2 {
+		return now.Add(24 * time.Hour)
+	}
+	hour, errHour := strconv.Atoi(parts[0])
+	minute, errMinute := strconv.Atoi(parts[1])
+	if errHour != nil || errMinute != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return now.Add(24 * time.Hour)
+	}
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
+}
+
+// runBlocklistScheduler mirrors HRNeo's daily DNS blocklist job. Its schedule
+// is independent of subscription refresh and uses the saved local wall-clock
+// time (default 04:30) and optional interface-bound downloader.
+func (s *Server) runBlocklistScheduler(ctx context.Context) {
+	for {
+		if s.blocklists == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.blocklistWake:
+				continue
+			}
+		}
+		settings := s.blocklists.Settings()
+		if !settings.AutoUpdate {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.blocklistWake:
+				continue
+			}
+		}
+		next := nextDailyBlocklistUpdate(time.Now(), settings.UpdateTime)
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-s.blocklistWake:
+			timer.Stop()
+			continue
+		case <-timer.C:
+		}
+		refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		failures := s.blocklists.RefreshAll(refreshCtx)
+		cancel()
+		s.applyDNSBlocklists()
+		if len(failures) > 0 {
+			messages := make([]string, 0, len(failures))
+			for _, err := range failures {
+				messages = append(messages, err.Error())
+			}
+			s.recordEvent("warning", "dns", "blocklist_scheduled_refresh_partial", strings.Join(messages, "; "))
+		} else {
+			s.recordEvent("info", "dns", "blocklist_scheduled_refresh", "Scheduled DNS blocklist refresh completed")
+		}
+	}
+}
+
+func (s *Server) wakeBlocklistScheduler() {
+	if s.blocklistWake == nil {
+		return
+	}
+	select {
+	case s.blocklistWake <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Server) runRefreshScheduler(ctx context.Context) {
 	retryDelay := time.Duration(0)
 	for {
@@ -3699,6 +3784,50 @@ func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
+}
+
+func (s *Server) dnsBlocklistSettings(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		writeError(w, http.StatusServiceUnavailable, "DNS blocklist state is not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		settings := s.blocklists.Settings()
+		next := any(nil)
+		if settings.AutoUpdate {
+			next = nextDailyBlocklistUpdate(time.Now(), settings.UpdateTime)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"settings": settings, "next_update": next})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var settings dnsblocklist.RefreshSettings
+		if err := decodeStrictJSON(w, r, &settings, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid DNS blocklist refresh settings")
+			return
+		}
+		saved, err := s.blocklists.SaveSettings(settings)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.wakeBlocklistScheduler()
+		s.recordEvent("info", "dns", "blocklist_schedule_saved", "DNS blocklist automatic refresh settings saved")
+		next := any(nil)
+		if saved.AutoUpdate {
+			next = nextDailyBlocklistUpdate(time.Now(), saved.UpdateTime)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"settings": saved, "next_update": next})
+	default:
+		methodNotAllowed(w)
+	}
 }
 
 func (s *Server) dnsBlocklists(w http.ResponseWriter, r *http.Request) {
