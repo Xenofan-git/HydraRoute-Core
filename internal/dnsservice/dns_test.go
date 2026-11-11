@@ -95,6 +95,93 @@ func freeDNSPort(t *testing.T) int {
 	return port
 }
 
+func startFakeDNSUpstream(t *testing.T, answerIP string, hits *atomic.Int32) string {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := mdns.NewServeMux()
+	mux.HandleFunc(".", func(w mdns.ResponseWriter, req *mdns.Msg) {
+		if hits != nil {
+			hits.Add(1)
+		}
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		if len(req.Question) > 0 && req.Question[0].Qtype == mdns.TypeA {
+			rr, parseErr := mdns.NewRR(req.Question[0].Name + " 30 IN A " + answerIP)
+			if parseErr != nil {
+				t.Errorf("build fake DNS answer: %v", parseErr)
+				return
+			}
+			resp.Answer = append(resp.Answer, rr)
+		}
+		_ = w.WriteMsg(resp)
+	})
+	server := &mdns.Server{PacketConn: pc, Handler: mux}
+	go func() { _ = server.ActivateAndServe() }()
+	t.Cleanup(func() { _ = server.Shutdown() })
+	return pc.LocalAddr().String()
+}
+
+func TestSmartDNSForwarderIsExclusiveAndSkipsConfiguredFallbacks(t *testing.T) {
+	var smartDNSHits, fallbackHits atomic.Int32
+	smartDNSAddr := startFakeDNSUpstream(t, "203.0.113.77", &smartDNSHits)
+	fallbackAddr := startFakeDNSUpstream(t, "198.51.100.88", &fallbackHits)
+	m := &Manager{cfg: Config{
+		AutoProvider: true,
+		Servers: []Server{{Name: "Public fallback", Protocol: "Do53", Address: fallbackAddr, Enabled: true}},
+	}}
+	if err := m.SetSmartDNSForwarder(smartDNSAddr); err != nil {
+		t.Fatal(err)
+	}
+	query := new(mdns.Msg)
+	query.SetQuestion("routed.example.test.", mdns.TypeA)
+	response := new(mdns.Msg)
+	if err := m.forward(query, response); err != nil {
+		t.Fatalf("forward through SmartDNS: %v", err)
+	}
+	if len(response.Answer) != 1 || response.Answer[0].(*mdns.A).A.String() != "203.0.113.77" {
+		t.Fatalf("unexpected SmartDNS response: %+v", response.Answer)
+	}
+	if smartDNSHits.Load() != 1 || fallbackHits.Load() != 0 {
+		t.Fatalf("SmartDNS/fallback hit counts = %d/%d, want 1/0", smartDNSHits.Load(), fallbackHits.Load())
+	}
+}
+
+func TestSmartDNSForwarderFailureDoesNotFallBackToPublicDNS(t *testing.T) {
+	var fallbackHits atomic.Int32
+	fallbackAddr := startFakeDNSUpstream(t, "198.51.100.88", &fallbackHits)
+	m := &Manager{cfg: Config{
+		Servers: []Server{{Name: "Public fallback", Protocol: "Do53", Address: fallbackAddr, Enabled: true}},
+	}}
+	unusedAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(freeDNSPort(t)))
+	if err := m.SetSmartDNSForwarder(unusedAddr); err != nil {
+		t.Fatal(err)
+	}
+	query := new(mdns.Msg)
+	query.SetQuestion("routed.example.test.", mdns.TypeA)
+	if err := m.forward(query, new(mdns.Msg)); err == nil {
+		t.Fatal("expected unavailable SmartDNS upstream to fail")
+	}
+	if got := fallbackHits.Load(); got != 0 {
+		t.Fatalf("public fallback received %d queries after SmartDNS failure", got)
+	}
+}
+
+func TestSetSmartDNSForwarderRequiresLoopback(t *testing.T) {
+	m := &Manager{}
+	if err := m.SetSmartDNSForwarder("8.8.8.8:5354"); err == nil {
+		t.Fatal("expected non-loopback SmartDNS forwarder to be rejected")
+	}
+	if err := m.SetSmartDNSForwarder("127.0.0.1:5354"); err != nil {
+		t.Fatalf("valid loopback SmartDNS forwarder rejected: %v", err)
+	}
+	if err := m.SetSmartDNSForwarder(""); err != nil {
+		t.Fatalf("clear SmartDNS forwarder: %v", err)
+	}
+}
+
 func TestStopClosesUDPAndTCPListenersAndAllowsRestart(t *testing.T) {
 	m := New(filepath.Join(t.TempDir(), "dns", "config.json"))
 	cfg := m.Config()
