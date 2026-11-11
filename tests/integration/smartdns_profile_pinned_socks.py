@@ -31,6 +31,7 @@ HITS: list[tuple[int, str]] = []
 PROXY_EVENTS: list[tuple[int, str, int]] = []
 SNI: list[str | None] = []
 DISABLED_PROXIES: set[int] = set()
+ACTIVE_PROXY_CLIENTS: dict[int, set[socket.socket]] = {}
 LOCK = threading.Lock()
 HTTP_SERVERS: list[ThreadingHTTPServer] = []
 SOCKS_SERVERS: list[socketserver.ThreadingTCPServer] = []
@@ -122,7 +123,6 @@ class DoHHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/dns-message")
         self.send_header("Content-Length", str(len(response)))
-        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(response)
 
@@ -150,6 +150,9 @@ def start_doh_servers() -> None:
 class SocksHandler(socketserver.BaseRequestHandler):
     def handle(self) -> None:
         client = self.request
+        proxy_port = self.server.server_address[1]
+        with LOCK:
+            ACTIVE_PROXY_CLIENTS.setdefault(proxy_port, set()).add(client)
         client.settimeout(6)
         try:
             version, method_count = read_exact(client, 2)
@@ -170,7 +173,6 @@ class SocksHandler(socketserver.BaseRequestHandler):
             else:
                 return
             target_port = struct.unpack("!H", read_exact(client, 2))[0]
-            proxy_port = self.server.server_address[1]
             with LOCK:
                 PROXY_EVENTS.append((proxy_port, host, target_port))
             if proxy_port in DISABLED_PROXIES:
@@ -207,6 +209,24 @@ class SocksHandler(socketserver.BaseRequestHandler):
                 client.sendall(b"\x05\x05\x00\x01\x7f\x00\x00\x01\x00\x00")
             except OSError:
                 pass
+        finally:
+            with LOCK:
+                ACTIVE_PROXY_CLIENTS.get(proxy_port, set()).discard(client)
+
+
+def disable_proxy(port: int) -> None:
+    with LOCK:
+        DISABLED_PROXIES.add(port)
+        clients = list(ACTIVE_PROXY_CLIENTS.get(port, set()))
+    for client in clients:
+        try:
+            client.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            client.close()
+        except OSError:
+            pass
 
 
 class SocksServer(socketserver.ThreadingTCPServer):
@@ -398,7 +418,7 @@ def main() -> None:
             assert any(proxy == 16082 and target_port == 18444 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
             assert "dns-foreign.example.test" in SNI and "dns-torrent.example.test" in SNI, SNI
             before_foreign_failure = len(HITS)
-        DISABLED_PROXIES.add(16081)
+        disable_proxy(16081)
         assert dns_query("login2.foreign.test") != "203.0.113.77", "foreign DNS bypassed its failed profile SOCKS proxy"
         with LOCK:
             assert len(HITS) == before_foreign_failure, f"foreign query reached DoH after its proxy was disabled: {HITS[before_foreign_failure:]}"
