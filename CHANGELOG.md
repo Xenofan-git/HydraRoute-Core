@@ -1,4 +1,14 @@
 
+## 2026-11-11 — DNS blocklist and SmartDNS policy parity
+
+- Unified managed URL blocklists and configured SmartDNS block/allow domain sets in the Core DNS policy front; the SmartDNS compiler now emits only profile-routing domain sets, preserving HRDNS most-specific-suffix semantics for nested allow/block rules.
+- Matched HRDNS blocklist RR-type scope (A, AAAA, SVCB, HTTPS) and negative NOERROR/SOA response tuple; TXT/MX/CNAME and other types continue upstream.
+- Added the seven HRNeo built-in DNS blocklist presets (HaGeZi Light/Multi/Pro, OISD small/big, AdGuard DNS Filter, StevenBlack) plus custom URL support in the dashboard.
+- Tightened hosts-file parsing to recognized sinkhole addresses only (0.0.0.0, 127.0.0.1, ::, ::1); preserved ABP allow/block parsing, last-known-good snapshots, atomic persistence and optional interface-bound fetch.
+- Auto-update now defaults to opt-in at 04:30, matching HRweb UI behavior; scheduled refresh and manual failures are visible in events.
+- Manual refresh POST endpoints require same-origin JSON. SmartDNS lifecycle tests use private state directories and Core DNS/SmartDNS port/start guards remain fail-closed.
+- Added unit/API/runtime integration coverage. CI is running on PR #7 head `6d3c3da3640a4fae33720ba36a811aaa23d4dee9`; no NanoPi runtime deployment performed.
+
 ## 2026-11-09 — Full HRNeo functional parity scope
 - Зафиксирована цель переноса всего функционала оригинального HydraRoute Neo в независимый Debian/Ubuntu ARM64 HydraRoute Core.
 - Добавлена матрица функциональных групп: профили/подписки/балансировка, proxy lifecycle, Phobos/WireGuard, DNS, Geo/FQDN, health/events/system/speed, API/UI/files.
