@@ -60,3 +60,10 @@ func TestPublicIPGuard(t *testing.T) {
 		t.Fatal(fmt.Sprint("public IP rejected"))
 	}
 }
+
+func TestFetchSubscriptionOnInterfaceRejectsMissingInterfaceBeforeNetwork(t *testing.T) {
+	_, err := FetchSubscriptionOnInterface(context.Background(), "https://example.com/list.txt", "hrcore-no-such-interface")
+	if err == nil || !strings.Contains(err.Error(), "interface") {
+		t.Fatalf("missing interface was not rejected before download: %v", err)
+	}
+}
