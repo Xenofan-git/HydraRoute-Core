@@ -3038,6 +3038,10 @@ func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		previous := s.dns.Config()
 		wasRunning, _ := s.dns.Status()["running"].(bool)
+		if !c.Enabled && s.smartDNSRuntime != nil && s.smartDNSRuntime.Status().Running {
+			writeError(w, http.StatusConflict, "stop SmartDNS before disabling the Core DNS policy resolver")
+			return
+		}
 		if wasRunning {
 			if err := s.dns.Stop(); err != nil {
 				writeError(w, 500, "cannot stop DNS service for configuration update: "+err.Error())
@@ -3118,6 +3122,10 @@ func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "stop":
+		if s.smartDNSRuntime != nil && s.smartDNSRuntime.Status().Running {
+			writeError(w, http.StatusConflict, "stop SmartDNS before stopping the Core DNS policy resolver")
+			return
+		}
 		if err = s.applyCoreDNSRuntime(false); err != nil {
 			break
 		}
@@ -3576,55 +3584,26 @@ func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
-func (s *Server) smartDNSConfigWithBlocklists(base hrsmartdns.Config) hrsmartdns.Config {
-	if s.blocklists == nil {
-		return base
-	}
-	const blocklistSetID = "hrcore-blocklist"
-	const allowlistSetID = "hrcore-allowlist"
-	sets := make([]hrsmartdns.DomainSet, 0, len(base.DomainSets)+2)
-	for _, set := range base.DomainSets {
-		if set.ID == blocklistSetID || set.ID == allowlistSetID {
-			continue
-		}
-		sets = append(sets, set)
-	}
-	snapshot := s.blocklists.Snapshot()
-	if len(snapshot.Blocked) > 0 {
-		sets = append(sets, hrsmartdns.DomainSet{ID: blocklistSetID, Kind: "block", Domains: snapshot.Blocked, Enabled: true})
-	}
-	if len(snapshot.Allowed) > 0 {
-		sets = append(sets, hrsmartdns.DomainSet{ID: allowlistSetID, Kind: "allow", Domains: snapshot.Allowed, Enabled: true})
-	}
-	base.DomainSets = sets
-	return base
-}
-
 func (s *Server) applyDNSBlocklists() {
 	if s.dns == nil || s.blocklists == nil {
 		return
 	}
 	snapshot := s.blocklists.Snapshot()
+	// Blocklist policy is evaluated by the Core DNS front resolver before
+	// forwarding to SmartDNS. Keeping these sets out of SmartDNS avoids its
+	// inherited address-flag semantics from changing HRDNS longest-suffix
+	// decisions. SmartDNS remains responsible for profile-specific upstream
+	// selection only.
 	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
-	if s.smartDNSRuntime == nil {
-		return
-	}
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	if !s.smartDNSConfig.Enabled {
-		s.smartDNSBlocklistErr = ""
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	cfg := s.smartDNSConfigWithBlocklists(s.smartDNSConfig)
-	if err := s.smartDNSRuntime.Apply(ctx, cfg, s.smartDNSProfileRefs()); err != nil {
-		s.smartDNSBlocklistErr = err.Error()
-		s.recordEvent("error", "dns", "smartdns_blocklist_apply_failed", "SmartDNS blocklist generation failed; previous generation retained when possible")
-		return
-	}
 	s.smartDNSBlocklistErr = ""
-	s.recordEvent("info", "dns", "smartdns_blocklists_applied", "DNS blocklists synchronized to SmartDNS")
+}
+
+func smartDNSForwardAddress(cfg hrsmartdns.Config) string {
+	port := cfg.ListenPort
+	if port == 0 {
+		port = hrsmartdns.DefaultConfig().ListenPort
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 }
 
 func (s *Server) smartDNSStatusError() string {
@@ -3737,7 +3716,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "cannot persist SmartDNS configuration")
 			return
 		}
-		if err := s.smartDNSRuntime.Apply(r.Context(), s.smartDNSConfigWithBlocklists(cfg), s.smartDNSProfileRefs()); err != nil {
+		if err := s.smartDNSRuntime.Apply(r.Context(), cfg, s.smartDNSProfileRefs()); err != nil {
 			if restoreErr := s.persistSmartDNSConfig(previous); restoreErr != nil {
 				s.smartDNSErr = "SmartDNS apply failed and saved configuration rollback failed: " + restoreErr.Error()
 			} else {
@@ -3777,20 +3756,32 @@ func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "SmartDNS is disabled")
 			return
 		}
+		if s.dns == nil || !s.dns.Config().Enabled || !s.dns.Status()["running"].(bool) {
+			writeError(w, http.StatusConflict, "start the Core DNS policy resolver before SmartDNS")
+			return
+		}
 		if err := s.smartDNSRuntime.Start(r.Context()); err != nil {
 			s.smartDNSErr = err.Error()
 			writeError(w, http.StatusBadGateway, "SmartDNS failed to start")
 			return
 		}
 		s.smartDNSErr = ""
-		s.recordEvent("info", "dns", "smartdns_started", "SmartDNS sidecar started")
+		if err := s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(s.smartDNSConfig)); err != nil {
+			_ = s.smartDNSRuntime.Stop(r.Context())
+			writeError(w, http.StatusInternalServerError, "cannot attach SmartDNS as the exclusive DNS upstream")
+			return
+		}
+		s.recordEvent("info", "dns", "smartdns_started", "SmartDNS sidecar started behind Core DNS policy resolver")
 	case "stop":
 		if err := s.smartDNSRuntime.Stop(r.Context()); err != nil {
 			s.smartDNSErr = err.Error()
 			writeError(w, http.StatusBadGateway, "SmartDNS failed to stop")
 			return
 		}
-		s.recordEvent("info", "dns", "smartdns_stopped", "SmartDNS sidecar stopped")
+		if s.dns != nil {
+			_ = s.dns.SetSmartDNSForwarder("")
+		}
+		s.recordEvent("info", "dns", "smartdns_stopped", "SmartDNS sidecar stopped; Core DNS upstream restored")
 	default:
 		writeError(w, http.StatusNotFound, "SmartDNS action not found")
 		return
