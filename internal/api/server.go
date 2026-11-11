@@ -88,6 +88,7 @@ type Server struct {
 	smartDNSConfig      hrsmartdns.Config
 	smartDNSConfigPath  string
 	smartDNSErr         string
+	smartDNSBlocklistErr string
 	opMu                sync.Mutex
 	refreshMu           sync.Mutex
 	refreshOpts         Options
@@ -3614,12 +3615,19 @@ func (s *Server) applyDNSBlocklists() {
 	defer cancel()
 	cfg := s.smartDNSConfigWithBlocklists(s.smartDNSConfig)
 	if err := s.smartDNSRuntime.Apply(ctx, cfg, s.smartDNSProfileRefs()); err != nil {
-		s.smartDNSErr = err.Error()
+		s.smartDNSBlocklistErr = err.Error()
 		s.recordEvent("error", "dns", "smartdns_blocklist_apply_failed", "SmartDNS blocklist generation failed; previous generation retained when possible")
 		return
 	}
-	s.smartDNSErr = ""
+	s.smartDNSBlocklistErr = ""
 	s.recordEvent("info", "dns", "smartdns_blocklists_applied", "DNS blocklists synchronized to SmartDNS")
+}
+
+func (s *Server) smartDNSStatusError() string {
+	if s.smartDNSErr != "" {
+		return s.smartDNSErr
+	}
+	return s.smartDNSBlocklistErr
 }
 
 func (s *Server) smartDNSProfileRefs() []hrsmartdns.ProfileRef {
@@ -3705,7 +3713,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		s.opMu.Lock()
 		defer s.opMu.Unlock()
-		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
+		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSStatusError()})
 	case http.MethodPut:
 		if !validLocalJSONRequest(r) {
 			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
