@@ -175,13 +175,11 @@ func TestCompileAppliesAllowlistPrecedenceAcrossDomainSets(t *testing.T) {
 		t.Fatalf("allow exceptions must compile: %v", err)
 	}
 	blocked := string(out.Files["domain-set-block.txt"])
-	for _, domain := range []string{"example.test", "ads.allow-parent.test"} {
-		if !strings.Contains(blocked, domain) {
-			t.Fatalf("block set lost source entry %q: %q", domain, blocked)
-		}
+	if !strings.Contains(blocked, "example.test") || strings.Contains(blocked, "ads.allow-parent.test") {
+		t.Fatalf("block set did not apply allow-parent precedence: %q", blocked)
 	}
-	if got := string(out.Files["domain-set-block-same.txt"]); got != "same.test\n" {
-		t.Fatalf("exact overlapping block entry must be preserved for SmartDNS allow flags: %q", got)
+	if _, exists := out.Files["domain-set-block-same.txt"]; exists {
+		t.Fatal("block entry identical to an allow entry must be suppressed")
 	}
 	allowed := string(out.Files["domain-set-allow.txt"])
 	for _, domain := range []string{"safe.example.test", "allow-parent.test", "same.test"} {
