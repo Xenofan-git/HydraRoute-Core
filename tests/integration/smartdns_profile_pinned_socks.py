@@ -68,7 +68,7 @@ def create_test_ca() -> None:
         "-extfile", str(CERTS / "server.ext"),
     ])
     run_checked(["openssl", "rehash", str(CERTS)])
-    (DATA / "ads.txt").write_text("ads.example.test\nblocked.example.test\nexact.example.test\n")
+    (DATA / "ads.txt").write_text("ads.example.test\nblocked.example.test\n")
     (DATA / "allow.txt").write_text("safe.ads.example.test\nexact.example.test\n")
 
 
@@ -380,9 +380,10 @@ def main() -> None:
         with LOCK:
             assert len(HITS) == before_ads, "blocked domain-set query unexpectedly reached a DoH upstream"
         # SmartDNS DOMAIN_FLAG_ADDR_IGN must override a matching parent block
-        # suffix and an exact block entry, exactly as HRNeo's Allow precedence.
+        # suffix. Exact Block/Allow duplicates are normalized out of the block
+        # set by the Core compiler before this configuration reaches SmartDNS.
         assert dns_query("safe.ads.example.test") == "203.0.113.77", "child allow exception did not override parent block"
-        assert dns_query("exact.example.test") == "203.0.113.77", "exact allow exception did not override exact block"
+        assert dns_query("exact.example.test") == "203.0.113.77", "normalized exact allow exception did not reach upstream"
         with LOCK:
             assert any(name == "safe.ads.example.test" for _port, name in HITS), HITS
             assert any(name == "exact.example.test" for _port, name in HITS), HITS
