@@ -38,18 +38,24 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 	if err := resolver.Save(resolverConfig); err != nil {
 		t.Fatal(err)
 	}
-	base := hrsmartdns.Config{DomainSets: []hrsmartdns.DomainSet{
+	base := hrsmartdns.Config{Enabled: true, DomainSets: []hrsmartdns.DomainSet{
+		{ID: "custom-block", Kind: "block", Domains: []string{"ads-parent.example.test", "blocked.allow-parent.example.test"}, Enabled: true},
+		{ID: "custom-allow", Kind: "allow", Domains: []string{"safe.ads-parent.example.test", "allow-parent.example.test"}, Enabled: true},
 		{ID: "custom-set", Kind: "route", ProfileID: "foreign", Domains: []string{"tracker.example.test"}, Enabled: true},
 	}}
 	server := &Server{blocklists: manager, dns: resolver, smartDNSConfig: base}
 	server.applyDNSBlocklists()
-	if !resolver.IsBlockedHost("ads.example.test") {
-		t.Fatal("Core DNS policy resolver did not receive blocklist entries")
+	for _, host := range []string{"ads.example.test", "blocked.allow-parent.example.test"} {
+		if !resolver.IsBlockedHost(host) {
+			t.Fatalf("Core DNS policy resolver did not block %s", host)
+		}
 	}
-	if resolver.IsBlockedHost("safe.example.test") {
-		t.Fatal("Core DNS policy resolver did not receive allowlist exceptions")
+	for _, host := range []string{"safe.example.test", "safe.ads-parent.example.test", "allow-parent.example.test"} {
+		if resolver.IsBlockedHost(host) {
+			t.Fatalf("Core DNS policy resolver did not apply allow exception for %s", host)
+		}
 	}
-	if len(server.smartDNSConfig.DomainSets) != 1 || server.smartDNSConfig.DomainSets[0].ID != "custom-set" {
+	if len(server.smartDNSConfig.DomainSets) != 3 || server.smartDNSConfig.DomainSets[2].ID != "custom-set" {
 		t.Fatalf("SmartDNS profile-routing domain sets unexpectedly changed: %+v", server.smartDNSConfig.DomainSets)
 	}
 }
