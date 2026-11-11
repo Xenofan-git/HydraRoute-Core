@@ -3917,8 +3917,8 @@ func (s *Server) dnsBlocklistCustom(w http.ResponseWriter, r *http.Request) {
 		s.applyDNSBlocklists()
 		s.recordEvent("info", "dns", "blocklist_custom_saved", "Custom DNS block and allow lists saved")
 		writeJSON(w, http.StatusOK, map[string]any{
-			"block": strings.Join(snapshot.CustomBlock, "\n"),
-			"allow": strings.Join(snapshot.CustomAllow, "\n"),
+			"block":    strings.Join(snapshot.CustomBlock, "\n"),
+			"allow":    strings.Join(snapshot.CustomAllow, "\n"),
 			"snapshot": snapshot,
 		})
 	default:
