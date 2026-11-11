@@ -42,3 +42,18 @@ The Core compiler now permits block/allow suffix overlaps and emits block sets b
 3. Complete end-to-end DNS query tests proving Block/Allow and per-profile routing through actual SmartDNS.
 4. Verify Core DNS service and SmartDNS lifecycle recovery after API restart.
 5. Controlled NanoPi installation/deployment remains separate and requires explicit approval. No host resolver, route, firewall, Keenetic, HRNeo or 3x-ui changes are part of this work.
+
+## HRNeo daily refresh scheduler parity
+
+The original HRWeb UI stores the global DNS block refresh settings through `dns.blockSave`:
+- `autoUpdate` (boolean),
+- `updateTime` (local `HH:MM`, UI fallback/default `04:30`),
+- `iface` (optional system interface).
+
+Static analysis of the original ARM64 HRWeb binary confirms that `main.dnsBlockJob.Next` uses the `hrweb/sched.Daily` scheduler and validates the configured time with `main.isValidTime`. The original DNSBlock first-initialization path sets the auto-update flag and uses the UI's `04:30` default. The job's Run path refreshes the enabled DNS block sources.
+
+Core now persists these settings with the blocklist state (legacy state files without the settings field migrate to the HRNeo defaults), exposes local-only GET/PUT at `/v1/dns/blocklists/settings`, and runs a separate daily scheduler independent of profile/subscription refresh. Saving settings wakes the scheduler so the next daily deadline is recalculated immediately.
+
+An optional interface name is validated and used for outbound HTTP(S) blocklist sockets through Linux `SO_BINDTODEVICE`. DNS hostname resolution remains through the system resolver to preserve compatibility with local resolver stubs such as 127.0.0.53; actual HTTP(S) connections are bound to the selected interface. An empty interface uses normal system routing.
+
+Tests cover default settings, normalization, invalid times/interface names, persistence across restart, interface-fetcher selection, API GET/PUT, wake-up signaling and next-daily-run calculation.
