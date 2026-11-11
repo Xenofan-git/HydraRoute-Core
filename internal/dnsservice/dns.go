@@ -428,6 +428,14 @@ func blocklistQueryType(qtype uint16) bool {
 	}
 }
 
+type BlockCheck struct {
+	Domain  string `json:"domain"`
+	Enabled bool   `json:"enabled"`
+	Matched bool   `json:"matched"`
+	Blocked bool   `json:"blocked"`
+	Source  string `json:"source,omitempty"`
+}
+
 type blockSource uint8
 
 const (
@@ -448,6 +456,10 @@ func (m *Manager) blockDecision(host string, qtype uint16) (bool, blockSource) {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.blockDecisionLocked(host, qtype)
+}
+
+func (m *Manager) blockDecisionLocked(host string, qtype uint16) (bool, blockSource) {
 	if !m.cfg.BlockingEnabled {
 		return false, blockSourceNone
 	}
@@ -480,6 +492,28 @@ func (m *Manager) blockDecision(host string, qtype uint16) (bool, blockSource) {
 		candidate = candidate[separator+1:]
 	}
 	return false, blockSourceNone
+}
+
+func (m *Manager) CheckBlock(host string) (BlockCheck, error) {
+	host = normalizeBlocklistDomain(host)
+	if host == "" {
+		return BlockCheck{}, fmt.Errorf("invalid DNS domain")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := BlockCheck{Domain: host, Enabled: m.cfg.BlockingEnabled}
+	if !result.Enabled {
+		return result, nil
+	}
+	result.Blocked, source := m.blockDecisionLocked(host, mdns.TypeA)
+	result.Matched = source != blockSourceNone
+	switch source {
+	case blockSourceExplicitRule:
+		result.Source = "explicit_rule"
+	case blockSourceManagedList:
+		result.Source = "blocklist"
+	}
+	return result, nil
 }
 
 // blocklistSOA mirrors the pinned SmartDNS/HRDNS default negative SOA tuple.
