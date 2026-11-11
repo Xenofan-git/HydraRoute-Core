@@ -77,43 +77,43 @@ type RefreshStatus struct {
 }
 
 type Server struct {
-	supervisor           *hrruntime.Supervisor
-	stateDir             string
-	profileStore         *profiles.Store
-	routingStore         *routeconfig.Store
-	dns                  *dnsservice.Manager
-	blocklists           *dnsblocklist.Manager
-	blocklistsErr        string
-	smartDNSRuntime      *hrsmartdns.Runtime
-	smartDNSConfig       hrsmartdns.Config
-	smartDNSConfigPath   string
-	smartDNSErr          string
-	opMu                 sync.Mutex
-	refreshMu            sync.Mutex
-	refreshOpts          Options
-	refreshState         RefreshStatus
-	refreshWake          chan struct{}
-	blocklistWake        chan struct{}
-	probeMu              sync.RWMutex
-	probeSaveMu          sync.Mutex
-	probeCache           map[string]map[string]xrayapi.OutboundStatus
-	events               *events.Store
-	healthMonitor        *health.Monitor
-	healthCheckMu        sync.Mutex
-	healthWake           chan struct{}
-	watchlistMu          sync.Mutex
-	watchlist            *hrwatchlist.Server
-	watchlistPath        string
-	watchlistErr         string
-	watchlistTargets     int
-	watchlistKeys        int
-	watchlistPartial     bool
-	watchlistExcluded    int
-	observatoryInterval  int
-	observatoryAddress   string
-	subscriptionFetcher  func(context.Context, string) (string, error)
-	l7Settings           compiler.L7SniffingConfig
-	mux                  *http.ServeMux
+	supervisor          *hrruntime.Supervisor
+	stateDir            string
+	profileStore        *profiles.Store
+	routingStore        *routeconfig.Store
+	dns                 *dnsservice.Manager
+	blocklists          *dnsblocklist.Manager
+	blocklistsErr       string
+	smartDNSRuntime     *hrsmartdns.Runtime
+	smartDNSConfig      hrsmartdns.Config
+	smartDNSConfigPath  string
+	smartDNSErr         string
+	opMu                sync.Mutex
+	refreshMu           sync.Mutex
+	refreshOpts         Options
+	refreshState        RefreshStatus
+	refreshWake         chan struct{}
+	blocklistWake       chan struct{}
+	probeMu             sync.RWMutex
+	probeSaveMu         sync.Mutex
+	probeCache          map[string]map[string]xrayapi.OutboundStatus
+	events              *events.Store
+	healthMonitor       *health.Monitor
+	healthCheckMu       sync.Mutex
+	healthWake          chan struct{}
+	watchlistMu         sync.Mutex
+	watchlist           *hrwatchlist.Server
+	watchlistPath       string
+	watchlistErr        string
+	watchlistTargets    int
+	watchlistKeys       int
+	watchlistPartial    bool
+	watchlistExcluded   int
+	observatoryInterval int
+	observatoryAddress  string
+	subscriptionFetcher func(context.Context, string) (string, error)
+	l7Settings          compiler.L7SniffingConfig
+	mux                 *http.ServeMux
 }
 
 func New(supervisor *hrruntime.Supervisor) *Server {
