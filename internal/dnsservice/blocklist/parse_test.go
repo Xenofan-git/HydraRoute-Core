@@ -37,6 +37,33 @@ func TestParseMixedHRWebDomainSources(t *testing.T) {
 	}
 }
 
+func TestParseHostsFilesOnlyAcceptHRDNSSinkholeAddresses(t *testing.T) {
+	input := strings.Join([]string{
+		"0.0.0.0 blocked-v4.example.test",
+		"127.0.0.1 blocked-loopback.example.test",
+		":: blocked-v6.example.test",
+		"::1 blocked-v6loopback.example.test",
+		"192.0.2.1 not-a-block.example.test",
+		"255.255.255.255 broadcast.example.test",
+	}, "\n")
+	got, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"blocked-loopback.example.test",
+		"blocked-v4.example.test",
+		"blocked-v6.example.test",
+		"blocked-v6loopback.example.test",
+	}
+	if strings.Join(got.Blocked, ",") != strings.Join(want, ",") {
+		t.Fatalf("blocked = %v, want %v", got.Blocked, want)
+	}
+	if got.Parsed != 4 || got.Ignored != 2 {
+		t.Fatalf("unexpected hosts parse counters: %+v", got)
+	}
+}
+
 func TestParseDeduplicatesAndNormalizes(t *testing.T) {
 	got, err := Parse(strings.NewReader("Example.COM.\nexample.com\n*.Sub.Example.com\n"))
 	if err != nil {
