@@ -162,26 +162,38 @@ func TestCompileGeneratesValidatedDomainSetFiles(t *testing.T) {
 	}
 }
 
-func TestCompileRejectsBlockAllowConflictsAndUnsafeDomainSetPaths(t *testing.T) {
+func TestCompileAppliesAllowlistPrecedenceAcrossDomainSets(t *testing.T) {
 	cfg, profiles := fixtures()
 	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
 	cfg.DomainSets = []DomainSet{
-		{ID: "block", Kind: "block", Domains: []string{"same.test"}, Enabled: true},
-		{ID: "allow", Kind: "allow", Domains: []string{"same.test"}, Enabled: true},
+		{ID: "block", Kind: "block", Domains: []string{"example.test", "ads.allow-parent.test"}, Enabled: true},
+		{ID: "allow", Kind: "allow", Domains: []string{"safe.example.test", "allow-parent.test", "same.test"}, Enabled: true},
+		{ID: "block-same", Kind: "block", Domains: []string{"same.test"}, Enabled: true},
 	}
-	if _, err := Compile(cfg, profiles); err == nil {
-		t.Fatal("expected block/allow conflict rejection")
+	out, err := Compile(cfg, profiles)
+	if err != nil {
+		t.Fatalf("allow exceptions must compile: %v", err)
 	}
-	cfg, profiles = fixtures()
-	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
-	cfg.DomainSets = []DomainSet{
-		{ID: "block", Kind: "block", Domains: []string{"example.test"}, Enabled: true},
-		{ID: "allow", Kind: "allow", Domains: []string{"sub.example.test"}, Enabled: true},
+	blocked := string(out.Files["domain-set-block.txt"])
+	if !strings.Contains(blocked, "example.test") || strings.Contains(blocked, "ads.allow-parent.test") {
+		t.Fatalf("block set did not apply allow-parent precedence: %q", blocked)
 	}
-	if _, err := Compile(cfg, profiles); err == nil {
-		t.Fatal("expected suffix-overlap block/allow rejection")
+	if _, exists := out.Files["domain-set-block-same.txt"]; exists {
+		t.Fatal("block entry identical to an allow entry must be suppressed")
 	}
-	cfg, profiles = fixtures()
+	allowed := string(out.Files["domain-set-allow.txt"])
+	if !strings.Contains(allowed, "safe.example.test") || !strings.Contains(allowed, "allow-parent.test") || !strings.Contains(allowed, "same.test") {
+		t.Fatalf("allow set lost an exception: %q", allowed)
+	}
+	blockRule := strings.Index(out.Config, "address /domain-set:hr_set_block/#")
+	allowRule := strings.Index(out.Config, "address /domain-set:hr_set_allow/-")
+	if blockRule < 0 || allowRule < 0 || allowRule < blockRule {
+		t.Fatalf("allow rules must be emitted after block rules: %s", out.Config)
+	}
+}
+
+func TestCompileRejectsUnsafeDomainSetPaths(t *testing.T) {
+	cfg, profiles := fixtures()
 	cfg.DataDir = "/var/lib/hydraroute/../etc"
 	cfg.DomainSets = []DomainSet{{ID: "block", Kind: "block", Domains: []string{"ads.test"}, Enabled: true}}
 	if _, err := Compile(cfg, profiles); err == nil {
