@@ -245,6 +245,7 @@ address /domain-set:hr_set_allow/-
 address /allowed.example.test/203.0.113.5
 nameserver /foreign.test/hr_dns_foreign
 nameserver /torrent.test/hr_dns_torrent
+nameserver /example.test/hr_dns_foreign
 """
     path = ROOT / "smartdns.conf"
     path.write_text(config)
