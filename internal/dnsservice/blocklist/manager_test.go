@@ -310,3 +310,78 @@ func TestManagerRemovedEntryTimestampIsRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestManagerRefreshSettingsDefaultDailyScheduleAndPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocklists.json")
+	manager, err := NewManager(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := manager.Settings()
+	if !defaults.AutoUpdate || defaults.UpdateTime != "04:30" || defaults.Iface != "" {
+		t.Fatalf("unexpected HRNeo default refresh settings: %+v", defaults)
+	}
+	saved, err := manager.SaveSettings(RefreshSettings{AutoUpdate: false, UpdateTime: "4:05", Iface: "eth1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.AutoUpdate || saved.UpdateTime != "04:05" || saved.Iface != "eth1" {
+		t.Fatalf("settings were not normalized: %+v", saved)
+	}
+	reloaded, err := NewManager(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.Settings(); got != saved {
+		t.Fatalf("refresh settings were not persisted: got %+v want %+v", got, saved)
+	}
+}
+
+func TestManagerRefreshSettingsRejectInvalidTimeAndInterface(t *testing.T) {
+	manager, err := NewManager(filepath.Join(t.TempDir(), "blocklists.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, settings := range []RefreshSettings{
+		{AutoUpdate: true, UpdateTime: "24:00"},
+		{AutoUpdate: true, UpdateTime: "04:60"},
+		{AutoUpdate: true, UpdateTime: "04:30", Iface: "interface-name-too-long"},
+		{AutoUpdate: true, UpdateTime: "04:30", Iface: "eth0;reboot"},
+	} {
+		if _, err := manager.SaveSettings(settings); err == nil {
+			t.Fatalf("invalid settings accepted: %+v", settings)
+		}
+	}
+}
+
+func TestManagerUsesSelectedInterfaceFetcher(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocklists.json")
+	fetcher := func(context.Context, string) (Result, error) {
+		return Result{Blocked: []string{"default.example.test"}}, nil
+	}
+	manager, err := NewManager(path, fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := ""
+	manager.SetInterfaceFetcher(func(_ context.Context, _ string, iface string) (Result, error) {
+		called = iface
+		return Result{Blocked: []string{"bound.example.test"}}, nil
+	})
+	if _, err := manager.SaveSettings(RefreshSettings{AutoUpdate: true, UpdateTime: "04:30", Iface: "eth1"}); err != nil {
+		t.Fatal(err)
+	}
+	source, err := manager.SaveSource(Source{Name: "Bound", URL: "https://lists.example.test/list", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Refresh(context.Background(), source.ID); err != nil {
+		t.Fatal(err)
+	}
+	if called != "eth1" {
+		t.Fatalf("interface fetcher called with %q, want eth1", called)
+	}
+	if got := manager.Snapshot().Blocked; len(got) != 1 || got[0] != "bound.example.test" {
+		t.Fatalf("selected interface fetch result not applied: %v", got)
+	}
+}
