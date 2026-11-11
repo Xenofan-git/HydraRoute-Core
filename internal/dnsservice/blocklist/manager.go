@@ -111,7 +111,6 @@ func NewManager(path string, fetcher Fetcher) (*Manager, error) {
 	return m, nil
 }
 
-
 var refreshTimePattern = regexp.MustCompile("^(?:[01]?\\d|2[0-3]):[0-5]\\d$")
 var interfaceNamePattern = regexp.MustCompile("^[a-zA-Z0-9_.:-]+$")
 
