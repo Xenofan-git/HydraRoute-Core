@@ -22,9 +22,10 @@ func FetchSubscription(ctx context.Context, rawURL string) (string, error) {
 	return FetchSubscriptionOnInterface(ctx, rawURL, "")
 }
 
-// FetchSubscriptionOnInterface binds both DNS lookups and HTTP(S) connections
-// to the requested Linux network interface. An empty interface uses normal
-// system routing.
+// FetchSubscriptionOnInterface binds outbound HTTP(S) connections to the
+// requested Linux network interface. Hostname resolution uses the system
+// resolver so local DNS stubs remain reachable. An empty interface uses
+// normal system routing.
 func FetchSubscriptionOnInterface(ctx context.Context, rawURL, interfaceName string) (string, error) {
 	u, err := validateSubscriptionURL(rawURL)
 	if err != nil {
