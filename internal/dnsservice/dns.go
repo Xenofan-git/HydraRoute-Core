@@ -80,6 +80,7 @@ type Manager struct {
 	hosts                                           map[string]net.IP
 	blocklistBlocked                                map[string]struct{}
 	blocklistAllowed                                map[string]struct{}
+	smartDNSForwardAddr                             string
 	client                                          *http.Client
 }
 
@@ -470,7 +471,33 @@ func normalizeBlocklistDomain(raw string) string {
 	return domain
 }
 
+// SetSmartDNSForwarder makes SmartDNS the exclusive upstream for this
+// resolver. Blocklist and explicit-rule decisions are made locally before
+// forwarding; a SmartDNS failure must not fall back to unrelated public DNS.
+func (m *Manager) SetSmartDNSForwarder(address string) error {
+	if address != "" {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || host != "127.0.0.1" {
+			return fmt.Errorf("SmartDNS forwarder must be a 127.0.0.1 host:port")
+		}
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1025 || value > 65535 {
+			return fmt.Errorf("SmartDNS forwarder port must be between 1025 and 65535")
+		}
+	}
+	m.mu.Lock()
+	m.smartDNSForwardAddr = address
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *Manager) forward(req, resp *mdns.Msg) error {
+	m.mu.RLock()
+	smartDNSForwardAddr := m.smartDNSForwardAddr
+	m.mu.RUnlock()
+	if smartDNSForwardAddr != "" {
+		return m.exchange(req, resp, Server{Name: "HydraRoute SmartDNS", Protocol: "Do53", Address: smartDNSForwardAddr, Enabled: true})
+	}
 	c := m.Config()
 	var candidates []Server
 	if c.AutoProvider {
