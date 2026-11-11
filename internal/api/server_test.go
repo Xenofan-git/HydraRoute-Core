@@ -1911,6 +1911,57 @@ func TestDNSBlocklistRefreshEndpointsRequireSameOriginJSON(t *testing.T) {
 	}
 }
 
+func TestDNSBlocklistCustomAPIUpdatesCorePolicyAndPersists(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	dnsConfig := server.dns.Config()
+	dnsConfig.BlockingEnabled = true
+	if err := server.dns.Save(dnsConfig); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", map[string]string{
+		"block": "ads.parent.test\nblocked.allow-parent.test",
+		"allow": "allow-parent.test\nsafe.parent.test",
+	}))
+	if response.Code != http.StatusOK {
+		t.Fatalf("custom list PUT status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, host := range []string{"ads.parent.test", "blocked.allow-parent.test"} {
+		if !server.dns.IsBlockedHost(host) {
+			t.Fatalf("custom block list did not block %s", host)
+		}
+	}
+	for _, host := range []string{"allow-parent.test", "safe.parent.test"} {
+		if server.dns.IsBlockedHost(host) {
+			t.Fatalf("custom allow list did not allow %s", host)
+		}
+	}
+
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localGet("/v1/dns/blocklists/custom"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("custom list GET status=%d body=%s", response.Code, response.Body.String())
+	}
+	var lists map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &lists); err != nil {
+		t.Fatal(err)
+	}
+	if lists["block"] != "ads.parent.test\nblocked.allow-parent.test" || lists["allow"] != "allow-parent.test\nsafe.parent.test" {
+		t.Fatalf("custom lists did not round-trip: %+v", lists)
+	}
+
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", map[string]string{"block": "bad..domain", "allow": ""}))
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid custom list status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !server.dns.IsBlockedHost("ads.parent.test") {
+		t.Fatal("invalid custom update replaced the last known-good policy")
+	}
+}
+
 func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
 	stateDir := t.TempDir()
 	server := NewWithStateDir(apiSupervisor(t), stateDir)
