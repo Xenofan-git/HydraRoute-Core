@@ -189,7 +189,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 		return fmt.Errorf("SmartDNS has no prepared configuration")
 	}
 	generationDir := filepath.Join(r.cfg.StateDir, "generations", r.current)
-	if err := r.startGenerationLocked(ctx, r.current, generationDir); err != nil {
+	if err := r.startGenerationWithRetryLocked(ctx, r.current, generationDir); err != nil {
 		r.status.LastError = err.Error()
 		return err
 	}
@@ -237,12 +237,12 @@ func (r *Runtime) swapLocked(ctx context.Context, generation, generationDir stri
 		r.status.ConfigPath = filepath.Join(generationDir, "smartdns.conf")
 		return nil
 	}
-	if err := r.startGenerationLocked(ctx, generation, generationDir); err == nil {
+	if err := r.startGenerationWithRetryLocked(ctx, generation, generationDir); err == nil {
 		return nil
 	} else {
 		candidateErr := err
 		if previousGeneration != "" {
-			if rollbackErr := r.startGenerationLocked(ctx, previousGeneration, previousDir); rollbackErr != nil {
+			if rollbackErr := r.startGenerationWithRetryLocked(ctx, previousGeneration, previousDir); rollbackErr != nil {
 				r.current = ""
 				return fmt.Errorf("candidate SmartDNS failed: %v; previous generation rollback failed: %w", candidateErr, rollbackErr)
 			}
@@ -252,6 +252,22 @@ func (r *Runtime) swapLocked(ctx context.Context, generation, generationDir stri
 		r.current = ""
 		return fmt.Errorf("candidate SmartDNS failed to start: %w", candidateErr)
 	}
+}
+
+// startGenerationWithRetryLocked mirrors HRweb's DNS service startup policy:
+ // one immediate retry after a failed start, unless the caller canceled.
+func (r *Runtime) startGenerationWithRetryLocked(ctx context.Context, generation, generationDir string) error {
+	firstErr := r.startGenerationLocked(ctx, generation, generationDir)
+	if firstErr == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return firstErr
+	}
+	if err := r.startGenerationLocked(ctx, generation, generationDir); err != nil {
+		return fmt.Errorf("SmartDNS failed to start after one retry (first attempt: %v): %w", firstErr, err)
+	}
+	return nil
 }
 
 func (r *Runtime) startGenerationLocked(ctx context.Context, generation, generationDir string) error {
