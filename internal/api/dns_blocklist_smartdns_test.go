@@ -29,6 +29,11 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 	}
 
 	resolver := dnsservice.New(filepath.Join(t.TempDir(), "dns", "config.json"))
+	resolverConfig := resolver.Config()
+	resolverConfig.BlockingEnabled = true
+	if err := resolver.Save(resolverConfig); err != nil {
+		t.Fatal(err)
+	}
 	server := &Server{blocklists: manager, dns: resolver}
 	server.applyDNSBlocklists()
 	if !resolver.IsBlockedHost("ads.example.test") {
