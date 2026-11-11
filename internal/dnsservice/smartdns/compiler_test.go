@@ -144,65 +144,65 @@ func TestCompileGeneratesValidatedDomainSetFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.DomainSetCount != 3 || len(out.Files) != 3 {
-		t.Fatalf("domain-set output=%+v files=%v", out, out.Files)
+	if out.DomainSetCount != 1 || len(out.Files) != 1 {
+		t.Fatalf("only route domain sets should be emitted to SmartDNS: output=%+v files=%v", out, out.Files)
 	}
 	for _, expected := range []string{
-		"domain-set -name hr_set_ads -type list -file /var/lib/hydraroute/state/dns/sets/domain-set-ads.txt",
-		"address /domain-set:hr_set_ads/#",
-		"address /domain-set:hr_set_trusted/-",
+		"domain-set -name hr_set_torrent-domains -type list -file /var/lib/hydraroute/state/dns/sets/domain-set-torrent-domains.txt",
 		"nameserver /domain-set:hr_set_torrent-domains/hr_dns_torrent",
 	} {
 		if !strings.Contains(out.Config, expected) {
 			t.Errorf("missing domain-set directive %q:\n%s", expected, out.Config)
 		}
 	}
-	if got := string(out.Files["domain-set-ads.txt"]); got != "a.ads.test\nz.ads.test\n" {
-		t.Fatalf("domain-set file is not deduplicated/sorted: %q", got)
+	if _, exists := out.Files["domain-set-ads.txt"]; exists {
+		t.Fatal("block domain set must be enforced by Core policy front, not SmartDNS address rules")
+	}
+	if _, exists := out.Files["domain-set-trusted.txt"]; exists {
+		t.Fatal("allow domain set must be enforced by Core policy front, not SmartDNS address rules")
+	}
+	if got := string(out.Files["domain-set-torrent-domains.txt"]); got != "tracker.test\n" {
+		t.Fatalf("route domain-set file mismatch: %q", got)
 	}
 }
 
-func TestCompilePreservesRepresentableHRDNSAllowPrecedence(t *testing.T) {
+func TestCompileLeavesBlockAndAllowSetsForCorePolicyFront(t *testing.T) {
 	cfg, profiles := fixtures()
-	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
 	cfg.DomainSets = []DomainSet{
 		{ID: "block", Kind: "block", Domains: []string{"example.test", "same.test"}, Enabled: true},
 		{ID: "allow", Kind: "allow", Domains: []string{"safe.example.test", "same.test"}, Enabled: true},
 	}
 	out, err := Compile(cfg, profiles)
 	if err != nil {
-		t.Fatalf("more-specific allow exception must compile: %v", err)
+		t.Fatalf("overlapping block/allow sets must compile through Core policy front: %v", err)
 	}
-	blocked := string(out.Files["domain-set-block.txt"])
-	if !strings.Contains(blocked, "example.test") || strings.Contains(blocked, "same.test") {
-		t.Fatalf("block set did not preserve parent block and same-domain allow precedence: %q", blocked)
+	if out.DomainSetCount != 0 || len(out.Files) != 0 {
+		t.Fatalf("block/allow sets unexpectedly generated SmartDNS files: %+v", out)
 	}
-	allowed := string(out.Files["domain-set-allow.txt"])
-	if !strings.Contains(allowed, "safe.example.test") || !strings.Contains(allowed, "same.test") {
-		t.Fatalf("allow set lost exception or same-domain allow entry: %q", allowed)
-	}
-	if !strings.Contains(out.Config, "address /domain-set:hr_set_block/#") ||
-		!strings.Contains(out.Config, "address /domain-set:hr_set_allow/-") {
-		t.Fatalf("missing block/allow rules: %s", out.Config)
+	if strings.Contains(out.Config, "address /domain-set:") {
+		t.Fatalf("block/allow address directives must not be emitted: %s", out.Config)
 	}
 }
 
-func TestCompileRejectsBlockChildUnderAllowParentUntilPolicyResolverExists(t *testing.T) {
+func TestCompileAcceptsBlockChildUnderAllowParentForCorePolicyFront(t *testing.T) {
 	cfg, profiles := fixtures()
-	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
 	cfg.DomainSets = []DomainSet{
 		{ID: "block-child", Kind: "block", Domains: []string{"ads.allow-parent.test"}, Enabled: true},
 		{ID: "allow-parent", Kind: "allow", Domains: []string{"allow-parent.test"}, Enabled: true},
 	}
-	if _, err := Compile(cfg, profiles); err == nil || !strings.Contains(err.Error(), "HRDNS precedence cannot be represented") {
-		t.Fatalf("expected fail-closed rejection for more-specific block under broader allow, got %v", err)
+	out, err := Compile(cfg, profiles)
+	if err != nil {
+		t.Fatalf("Core policy front must support child block beneath parent allow: %v", err)
+	}
+	if len(out.Files) != 0 || out.DomainSetCount != 0 {
+		t.Fatalf("block/allow sets must not be emitted as SmartDNS address rules: %+v", out)
 	}
 }
 
 func TestCompileRejectsUnsafeDomainSetPaths(t *testing.T) {
 	cfg, profiles := fixtures()
 	cfg.DataDir = "/var/lib/hydraroute/../etc"
-	cfg.DomainSets = []DomainSet{{ID: "block", Kind: "block", Domains: []string{"ads.test"}, Enabled: true}}
+	cfg.DomainSets = []DomainSet{{ID: "route", Kind: "route", ProfileID: "foreign", Domains: []string{"ads.test"}, Enabled: true}}
 	if _, err := Compile(cfg, profiles); err == nil {
 		t.Fatal("expected unsafe data directory rejection")
 	}
