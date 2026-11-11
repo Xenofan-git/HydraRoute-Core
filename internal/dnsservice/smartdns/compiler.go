@@ -271,7 +271,6 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 	})
 	sets := make([]normalizedDomainSet, 0, len(cfg.DomainSets))
 	setIDs := make(map[string]struct{}, len(cfg.DomainSets))
-	setMembership := make(map[string]string)
 	for _, set := range cfg.DomainSets {
 		if !set.Enabled {
 			continue
@@ -304,15 +303,7 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 				continue
 			}
 			seenDomains[domain] = struct{}{}
-			if kind == "block" || kind == "allow" {
-				for previousDomain, previousKind := range setMembership {
-					overlaps := domain == previousDomain || strings.HasSuffix(domain, "."+previousDomain) || strings.HasSuffix(previousDomain, "."+domain)
-					if overlaps && previousKind != kind {
-						return cfg, nil, nil, nil, nil, fmt.Errorf("block/allow domain-set suffix overlap between %q and %q; resolve explicitly", domain, previousDomain)
-					}
-				}
-				setMembership[domain] = kind
-			}
+
 			domains = append(domains, domain)
 		}
 		if len(domains) == 0 {
@@ -332,7 +323,60 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 		}
 		sets = append(sets, normalizedDomainSet{DomainSet: set, name: "hr_set_" + set.ID, file: "domain-set-" + set.ID + ".txt"})
 	}
-	sort.Slice(sets, func(i, j int) bool { return sets[i].ID < sets[j].ID })
+	// SmartDNS resolves domain rules by the most-specific matching suffix.
+	// For the same exact domain, emit allow rules after block rules so an
+	// explicit allow exception wins. Block entries covered by an allow parent
+	// are removed below; allow child exceptions remain more specific.
+	allowDomains := make([]string, 0)
+	for _, set := range sets {
+		if set.Kind == "allow" {
+			allowDomains = append(allowDomains, set.Domains...)
+		}
+	}
+	for i := range sets {
+		if sets[i].Kind != "block" {
+			continue
+		}
+		filtered := make([]string, 0, len(sets[i].Domains))
+		for _, domain := range sets[i].Domains {
+			coveredByAllowParent := false
+			for _, allowed := range allowDomains {
+				if domain == allowed || strings.HasSuffix(domain, "."+allowed) {
+					coveredByAllowParent = true
+					break
+				}
+			}
+			if !coveredByAllowParent {
+				filtered = append(filtered, domain)
+			}
+		}
+		sets[i].Domains = filtered
+	}
+	nonEmpty := sets[:0]
+	for _, set := range sets {
+		if len(set.Domains) > 0 {
+			nonEmpty = append(nonEmpty, set)
+		}
+	}
+	sets = nonEmpty
+	priority := func(kind string) int {
+		switch kind {
+		case "block":
+			return 0
+		case "route":
+			return 1
+		case "allow":
+			return 2
+		default:
+			return 3
+		}
+	}
+	sort.Slice(sets, func(i, j int) bool {
+		if priority(sets[i].Kind) != priority(sets[j].Kind) {
+			return priority(sets[i].Kind) < priority(sets[j].Kind)
+		}
+		return sets[i].ID < sets[j].ID
+	})
 	return cfg, profileMap, upstreams, rules, sets, nil
 }
 
