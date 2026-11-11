@@ -55,7 +55,9 @@ type RefreshSettings struct {
 }
 
 func DefaultRefreshSettings() RefreshSettings {
-	return RefreshSettings{AutoUpdate: true, UpdateTime: "04:30"}
+	// HRweb's DNS blocklist auto-update toggle is opt-in; 04:30 is the
+	// default time shown when the user enables it.
+	return RefreshSettings{AutoUpdate: false, UpdateTime: "04:30"}
 }
 
 type Snapshot struct {
