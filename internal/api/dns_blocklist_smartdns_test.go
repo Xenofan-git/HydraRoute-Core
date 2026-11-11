@@ -51,8 +51,14 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 }
 
 func TestSmartDNSForwardAddressDefaultsToLoopbackPort(t *testing.T) {
+	if got := smartDNSListenPort(hrsmartdns.Config{}); got != 5354 {
+		t.Fatalf("default SmartDNS listen port = %d, want 5354", got)
+	}
 	if got := smartDNSForwardAddress(hrsmartdns.Config{}); got != "127.0.0.1:5354" {
 		t.Fatalf("default SmartDNS forward address = %q, want 127.0.0.1:5354", got)
+	}
+	if got := smartDNSListenPort(hrsmartdns.Config{ListenPort: 5454}); got != 5454 {
+		t.Fatalf("configured SmartDNS listen port = %d, want 5454", got)
 	}
 	if got := smartDNSForwardAddress(hrsmartdns.Config{ListenPort: 5454}); got != "127.0.0.1:5454" {
 		t.Fatalf("configured SmartDNS forward address = %q, want 127.0.0.1:5454", got)
