@@ -177,8 +177,8 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 			s.blocklistsErr = err.Error()
 		} else {
 			s.blocklists = manager
-			s.applyDNSBlocklists()
 		}
+		s.applyDNSBlocklists()
 		if data, err := os.ReadFile(filepath.Join(stateDir, "refresh-settings.json")); err == nil {
 			var saved struct {
 				Enabled         bool  `json:"enabled"`
@@ -3593,16 +3593,30 @@ func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) applyDNSBlocklists() {
-	if s.dns == nil || s.blocklists == nil {
+	if s.dns == nil {
 		return
 	}
-	snapshot := s.blocklists.Snapshot()
-	// Blocklist policy is evaluated by the Core DNS front resolver before
-	// forwarding to SmartDNS. Keeping these sets out of SmartDNS avoids its
-	// inherited address-flag semantics from changing HRDNS longest-suffix
-	// decisions. SmartDNS remains responsible for profile-specific upstream
-	// selection only.
-	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
+	var blocked, allowed []string
+	if s.blocklists != nil {
+		snapshot := s.blocklists.Snapshot()
+		blocked = append(blocked, snapshot.Blocked...)
+		allowed = append(allowed, snapshot.Allowed...)
+	}
+	// Both managed URL lists and configured block/allow domain sets are
+	// evaluated by the Core DNS front resolver. SmartDNS receives route sets
+	// only, avoiding inherited address-flag precedence differences.
+	for _, set := range s.smartDNSConfig.DomainSets {
+		if !set.Enabled {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(set.Kind)) {
+		case "block":
+			blocked = append(blocked, set.Domains...)
+		case "allow":
+			allowed = append(allowed, set.Domains...)
+		}
+	}
+	s.dns.SetBlocklistDomains(blocked, allowed)
 }
 
 func smartDNSListenPort(cfg hrsmartdns.Config) int {
@@ -3747,6 +3761,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		s.smartDNSConfig = cfg
 		s.smartDNSErr = ""
+		s.applyDNSBlocklists()
 		if s.dns != nil {
 			if (wasRunning || wasForwarding) && cfg.Enabled {
 				if err := s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(cfg)); err != nil {
