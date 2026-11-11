@@ -3041,6 +3041,10 @@ func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "stop SmartDNS before disabling the Core DNS policy resolver")
 			return
 		}
+		if c.Enabled && s.smartDNSConfig.Enabled && c.Port == smartDNSListenPort(s.smartDNSConfig) {
+			writeError(w, http.StatusConflict, "SmartDNS and Core DNS must use different loopback ports")
+			return
+		}
 		if wasRunning {
 			if err := s.dns.Stop(); err != nil {
 				writeError(w, 500, "cannot stop DNS service for configuration update: "+err.Error())
@@ -3717,7 +3721,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 		if cfg.ListenPort == 0 {
 			cfg.ListenPort = defaults.ListenPort
 		}
-		if s.dns != nil && s.dns.Config().Enabled && cfg.ListenPort == s.dns.Config().Port {
+		if s.dns != nil && cfg.ListenPort == s.dns.Config().Port {
 			writeError(w, http.StatusConflict, "SmartDNS and Core DNS must use different loopback ports")
 			return
 		}
