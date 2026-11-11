@@ -221,6 +221,9 @@ func TestRuntimeHonorsCanceledStartContext(t *testing.T) {
 	if err := r.Start(ctx); err == nil {
 		t.Fatal("canceled start context unexpectedly succeeded")
 	}
+	if launcher.attempts != 1 {
+		t.Fatalf("canceled startup made %d attempts, want no retry after cancellation", launcher.attempts)
+	}
 }
 
 func TestRuntimeApplyRequiresProfilePinnedUpstream(t *testing.T) {
