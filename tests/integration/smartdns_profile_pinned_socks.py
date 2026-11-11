@@ -406,9 +406,13 @@ def main() -> None:
         # set by the Core compiler before this configuration reaches SmartDNS.
         assert dns_query("safe.ads.example.test") == "203.0.113.77", "child allow exception did not override parent block"
         assert dns_query("exact.example.test") == "203.0.113.77", "normalized exact allow exception did not reach upstream"
-        # Also exercise the reverse suffix direction directly against SmartDNS:
-        # a parent allow must suppress a more-specific child block.
-        assert dns_query("blocked.allow-parent.example.test") == "203.0.113.77", "parent allow did not suppress child block"
+        # Engine-behavior regression probe, not an HRDNS-parity expectation:
+        # SmartDNS 48.4 accumulates the parent allow flag and therefore lets this
+        # query through. HRDNS instead evaluates the most-specific matching
+        # suffix first and blocks this child. The Core compiler must reject
+        # this unrepresentable overlap until a Core-owned policy resolver is
+        # wired in; this raw SmartDNS fixture records the engine limitation.
+        assert dns_query("blocked.allow-parent.example.test") == "203.0.113.77", "SmartDNS native parent-allow behavior changed"
         with LOCK:
             assert any(name == "safe.ads.example.test" for _port, name in HITS), HITS
             assert any(name == "exact.example.test" for _port, name in HITS), HITS
