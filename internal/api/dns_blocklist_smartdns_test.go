@@ -66,7 +66,7 @@ func TestSmartDNSForwardAddressDefaultsToLoopbackPort(t *testing.T) {
 	if got := smartDNSForwardAddress(hrsmartdns.Config{ListenPort: 5454}); got != "127.0.0.1:5454" {
 		t.Fatalf("configured SmartDNS forward address = %q, want 127.0.0.1:5454", got)
 	}
-} 
+}
 func TestSmartDNSStartRequiresRunningCoreDNSPolicyResolver(t *testing.T) {
 	runtime, err := hrsmartdns.NewRuntime(hrsmartdns.RuntimeConfig{
 		BinaryPath: "/bin/true",
@@ -77,9 +77,9 @@ func TestSmartDNSStartRequiresRunningCoreDNSPolicyResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := &Server{
-		dns:              dnsservice.New(filepath.Join(t.TempDir(), "dns", "config.json")),
-		smartDNSRuntime:  runtime,
-		smartDNSConfig:   hrsmartdns.DefaultConfig(),
+		dns:             dnsservice.New(filepath.Join(t.TempDir(), "dns", "config.json")),
+		smartDNSRuntime: runtime,
+		smartDNSConfig:  hrsmartdns.DefaultConfig(),
 	}
 	server.smartDNSConfig.Enabled = true
 
