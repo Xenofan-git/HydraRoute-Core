@@ -15,8 +15,20 @@ func TestCatalogMatchesHRNeoBuiltInPresets(t *testing.T) {
 	if len(presets) != 7 {
 		t.Fatalf("HRNeo preset count=%d, want 7", len(presets))
 	}
+	expectedURLs := map[string]string{
+		"hagezi-light": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt",
+		"hagezi-multi": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi-onlydomains.txt",
+		"hagezi-pro":   "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro-onlydomains.txt",
+		"oisd-small":   "https://small.oisd.nl/domainswild2",
+		"oisd-big":     "https://big.oisd.nl/domainswild2",
+		"adguard-dns":  "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
+		"stevenblack":  "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+	}
 	seen := make(map[string]struct{}, len(presets))
 	for _, preset := range presets {
+		if expectedURLs[preset.ID] != preset.URL {
+			t.Fatalf("preset %q URL=%q, want %q", preset.ID, preset.URL, expectedURLs[preset.ID])
+		}
 		if preset.ID == "" || preset.Name == "" {
 			t.Fatalf("incomplete preset: %+v", preset)
 		}
