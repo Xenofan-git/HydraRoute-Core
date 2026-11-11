@@ -361,7 +361,7 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 				continue
 			}
 		}
-		if m.blockedHost(host) {
+		if m.blockedHostForType(host, q.Qtype) {
 			blocked = true
 			if trackStats {
 				m.blocked.Add(1)
@@ -414,6 +414,19 @@ func (m *Manager) IsBlockedHost(host string) bool {
 }
 
 func (m *Manager) blockedHost(host string) bool {
+	return m.blockedHostForType(host, mdns.TypeA)
+}
+
+func blocklistQueryType(qtype uint16) bool {
+	switch qtype {
+	case mdns.TypeA, mdns.TypeAAAA, mdns.TypeSVCB, mdns.TypeHTTPS:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Manager) blockedHostForType(host string, qtype uint16) bool {
 	host = normalizeBlocklistDomain(host)
 	if host == "" {
 		return false
@@ -423,12 +436,16 @@ func (m *Manager) blockedHost(host string) bool {
 	if !m.cfg.BlockingEnabled {
 		return false
 	}
-	// Explicit Core rules retain their existing first-match priority.
+	// Explicit Core rules retain their existing first-match priority and
+	// remain independent of the record-type filter used by HRDNS blocklists.
 	for _, rule := range m.cfg.Rules {
 		domain := normalizeBlocklistDomain(rule.Domain)
 		if domain != "" && (host == domain || strings.HasSuffix(host, "."+domain)) {
 			return !strings.EqualFold(rule.Action, "allow")
 		}
+	}
+	if !blocklistQueryType(qtype) {
+		return false
 	}
 	// HRDNS evaluates the most-specific matching suffix first. At each
 	// candidate suffix an allow entry is checked before a block entry, so an
