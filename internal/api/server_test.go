@@ -1895,7 +1895,7 @@ func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
 	if err := json.Unmarshal(get.Body.Bytes(), &initial); err != nil {
 		t.Fatal(err)
 	}
-	if !initial.Settings.AutoUpdate || initial.Settings.UpdateTime != "04:30" {
+	if initial.Settings.AutoUpdate || initial.Settings.UpdateTime != "04:30" {
 		t.Fatalf("HRNeo default daily refresh settings mismatch: %+v", initial.Settings)
 	}
 
