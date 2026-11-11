@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/net/proxy"
 	"io"
 	"mime"
 	"net"
@@ -23,6 +22,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/proxy"
 
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/dnsservice"
