@@ -48,19 +48,32 @@ type Source struct {
 	Error   string         `json:"error,omitempty"`
 }
 
+type RefreshSettings struct {
+	AutoUpdate bool   `json:"autoUpdate"`
+	UpdateTime string `json:"updateTime"`
+	Iface      string `json:"iface"`
+}
+
+func DefaultRefreshSettings() RefreshSettings {
+	return RefreshSettings{AutoUpdate: true, UpdateTime: "04:30"}
+}
+
 type Snapshot struct {
-	Sources []Source            `json:"sources"`
-	Blocked []string            `json:"blocked"`
-	Allowed []string            `json:"allowed"`
-	Missing map[string][]string `json:"missing,omitempty"`
+	Sources  []Source            `json:"sources"`
+	Blocked  []string            `json:"blocked"`
+	Allowed  []string            `json:"allowed"`
+	Missing  map[string][]string `json:"missing,omitempty"`
+	Settings RefreshSettings     `json:"settings"`
 }
 
 type Fetcher func(context.Context, string) (Result, error)
+type InterfaceFetcher func(context.Context, string, string) (Result, error)
 
 type persistedState struct {
-	Version int               `json:"version"`
-	Sources []Source          `json:"sources"`
-	Results map[string]Result `json:"results"`
+	Version  int               `json:"version"`
+	Sources  []Source          `json:"sources"`
+	Results  map[string]Result `json:"results"`
+	Settings RefreshSettings   `json:"settings,omitempty"`
 }
 
 type Manager struct {
@@ -68,8 +81,10 @@ type Manager struct {
 	path    string
 	sources []Source
 	results map[string]Result
-	fetcher Fetcher
-	now     func() time.Time
+	fetcher          Fetcher
+	interfaceFetcher InterfaceFetcher
+	settings         RefreshSettings
+	now              func() time.Time
 }
 
 func NewManager(path string, fetcher Fetcher) (*Manager, error) {
@@ -80,15 +95,519 @@ func NewManager(path string, fetcher Fetcher) (*Manager, error) {
 		fetcher = Fetch
 	}
 	m := &Manager{
-		path:    path,
-		results: make(map[string]Result),
-		fetcher: fetcher,
-		now:     time.Now,
+		path:     path,
+		results:  make(map[string]Result),
+		fetcher:  fetcher,
+		settings: DefaultRefreshSettings(),
+		now:      time.Now,
+	}
+	if fetcher == nil {
+		m.interfaceFetcher = FetchOnInterface
 	}
 	if err := m.load(); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+func validateRefreshSettings(input RefreshSettings) (RefreshSettings, error) {
+	input.UpdateTime = strings.TrimSpace(input.UpdateTime)
+	if !regexp.MustCompile(`^(?:[01]?\d|2[0-3]):[0-5]\dpackage blocklist
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"hydraroute.local/core/internal/parser"
+)
+
+const (
+	maxSources       = 128
+	maxRemoved       = 10000
+	maxStateBytes    = 32 << 20
+	maxSourceNameLen = 128
+)
+
+var (
+	ErrSourceNotFound = errors.New("DNS blocklist source not found")
+	sourceIDPattern   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$`)
+)
+
+type RemovedEntry struct {
+	Entry string    `json:"entry"`
+	At    time.Time `json:"at"`
+}
+
+type Source struct {
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	URL     string         `json:"url"`
+	Enabled bool           `json:"enabled"`
+	Removed []RemovedEntry `json:"removed,omitempty"`
+	Count   int            `json:"count"`
+	Allow   int            `json:"allow"`
+	Dropped int            `json:"dropped"`
+	Updated time.Time      `json:"updated,omitempty"`
+	Error   string         `json:"error,omitempty"`
+}
+
+type RefreshSettings struct {
+	AutoUpdate bool   `json:"autoUpdate"`
+	UpdateTime string `json:"updateTime"`
+	Iface      string `json:"iface"`
+}
+
+func DefaultRefreshSettings() RefreshSettings {
+	return RefreshSettings{AutoUpdate: true, UpdateTime: "04:30"}
+}
+
+type Snapshot struct {
+	Sources  []Source            `json:"sources"`
+	Blocked  []string            `json:"blocked"`
+	Allowed  []string            `json:"allowed"`
+	Missing  map[string][]string `json:"missing,omitempty"`
+	Settings RefreshSettings     `json:"settings"`
+}
+
+type Fetcher func(context.Context, string) (Result, error)
+type InterfaceFetcher func(context.Context, string, string) (Result, error)
+
+type persistedState struct {
+	Version  int               `json:"version"`
+	Sources  []Source          `json:"sources"`
+	Results  map[string]Result `json:"results"`
+	Settings RefreshSettings   `json:"settings,omitempty"`
+}
+
+type Manager struct {
+	mu      sync.RWMutex
+	path    string
+	sources []Source
+	results map[string]Result
+	fetcher          Fetcher
+	interfaceFetcher InterfaceFetcher
+	settings         RefreshSettings
+	now              func() time.Time
+}
+
+func NewManager(path string, fetcher Fetcher) (*Manager, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, fmt.Errorf("blocklist state path must be absolute and clean")
+	}
+	if fetcher == nil {
+		fetcher = Fetch
+	}
+	m := &Manager{
+		path:     path,
+		results:  make(map[string]Result),
+		fetcher:  fetcher,
+		settings: DefaultRefreshSettings(),
+		now:      time.Now,
+	}
+	if fetcher == nil {
+		m.interfaceFetcher = FetchOnInterface
+	}
+	if err := m.load(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+).MatchString(input.UpdateTime) {
+		return RefreshSettings{}, fmt.Errorf("DNS blocklist update time must use HH:MM")
+	}
+	parts := strings.Split(input.UpdateTime, ":")
+	if len(parts[0]) == 1 {
+		input.UpdateTime = "0" + input.UpdateTime
+	}
+	input.Iface = strings.TrimSpace(input.Iface)
+	if len(input.Iface) > 15 || (input.Iface != "" && !regexp.MustCompile(`^[a-zA-Z0-9_.:-]+package blocklist
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"hydraroute.local/core/internal/parser"
+)
+
+const (
+	maxSources       = 128
+	maxRemoved       = 10000
+	maxStateBytes    = 32 << 20
+	maxSourceNameLen = 128
+)
+
+var (
+	ErrSourceNotFound = errors.New("DNS blocklist source not found")
+	sourceIDPattern   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$`)
+)
+
+type RemovedEntry struct {
+	Entry string    `json:"entry"`
+	At    time.Time `json:"at"`
+}
+
+type Source struct {
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	URL     string         `json:"url"`
+	Enabled bool           `json:"enabled"`
+	Removed []RemovedEntry `json:"removed,omitempty"`
+	Count   int            `json:"count"`
+	Allow   int            `json:"allow"`
+	Dropped int            `json:"dropped"`
+	Updated time.Time      `json:"updated,omitempty"`
+	Error   string         `json:"error,omitempty"`
+}
+
+type RefreshSettings struct {
+	AutoUpdate bool   `json:"autoUpdate"`
+	UpdateTime string `json:"updateTime"`
+	Iface      string `json:"iface"`
+}
+
+func DefaultRefreshSettings() RefreshSettings {
+	return RefreshSettings{AutoUpdate: true, UpdateTime: "04:30"}
+}
+
+type Snapshot struct {
+	Sources  []Source            `json:"sources"`
+	Blocked  []string            `json:"blocked"`
+	Allowed  []string            `json:"allowed"`
+	Missing  map[string][]string `json:"missing,omitempty"`
+	Settings RefreshSettings     `json:"settings"`
+}
+
+type Fetcher func(context.Context, string) (Result, error)
+type InterfaceFetcher func(context.Context, string, string) (Result, error)
+
+type persistedState struct {
+	Version  int               `json:"version"`
+	Sources  []Source          `json:"sources"`
+	Results  map[string]Result `json:"results"`
+	Settings RefreshSettings   `json:"settings,omitempty"`
+}
+
+type Manager struct {
+	mu      sync.RWMutex
+	path    string
+	sources []Source
+	results map[string]Result
+	fetcher          Fetcher
+	interfaceFetcher InterfaceFetcher
+	settings         RefreshSettings
+	now              func() time.Time
+}
+
+func NewManager(path string, fetcher Fetcher) (*Manager, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, fmt.Errorf("blocklist state path must be absolute and clean")
+	}
+	if fetcher == nil {
+		fetcher = Fetch
+	}
+	m := &Manager{
+		path:     path,
+		results:  make(map[string]Result),
+		fetcher:  fetcher,
+		settings: DefaultRefreshSettings(),
+		now:      time.Now,
+	}
+	if fetcher == nil {
+		m.interfaceFetcher = FetchOnInterface
+	}
+	if err := m.load(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+).MatchString(input.Iface)) {
+		return RefreshSettings{}, fmt.Errorf("DNS blocklist interface name is invalid")
+	}
+	return input, nil
+}
+
+func (m *Manager) Settings() RefreshSettings {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.settings
+}
+
+func (m *Manager) SaveSettings(input RefreshSettings) (RefreshSettings, error) {
+	input.UpdateTime = strings.TrimSpace(input.UpdateTime)
+	if !regexp.MustCompile(`^(?:[01]?\d|2[0-3]):[0-5]\dpackage blocklist
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"hydraroute.local/core/internal/parser"
+)
+
+const (
+	maxSources       = 128
+	maxRemoved       = 10000
+	maxStateBytes    = 32 << 20
+	maxSourceNameLen = 128
+)
+
+var (
+	ErrSourceNotFound = errors.New("DNS blocklist source not found")
+	sourceIDPattern   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$`)
+)
+
+type RemovedEntry struct {
+	Entry string    `json:"entry"`
+	At    time.Time `json:"at"`
+}
+
+type Source struct {
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	URL     string         `json:"url"`
+	Enabled bool           `json:"enabled"`
+	Removed []RemovedEntry `json:"removed,omitempty"`
+	Count   int            `json:"count"`
+	Allow   int            `json:"allow"`
+	Dropped int            `json:"dropped"`
+	Updated time.Time      `json:"updated,omitempty"`
+	Error   string         `json:"error,omitempty"`
+}
+
+type RefreshSettings struct {
+	AutoUpdate bool   `json:"autoUpdate"`
+	UpdateTime string `json:"updateTime"`
+	Iface      string `json:"iface"`
+}
+
+func DefaultRefreshSettings() RefreshSettings {
+	return RefreshSettings{AutoUpdate: true, UpdateTime: "04:30"}
+}
+
+type Snapshot struct {
+	Sources  []Source            `json:"sources"`
+	Blocked  []string            `json:"blocked"`
+	Allowed  []string            `json:"allowed"`
+	Missing  map[string][]string `json:"missing,omitempty"`
+	Settings RefreshSettings     `json:"settings"`
+}
+
+type Fetcher func(context.Context, string) (Result, error)
+type InterfaceFetcher func(context.Context, string, string) (Result, error)
+
+type persistedState struct {
+	Version  int               `json:"version"`
+	Sources  []Source          `json:"sources"`
+	Results  map[string]Result `json:"results"`
+	Settings RefreshSettings   `json:"settings,omitempty"`
+}
+
+type Manager struct {
+	mu      sync.RWMutex
+	path    string
+	sources []Source
+	results map[string]Result
+	fetcher          Fetcher
+	interfaceFetcher InterfaceFetcher
+	settings         RefreshSettings
+	now              func() time.Time
+}
+
+func NewManager(path string, fetcher Fetcher) (*Manager, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, fmt.Errorf("blocklist state path must be absolute and clean")
+	}
+	if fetcher == nil {
+		fetcher = Fetch
+	}
+	m := &Manager{
+		path:     path,
+		results:  make(map[string]Result),
+		fetcher:  fetcher,
+		settings: DefaultRefreshSettings(),
+		now:      time.Now,
+	}
+	if fetcher == nil {
+		m.interfaceFetcher = FetchOnInterface
+	}
+	if err := m.load(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+).MatchString(input.UpdateTime) {
+		return RefreshSettings{}, fmt.Errorf("DNS blocklist update time must use HH:MM")
+	}
+	parts := strings.Split(input.UpdateTime, ":")
+	if len(parts[0]) == 1 {
+		input.UpdateTime = "0" + input.UpdateTime
+	}
+	input.Iface = strings.TrimSpace(input.Iface)
+	if len(input.Iface) > 15 || (input.Iface != "" && !regexp.MustCompile(`^[a-zA-Z0-9_.:-]+package blocklist
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"hydraroute.local/core/internal/parser"
+)
+
+const (
+	maxSources       = 128
+	maxRemoved       = 10000
+	maxStateBytes    = 32 << 20
+	maxSourceNameLen = 128
+)
+
+var (
+	ErrSourceNotFound = errors.New("DNS blocklist source not found")
+	sourceIDPattern   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$`)
+)
+
+type RemovedEntry struct {
+	Entry string    `json:"entry"`
+	At    time.Time `json:"at"`
+}
+
+type Source struct {
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	URL     string         `json:"url"`
+	Enabled bool           `json:"enabled"`
+	Removed []RemovedEntry `json:"removed,omitempty"`
+	Count   int            `json:"count"`
+	Allow   int            `json:"allow"`
+	Dropped int            `json:"dropped"`
+	Updated time.Time      `json:"updated,omitempty"`
+	Error   string         `json:"error,omitempty"`
+}
+
+type RefreshSettings struct {
+	AutoUpdate bool   `json:"autoUpdate"`
+	UpdateTime string `json:"updateTime"`
+	Iface      string `json:"iface"`
+}
+
+func DefaultRefreshSettings() RefreshSettings {
+	return RefreshSettings{AutoUpdate: true, UpdateTime: "04:30"}
+}
+
+type Snapshot struct {
+	Sources  []Source            `json:"sources"`
+	Blocked  []string            `json:"blocked"`
+	Allowed  []string            `json:"allowed"`
+	Missing  map[string][]string `json:"missing,omitempty"`
+	Settings RefreshSettings     `json:"settings"`
+}
+
+type Fetcher func(context.Context, string) (Result, error)
+type InterfaceFetcher func(context.Context, string, string) (Result, error)
+
+type persistedState struct {
+	Version  int               `json:"version"`
+	Sources  []Source          `json:"sources"`
+	Results  map[string]Result `json:"results"`
+	Settings RefreshSettings   `json:"settings,omitempty"`
+}
+
+type Manager struct {
+	mu      sync.RWMutex
+	path    string
+	sources []Source
+	results map[string]Result
+	fetcher          Fetcher
+	interfaceFetcher InterfaceFetcher
+	settings         RefreshSettings
+	now              func() time.Time
+}
+
+func NewManager(path string, fetcher Fetcher) (*Manager, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, fmt.Errorf("blocklist state path must be absolute and clean")
+	}
+	if fetcher == nil {
+		fetcher = Fetch
+	}
+	m := &Manager{
+		path:     path,
+		results:  make(map[string]Result),
+		fetcher:  fetcher,
+		settings: DefaultRefreshSettings(),
+		now:      time.Now,
+	}
+	if fetcher == nil {
+		m.interfaceFetcher = FetchOnInterface
+	}
+	if err := m.load(); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+).MatchString(input.Iface)) {
+		return RefreshSettings{}, fmt.Errorf("DNS blocklist interface name is invalid")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previous := m.settings
+	m.settings = input
+	if err := m.persistLocked(); err != nil {
+		m.settings = previous
+		return RefreshSettings{}, err
+	}
+	return m.settings, nil
+}
+
+func (m *Manager) SetInterfaceFetcher(fetcher InterfaceFetcher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.interfaceFetcher = fetcher
 }
 
 func (m *Manager) List() []Source {
@@ -201,9 +720,17 @@ func (m *Manager) Refresh(ctx context.Context, id string) (Source, error) {
 	}
 	source := cloneSource(m.sources[index])
 	fetcher := m.fetcher
+	interfaceFetcher := m.interfaceFetcher
+	iface := m.settings.Iface
 	m.mu.RUnlock()
 
-	result, fetchErr := fetcher(ctx, source.URL)
+	var result Result
+	var fetchErr error
+	if iface != "" && interfaceFetcher != nil {
+		result, fetchErr = interfaceFetcher(ctx, source.URL, iface)
+	} else {
+		result, fetchErr = fetcher(ctx, source.URL)
+	}
 	if fetchErr == nil {
 		result = normalizeResult(result)
 	}
@@ -322,7 +849,7 @@ func (m *Manager) RestoreEntry(id, rawDomain string) error {
 func (m *Manager) Snapshot() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := Snapshot{Sources: cloneSources(m.sources), Missing: make(map[string][]string)}
+	out := Snapshot{Sources: cloneSources(m.sources), Missing: make(map[string][]string), Settings: m.settings}
 	blocked := make(map[string]struct{})
 	allowed := make(map[string]struct{})
 	for _, source := range m.sources {
@@ -390,6 +917,13 @@ func (m *Manager) load() error {
 	if state.Results == nil {
 		state.Results = make(map[string]Result)
 	}
+	if state.Settings.UpdateTime == "" {
+		state.Settings = DefaultRefreshSettings()
+	}
+	if _, err := validateRefreshSettings(state.Settings); err != nil {
+		return fmt.Errorf("invalid DNS blocklist refresh settings: %w", err)
+	}
+	m.settings = state.Settings
 	seen := make(map[string]struct{}, len(state.Sources))
 	for i := range state.Sources {
 		source := &state.Sources[i]
@@ -436,7 +970,7 @@ func (m *Manager) persistLocked() error {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 {
 		return fmt.Errorf("blocklist state directory must not be group/world writable or a symlink")
 	}
-	state := persistedState{Version: 1, Sources: cloneSources(m.sources), Results: cloneResults(m.results)}
+	state := persistedState{Version: 1, Sources: cloneSources(m.sources), Results: cloneResults(m.results), Settings: m.settings}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
