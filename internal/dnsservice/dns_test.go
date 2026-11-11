@@ -108,13 +108,22 @@ func startFakeDNSUpstream(t *testing.T, answerIP string, hits *atomic.Int32) str
 		}
 		resp := new(mdns.Msg)
 		resp.SetReply(req)
-		if len(req.Question) > 0 && req.Question[0].Qtype == mdns.TypeA {
-			rr, parseErr := mdns.NewRR(req.Question[0].Name + " 30 IN A " + answerIP)
-			if parseErr != nil {
-				t.Errorf("build fake DNS answer: %v", parseErr)
-				return
+		if len(req.Question) > 0 {
+			var record string
+			switch req.Question[0].Qtype {
+			case mdns.TypeA:
+				record = req.Question[0].Name + " 30 IN A " + answerIP
+			case mdns.TypeTXT:
+				record = req.Question[0].Name + " 30 IN TXT \"passed-through\""
 			}
-			resp.Answer = append(resp.Answer, rr)
+			if record != "" {
+				rr, parseErr := mdns.NewRR(record)
+				if parseErr != nil {
+					t.Errorf("build fake DNS answer: %v", parseErr)
+					return
+				}
+				resp.Answer = append(resp.Answer, rr)
+			}
 		}
 		_ = w.WriteMsg(resp)
 	})
@@ -171,6 +180,21 @@ func TestDNSPolicyFrontBlocksBeforeSmartDNSAndForwardsAllowedQueries(t *testing.
 	}
 	if smartDNSHits.Load() != 1 {
 		t.Fatalf("SmartDNS received %d queries, want exactly one", smartDNSHits.Load())
+	}
+
+	// HRDNS applies managed blocklists to A/AAAA/SVCB/HTTPS records, not TXT.
+	// A TXT lookup for the same blocked hostname must still reach SmartDNS.
+	txtQuery := new(mdns.Msg)
+	txtQuery.SetQuestion("blocked.allow-parent.test.", mdns.TypeTXT)
+	txtResponse, _, err := client.Exchange(txtQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if err != nil {
+		t.Fatalf("TXT query for blocked host: %v", err)
+	}
+	if len(txtResponse.Answer) != 1 || txtResponse.Answer[0].Header().Rrtype != mdns.TypeTXT {
+		t.Fatalf("TXT query was incorrectly blocked: %+v", txtResponse.Answer)
+	}
+	if smartDNSHits.Load() != 2 {
+		t.Fatalf("SmartDNS received %d queries after TXT pass-through, want two", smartDNSHits.Load())
 	}
 }
 
