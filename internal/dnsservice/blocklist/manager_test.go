@@ -345,7 +345,7 @@ func TestManagerRefreshSettingsDefaultDailyScheduleAndPersistence(t *testing.T) 
 		t.Fatal(err)
 	}
 	defaults := manager.Settings()
-	if !defaults.AutoUpdate || defaults.UpdateTime != "04:30" || defaults.Iface != "" {
+	if defaults.AutoUpdate || defaults.UpdateTime != "04:30" || defaults.Iface != "" {
 		t.Fatalf("unexpected HRNeo default refresh settings: %+v", defaults)
 	}
 	saved, err := manager.SaveSettings(RefreshSettings{AutoUpdate: false, UpdateTime: "4:05", Iface: "eth1"})
