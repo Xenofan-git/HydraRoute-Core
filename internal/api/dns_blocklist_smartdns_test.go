@@ -5,11 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	dnsservice "hydraroute.local/core/internal/dnsservice"
 	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
 	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 )
 
-func TestSmartDNSConfigWithBlocklistsPreservesCustomSetsAndReplacesManagedSets(t *testing.T) {
+func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testing.T) {
 	manager, err := dnsblocklist.NewManager(filepath.Join(t.TempDir(), "blocklists.json"), func(context.Context, string) (dnsblocklist.Result, error) {
 		return dnsblocklist.Result{
 			Blocked: []string{"ads.example.test"},
@@ -27,27 +28,29 @@ func TestSmartDNSConfigWithBlocklistsPreservesCustomSetsAndReplacesManagedSets(t
 		t.Fatal(err)
 	}
 
-	server := &Server{blocklists: manager}
+	resolver := dnsservice.New(filepath.Join(t.TempDir(), "dns", "config.json"))
+	server := &Server{blocklists: manager, dns: resolver}
+	server.applyDNSBlocklists()
+	if !resolver.IsBlockedHost("ads.example.test") {
+		t.Fatal("Core DNS policy resolver did not receive blocklist entries")
+	}
+	if resolver.IsBlockedHost("safe.example.test") {
+		t.Fatal("Core DNS policy resolver did not receive allowlist exceptions")
+	}
+
 	base := hrsmartdns.Config{DomainSets: []hrsmartdns.DomainSet{
 		{ID: "custom-set", Kind: "route", ProfileID: "foreign", Domains: []string{"tracker.example.test"}, Enabled: true},
-		{ID: "hrcore-blocklist", Kind: "block", Domains: []string{"stale.example.test"}, Enabled: true},
-		{ID: "hrcore-allowlist", Kind: "allow", Domains: []string{"stale-safe.example.test"}, Enabled: true},
 	}}
-	got := server.smartDNSConfigWithBlocklists(base)
-	if len(got.DomainSets) != 3 {
-		t.Fatalf("got %d domain sets, want custom + managed block + managed allow: %+v", len(got.DomainSets), got.DomainSets)
+	if len(base.DomainSets) != 1 || base.DomainSets[0].ID != "custom-set" {
+		t.Fatalf("SmartDNS profile-routing domain sets unexpectedly changed: %+v", base.DomainSets)
 	}
-	byID := make(map[string]hrsmartdns.DomainSet, len(got.DomainSets))
-	for _, set := range got.DomainSets {
-		byID[set.ID] = set
+}
+
+func TestSmartDNSForwardAddressDefaultsToLoopbackPort(t *testing.T) {
+	if got := smartDNSForwardAddress(hrsmartdns.Config{}); got != "127.0.0.1:5354" {
+		t.Fatalf("default SmartDNS forward address = %q, want 127.0.0.1:5354", got)
 	}
-	if _, ok := byID["custom-set"]; !ok {
-		t.Fatal("custom SmartDNS domain set was lost")
-	}
-	if got := byID["hrcore-blocklist"].Domains; len(got) != 1 || got[0] != "ads.example.test" {
-		t.Fatalf("managed blocklist set was not refreshed: %v", got)
-	}
-	if got := byID["hrcore-allowlist"].Domains; len(got) != 1 || got[0] != "safe.example.test" {
-		t.Fatalf("managed allowlist set was not refreshed: %v", got)
+	if got := smartDNSForwardAddress(hrsmartdns.Config{ListenPort: 5454}); got != "127.0.0.1:5454" {
+		t.Fatalf("configured SmartDNS forward address = %q, want 127.0.0.1:5454", got)
 	}
 }
