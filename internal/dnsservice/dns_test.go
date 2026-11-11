@@ -174,6 +174,41 @@ func TestDNSPolicyFrontBlocksBeforeSmartDNSAndForwardsAllowedQueries(t *testing.
 	}
 }
 
+func TestBlocklistAppliesOnlyToHRDNSRecordTypes(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true}}
+	m.SetBlocklistDomains([]string{"blocked.example.test"}, nil)
+	cases := []struct {
+		name  string
+		qtype uint16
+		want  bool
+	}{
+		{name: "A", qtype: mdns.TypeA, want: true},
+		{name: "AAAA", qtype: mdns.TypeAAAA, want: true},
+		{name: "SVCB", qtype: mdns.TypeSVCB, want: true},
+		{name: "HTTPS", qtype: mdns.TypeHTTPS, want: true},
+		{name: "TXT", qtype: mdns.TypeTXT, want: false},
+		{name: "MX", qtype: mdns.TypeMX, want: false},
+		{name: "CNAME", qtype: mdns.TypeCNAME, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := m.blockedHostForType("blocked.example.test", tc.qtype); got != tc.want {
+				t.Fatalf("blockedHostForType(%s)=%v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExplicitDNSRulesRemainIndependentOfBlocklistRecordTypes(t *testing.T) {
+	m := &Manager{cfg: Config{
+		BlockingEnabled: true,
+		Rules:           []Rule{{Domain: "explicit.example.test", Action: "block"}},
+	}}
+	if !m.blockedHostForType("explicit.example.test", mdns.TypeTXT) {
+		t.Fatal("explicit Core DNS rule unexpectedly inherited the blocklist record-type filter")
+	}
+}
+
 func TestSmartDNSForwarderIsExclusiveAndSkipsConfiguredFallbacks(t *testing.T) {
 	var smartDNSHits, fallbackHits atomic.Int32
 	smartDNSAddr := startFakeDNSUpstream(t, "203.0.113.77", &smartDNSHits)
