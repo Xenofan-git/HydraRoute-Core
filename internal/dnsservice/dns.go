@@ -481,8 +481,8 @@ func (m *Manager) SetSmartDNSForwarder(address string) error {
 			return fmt.Errorf("SmartDNS forwarder must be a 127.0.0.1 host:port")
 		}
 		value, err := strconv.Atoi(port)
-		if err != nil || value < 1025 || value > 65535 {
-			return fmt.Errorf("SmartDNS forwarder port must be between 1025 and 65535")
+		if err != nil || value < 1 || value > 65535 {
+			return fmt.Errorf("SmartDNS forwarder port must be between 1 and 65535")
 		}
 	}
 	m.mu.Lock()
