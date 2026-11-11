@@ -23,6 +23,7 @@ STARTUP_TIMEOUT = float(os.environ.get("SMARTDNS_STARTUP_TIMEOUT", "10"))
 if not SMARTDNS or not Path(SMARTDNS).is_file():
     raise SystemExit("SMARTDNS_BINARY must point to the built SmartDNS executable")
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 ROOT = Path(tempfile.mkdtemp(prefix="hrcore-smartdns-sandbox-"))
 CERTS = ROOT / "certs"
 DATA = ROOT / "data"
@@ -425,6 +426,30 @@ def main() -> None:
             assert any(proxy == 16081 and target_port == 18443 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
             assert any(proxy == 16082 and target_port == 18444 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
             assert "dns-foreign.example.test" in SNI and "dns-torrent.example.test" in SNI, SNI
+            before_policy_front = len(HITS)
+
+        # Exercise the actual Core DNS policy resolver in front of this live
+        # pinned SmartDNS process. This proves the HRDNS parent-allow/child-block
+        # case is stopped before SmartDNS, while allowed queries still use the
+        # profile-pinned SOCKS/DoH groups.
+        policy_env = os.environ.copy()
+        policy_env["HRCORE_SMARTDNS_TEST_ADDR"] = "127.0.0.1:16053"
+        subprocess.run(
+            [
+                "go", "test", "./internal/dnsservice",
+                "-run", "^TestPolicyFrontAgainstRunningSmartDNS$",
+                "-count=1",
+            ],
+            cwd=REPO_ROOT,
+            env=policy_env,
+            check=True,
+        )
+        with LOCK:
+            policy_hits = HITS[before_policy_front:]
+            assert not any(name == "blocked.allow-parent.example.test" for _port, name in policy_hits), policy_hits
+            assert any(name == "policy.safe.ads.example.test" for _port, name in policy_hits), policy_hits
+            assert any(port == 18443 and name == "policy-login.foreign.test" for port, name in policy_hits), policy_hits
+            assert any(port == 18444 and name == "policy-tracker.torrent.test" for port, name in policy_hits), policy_hits
             before_foreign_failure = len(HITS)
         disable_proxy(16081)
         assert dns_query("login2.foreign.test") != "203.0.113.77", "foreign DNS bypassed its failed profile SOCKS proxy"
