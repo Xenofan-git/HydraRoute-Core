@@ -7,19 +7,19 @@ import (
 
 func fixtures() (Config, []ProfileRef) {
 	return Config{
-			Enabled: true, ListenHost: "127.0.0.1", ListenPort: 16053, CacheSize: 4096,
-			Upstreams: []Upstream{
-				{ID: "foreign-doh", ProfileID: "foreign", Protocol: "doh", Host: "dns.example.net", Path: "/dns-query", BootstrapIP: "1.1.1.1", Enabled: true},
-				{ID: "torrent-dot", ProfileID: "torrent", Protocol: "dot", Host: "dot.example.org", BootstrapIP: "9.9.9.9", Enabled: true},
-			},
-			Rules: []DomainRule{
-				{ID: "suffix", MatchType: "suffix", Pattern: "example.com", ProfileID: "foreign", Enabled: true},
-				{ID: "exact", MatchType: "exact", Pattern: "login.example.com", ProfileID: "torrent", Enabled: true},
-			},
-		}, []ProfileRef{
-			{ID: "foreign", Enabled: true, Listen: "127.0.0.1", Port: 16081},
-			{ID: "torrent", Enabled: true, Listen: "127.0.0.1", Port: 16082},
-		}
+		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 16053, CacheSize: 4096,
+		Upstreams: []Upstream{
+			{ID: "foreign-doh", ProfileID: "foreign", Protocol: "doh", Host: "dns.example.net", Path: "/dns-query", BootstrapIP: "1.1.1.1", Enabled: true},
+			{ID: "torrent-dot", ProfileID: "torrent", Protocol: "dot", Host: "dot.example.org", BootstrapIP: "9.9.9.9", Enabled: true},
+		},
+		Rules: []DomainRule{
+			{ID: "suffix", MatchType: "suffix", Pattern: "example.com", ProfileID: "foreign", Enabled: true},
+			{ID: "exact", MatchType: "exact", Pattern: "login.example.com", ProfileID: "torrent", Enabled: true},
+		},
+	}, []ProfileRef{
+		{ID: "foreign", Enabled: true, Listen: "127.0.0.1", Port: 16081},
+		{ID: "torrent", Enabled: true, Listen: "127.0.0.1", Port: 16082},
+	}
 }
 
 func TestCompileCreatesOnePinnedProxyPerProfile(t *testing.T) {
