@@ -124,6 +124,56 @@ func startFakeDNSUpstream(t *testing.T, answerIP string, hits *atomic.Int32) str
 	return pc.LocalAddr().String()
 }
 
+func TestDNSPolicyFrontBlocksBeforeSmartDNSAndForwardsAllowedQueries(t *testing.T) {
+	var smartDNSHits atomic.Int32
+	smartDNSAddr := startFakeDNSUpstream(t, "203.0.113.77", &smartDNSHits)
+	m := New(filepath.Join(t.TempDir(), "dns", "config.json"))
+	cfg := m.Config()
+	cfg.Port = freeDNSPort(t)
+	cfg.BlockingEnabled = true
+	if err := m.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	m.SetBlocklistDomains(
+		[]string{"blocked.allow-parent.test"},
+		[]string{"allow-parent.test"},
+	)
+	if err := m.SetSmartDNSForwarder(smartDNSAddr); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Stop() }()
+
+	client := &mdns.Client{Net: "udp", Timeout: 2 * time.Second}
+	blockedQuery := new(mdns.Msg)
+	blockedQuery.SetQuestion("blocked.allow-parent.test.", mdns.TypeA)
+	blockedResponse, _, err := client.Exchange(blockedQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if err != nil {
+		t.Fatalf("blocked query: %v", err)
+	}
+	if len(blockedResponse.Answer) != 1 || blockedResponse.Answer[0].(*mdns.A).A.String() != "0.0.0.0" {
+		t.Fatalf("more-specific block was not enforced before SmartDNS: %+v", blockedResponse.Answer)
+	}
+	if smartDNSHits.Load() != 0 {
+		t.Fatalf("blocked query reached SmartDNS %d times", smartDNSHits.Load())
+	}
+
+	allowedQuery := new(mdns.Msg)
+	allowedQuery.SetQuestion("other.allow-parent.test.", mdns.TypeA)
+	allowedResponse, _, err := client.Exchange(allowedQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if err != nil {
+		t.Fatalf("allowed query: %v", err)
+	}
+	if len(allowedResponse.Answer) != 1 || allowedResponse.Answer[0].(*mdns.A).A.String() != "203.0.113.77" {
+		t.Fatalf("allow-parent query was not forwarded to SmartDNS: %+v", allowedResponse.Answer)
+	}
+	if smartDNSHits.Load() != 1 {
+		t.Fatalf("SmartDNS received %d queries, want exactly one", smartDNSHits.Load())
+	}
+}
+
 func TestSmartDNSForwarderIsExclusiveAndSkipsConfiguredFallbacks(t *testing.T) {
 	var smartDNSHits, fallbackHits atomic.Int32
 	smartDNSAddr := startFakeDNSUpstream(t, "203.0.113.77", &smartDNSHits)
