@@ -88,7 +88,6 @@ type Server struct {
 	smartDNSConfig       hrsmartdns.Config
 	smartDNSConfigPath   string
 	smartDNSErr          string
-	smartDNSBlocklistErr string
 	opMu                 sync.Mutex
 	refreshMu            sync.Mutex
 	refreshOpts          Options
@@ -3600,7 +3599,6 @@ func (s *Server) applyDNSBlocklists() {
 	// decisions. SmartDNS remains responsible for profile-specific upstream
 	// selection only.
 	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
-	s.smartDNSBlocklistErr = ""
 }
 
 func smartDNSForwardAddress(cfg hrsmartdns.Config) string {
@@ -3612,10 +3610,7 @@ func smartDNSForwardAddress(cfg hrsmartdns.Config) string {
 }
 
 func (s *Server) smartDNSStatusError() string {
-	if s.smartDNSErr != "" {
-		return s.smartDNSErr
-	}
-	return s.smartDNSBlocklistErr
+	return s.smartDNSErr
 }
 
 func (s *Server) smartDNSProfileRefs() []hrsmartdns.ProfileRef {
