@@ -3779,17 +3779,19 @@ func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "start the Core DNS policy resolver before SmartDNS")
 			return
 		}
-		if err := s.smartDNSRuntime.Start(r.Context()); err != nil {
-			s.smartDNSErr = err.Error()
-			writeError(w, http.StatusBadGateway, "SmartDNS failed to start")
-			return
-		}
-		s.smartDNSErr = ""
+		// Install the exclusive forwarder before starting SmartDNS. Queries
+		// during startup must fail closed rather than leak to public DNS.
 		if err := s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(s.smartDNSConfig)); err != nil {
-			_ = s.smartDNSRuntime.Stop(r.Context())
 			writeError(w, http.StatusInternalServerError, "cannot attach SmartDNS as the exclusive DNS upstream")
 			return
 		}
+		if err := s.smartDNSRuntime.Start(r.Context()); err != nil {
+			s.smartDNSErr = err.Error()
+			s.recordEvent("error", "dns", "smartdns_start_failed", "SmartDNS failed to start; Core DNS remains fail-closed")
+			writeError(w, http.StatusBadGateway, "SmartDNS failed to start; DNS forwarding remains fail-closed")
+			return
+		}
+		s.smartDNSErr = ""
 		s.recordEvent("info", "dns", "smartdns_started", "SmartDNS sidecar started behind Core DNS policy resolver")
 	case "stop":
 		if err := s.smartDNSRuntime.Stop(r.Context()); err != nil {
