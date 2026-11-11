@@ -82,6 +82,9 @@ type Server struct {
 	profileStore        *profiles.Store
 	routingStore        *routeconfig.Store
 	dns                 *dnsservice.Manager
+	dnsPolicyMu         sync.RWMutex
+	smartDNSPolicyOn    bool
+	smartDNSDomainSets  []hrsmartdns.DomainSet
 	blocklists          *dnsblocklist.Manager
 	blocklistsErr       string
 	smartDNSRuntime     *hrsmartdns.Runtime
@@ -168,6 +171,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		} else if !os.IsNotExist(err) {
 			s.smartDNSErr = "saved SmartDNS configuration could not be inspected"
 		}
+		s.setSmartDNSPolicyConfig(s.smartDNSConfig)
 		if s.smartDNSRuntime != nil {
 			if err := s.smartDNSRuntime.Apply(context.Background(), s.smartDNSConfig, s.smartDNSProfileRefs()); err != nil {
 				s.smartDNSErr = err.Error()
@@ -3592,6 +3596,18 @@ func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (s *Server) setSmartDNSPolicyConfig(cfg hrsmartdns.Config) {
+	sets := make([]hrsmartdns.DomainSet, len(cfg.DomainSets))
+	for i, set := range cfg.DomainSets {
+		sets[i] = set
+		sets[i].Domains = append([]string(nil), set.Domains...)
+	}
+	s.dnsPolicyMu.Lock()
+	s.smartDNSPolicyOn = cfg.Enabled
+	s.smartDNSDomainSets = sets
+	s.dnsPolicyMu.Unlock()
+}
+
 func (s *Server) applyDNSBlocklists() {
 	if s.dns == nil {
 		return
@@ -3605,8 +3621,16 @@ func (s *Server) applyDNSBlocklists() {
 	// Both managed URL lists and configured block/allow domain sets are
 	// evaluated by the Core DNS front resolver. SmartDNS receives route sets
 	// only, avoiding inherited address-flag precedence differences.
-	if s.smartDNSConfig.Enabled {
-		for _, set := range s.smartDNSConfig.DomainSets {
+	s.dnsPolicyMu.RLock()
+	policyEnabled := s.smartDNSPolicyOn
+	sets := make([]hrsmartdns.DomainSet, len(s.smartDNSDomainSets))
+	for i, set := range s.smartDNSDomainSets {
+		sets[i] = set
+		sets[i].Domains = append([]string(nil), set.Domains...)
+	}
+	s.dnsPolicyMu.RUnlock()
+	if policyEnabled {
+		for _, set := range sets {
 			if !set.Enabled {
 				continue
 			}
@@ -3762,6 +3786,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.smartDNSConfig = cfg
+		s.setSmartDNSPolicyConfig(cfg)
 		s.smartDNSErr = ""
 		s.applyDNSBlocklists()
 		if s.dns != nil {
