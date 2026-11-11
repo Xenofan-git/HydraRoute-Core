@@ -474,6 +474,12 @@ func normalizeBlocklistDomain(raw string) string {
 // SetSmartDNSForwarder makes SmartDNS the exclusive upstream for this
 // resolver. Blocklist and explicit-rule decisions are made locally before
 // forwarding; a SmartDNS failure must not fall back to unrelated public DNS.
+func (m *Manager) SmartDNSForwarder() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.smartDNSForwardAddr
+}
+
 func (m *Manager) SetSmartDNSForwarder(address string) error {
 	if address != "" {
 		host, port, err := net.SplitHostPort(address)
