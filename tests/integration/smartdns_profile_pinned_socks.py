@@ -68,7 +68,8 @@ def create_test_ca() -> None:
         "-extfile", str(CERTS / "server.ext"),
     ])
     run_checked(["openssl", "rehash", str(CERTS)])
-    (DATA / "ads.txt").write_text("ads.example.test\n")
+    (DATA / "ads.txt").write_text("ads.example.test\nblocked.example.test\nexact.example.test\n")
+    (DATA / "allow.txt").write_text("safe.ads.example.test\nexact.example.test\n")
 
 
 def read_exact(sock: socket.socket, size: int) -> bytes:
@@ -238,7 +239,9 @@ proxy-server socks5://127.0.0.1:16082 -name hr_proxy_torrent
 server-https https://dns-foreign.example.test:18443/dns-query -group hr_dns_foreign -exclude-default-group -proxy hr_proxy_foreign -host-name dns-foreign.example.test -tls-host-verify dns-foreign.example.test -host-ip 127.0.0.1 -http-host dns-foreign.example.test
 server-https https://dns-torrent.example.test:18444/dns-query -group hr_dns_torrent -exclude-default-group -proxy hr_proxy_torrent -host-name dns-torrent.example.test -tls-host-verify dns-torrent.example.test -host-ip 127.0.0.1 -http-host dns-torrent.example.test
 domain-set -name hr_set_ads -type list -file {DATA / 'ads.txt'}
+domain-set -name hr_set_allow -type list -file {DATA / 'allow.txt'}
 address /domain-set:hr_set_ads/#
+address /domain-set:hr_set_allow/-
 address /allowed.example.test/203.0.113.5
 nameserver /foreign.test/hr_dns_foreign
 nameserver /torrent.test/hr_dns_torrent
@@ -370,9 +373,18 @@ def main() -> None:
         assert dns_query("allowed.example.test") == "203.0.113.5", "static allow response failed"
         before_ads = len(HITS)
         ads_result = dns_query("ads.example.test")
-        assert ads_result != "203.0.113.77", f"domain-set query escaped to DoH: {ads_result}"
+        blocked_result = dns_query("blocked.example.test")
+        assert ads_result != "203.0.113.77", f"block domain-set query escaped to DoH: {ads_result}"
+        assert blocked_result != "203.0.113.77", f"second block domain-set query escaped to DoH: {blocked_result}"
         with LOCK:
-            assert len(HITS) == before_ads, "domain-set query unexpectedly reached a DoH upstream"
+            assert len(HITS) == before_ads, "blocked domain-set query unexpectedly reached a DoH upstream"
+        # SmartDNS DOMAIN_FLAG_ADDR_IGN must override a matching parent block
+        # suffix and an exact block entry, exactly as HRNeo's Allow precedence.
+        assert dns_query("safe.ads.example.test") == "203.0.113.77", "child allow exception did not override parent block"
+        assert dns_query("exact.example.test") == "203.0.113.77", "exact allow exception did not override exact block"
+        with LOCK:
+            assert any(name == "safe.ads.example.test" for _port, name in HITS), HITS
+            assert any(name == "exact.example.test" for _port, name in HITS), HITS
         assert dns_query("login.foreign.test") == "203.0.113.77", "DoH over foreign profile SOCKS failed"
         assert dns_query("tracker.torrent.test") == "203.0.113.77", "DoH over torrent profile SOCKS failed"
         with LOCK:
