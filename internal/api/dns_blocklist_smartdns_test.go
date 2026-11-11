@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,9 +69,13 @@ func TestSmartDNSForwardAddressDefaultsToLoopbackPort(t *testing.T) {
 	}
 }
 func TestSmartDNSStartRequiresRunningCoreDNSPolicyResolver(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "smartdns-state")
+	if err := os.Mkdir(stateDir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	runtime, err := hrsmartdns.NewRuntime(hrsmartdns.RuntimeConfig{
 		BinaryPath: "/bin/true",
-		StateDir:   t.TempDir(),
+		StateDir:   stateDir,
 		ListenAddr: "127.0.0.1:5354",
 	})
 	if err != nil {
