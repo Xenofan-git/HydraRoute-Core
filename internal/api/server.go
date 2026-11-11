@@ -3720,6 +3720,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 		defer s.opMu.Unlock()
 		previous := s.smartDNSConfig
 		wasRunning := s.smartDNSRuntime.Status().Running
+		wasForwarding := s.dns != nil && s.dns.SmartDNSForwarder() != ""
 		if err := s.persistSmartDNSConfig(cfg); err != nil {
 			writeError(w, http.StatusInternalServerError, "cannot persist SmartDNS configuration")
 			return
@@ -3736,7 +3737,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 		s.smartDNSConfig = cfg
 		s.smartDNSErr = ""
 		if s.dns != nil {
-			if wasRunning && cfg.Enabled {
+			if (wasRunning || wasForwarding) && cfg.Enabled {
 				if err := s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(cfg)); err != nil {
 					s.smartDNSErr = err.Error()
 					writeError(w, http.StatusInternalServerError, "SmartDNS restarted but policy forwarding could not be updated")
