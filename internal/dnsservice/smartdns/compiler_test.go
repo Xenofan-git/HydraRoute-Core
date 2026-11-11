@@ -175,15 +175,19 @@ func TestCompileAppliesAllowlistPrecedenceAcrossDomainSets(t *testing.T) {
 		t.Fatalf("allow exceptions must compile: %v", err)
 	}
 	blocked := string(out.Files["domain-set-block.txt"])
-	if !strings.Contains(blocked, "example.test") || strings.Contains(blocked, "ads.allow-parent.test") {
-		t.Fatalf("block set did not apply allow-parent precedence: %q", blocked)
+	for _, domain := range []string{"example.test", "ads.allow-parent.test"} {
+		if !strings.Contains(blocked, domain) {
+			t.Fatalf("block set lost source entry %q: %q", domain, blocked)
+		}
 	}
-	if _, exists := out.Files["domain-set-block-same.txt"]; exists {
-		t.Fatal("block entry identical to an allow entry must be suppressed")
+	if got := string(out.Files["domain-set-block-same.txt"]); got != "same.test\n" {
+		t.Fatalf("exact overlapping block entry must be preserved for SmartDNS allow flags: %q", got)
 	}
 	allowed := string(out.Files["domain-set-allow.txt"])
-	if !strings.Contains(allowed, "safe.example.test") || !strings.Contains(allowed, "allow-parent.test") || !strings.Contains(allowed, "same.test") {
-		t.Fatalf("allow set lost an exception: %q", allowed)
+	for _, domain := range []string{"safe.example.test", "allow-parent.test", "same.test"} {
+		if !strings.Contains(allowed, domain) {
+			t.Fatalf("allow set lost exception %q: %q", domain, allowed)
+		}
 	}
 	blockRule := strings.Index(out.Config, "address /domain-set:hr_set_block/#")
 	allowRule := strings.Index(out.Config, "address /domain-set:hr_set_allow/-")
@@ -191,6 +195,7 @@ func TestCompileAppliesAllowlistPrecedenceAcrossDomainSets(t *testing.T) {
 		t.Fatalf("allow rules must be emitted after block rules: %s", out.Config)
 	}
 }
+
 
 func TestCompileRejectsUnsafeDomainSetPaths(t *testing.T) {
 	cfg, profiles := fixtures()
