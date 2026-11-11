@@ -227,6 +227,9 @@ func TestSetSmartDNSForwarderRequiresLoopback(t *testing.T) {
 	if err := m.SetSmartDNSForwarder("127.0.0.1:5354"); err != nil {
 		t.Fatalf("valid loopback SmartDNS forwarder rejected: %v", err)
 	}
+	if err := m.SetSmartDNSForwarder("127.0.0.1:53"); err != nil {
+		t.Fatalf("valid privileged loopback SmartDNS port rejected: %v", err)
+	}
 	if err := m.SetSmartDNSForwarder(""); err != nil {
 		t.Fatalf("clear SmartDNS forwarder: %v", err)
 	}
