@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	dnsservice "hydraroute.local/core/internal/dnsservice"
@@ -62,5 +65,32 @@ func TestSmartDNSForwardAddressDefaultsToLoopbackPort(t *testing.T) {
 	}
 	if got := smartDNSForwardAddress(hrsmartdns.Config{ListenPort: 5454}); got != "127.0.0.1:5454" {
 		t.Fatalf("configured SmartDNS forward address = %q, want 127.0.0.1:5454", got)
+	}
+} 
+func TestSmartDNSStartRequiresRunningCoreDNSPolicyResolver(t *testing.T) {
+	runtime, err := hrsmartdns.NewRuntime(hrsmartdns.RuntimeConfig{
+		BinaryPath: "/bin/true",
+		StateDir:   t.TempDir(),
+		ListenAddr: "127.0.0.1:5354",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{
+		dns:              dnsservice.New(filepath.Join(t.TempDir(), "dns", "config.json")),
+		smartDNSRuntime:  runtime,
+		smartDNSConfig:   hrsmartdns.DefaultConfig(),
+	}
+	server.smartDNSConfig.Enabled = true
+
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:17891/v1/dns/smartdns/start", strings.NewReader("{}"))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("Origin", "http://127.0.0.1:17891")
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.smartDNSAction(recorder, req)
+
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "start the Core DNS policy resolver before SmartDNS") {
+		t.Fatalf("SmartDNS start without Core DNS returned status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
