@@ -1881,6 +1881,36 @@ func TestDNSBlocklistCatalogAPIRequiresLocalReadAndReturnsPresets(t *testing.T) 
 	}
 }
 
+func TestDNSBlocklistRefreshEndpointsRequireSameOriginJSON(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := manager.SaveSource(dnsblocklist.Source{Name: "Ads", URL: "https://lists.example/ads.txt", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.blocklists = manager
+
+	for _, path := range []string{
+		"/v1/dns/blocklists/_refresh",
+		"/v1/dns/blocklists/" + source.ID + "/refresh",
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Host = "127.0.0.1:17891"
+		req.Header.Set("Origin", "http://127.0.0.1:3000")
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, req)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("cross-origin refresh %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
 	stateDir := t.TempDir()
 	server := NewWithStateDir(apiSupervisor(t), stateDir)
