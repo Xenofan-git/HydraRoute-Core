@@ -222,6 +222,7 @@ def start_socks_servers() -> None:
 
 
 def build_config() -> Path:
+    debug_log = ROOT / "smartdns-debug.log"
     config = f"""bind 127.0.0.1:16053
 bind-tcp 127.0.0.1:16053
 cache-size 4096
@@ -231,7 +232,8 @@ local-ptr-enable no
 mdns-lookup no
 expand-ptr-from-address no
 audit-enable no
-log-level error
+log-level debug
+log-file {debug_log}
 speed-check-mode none
 ca-path {CERTS}
 proxy-server socks5://127.0.0.1:16081 -name hr_proxy_foreign
@@ -411,6 +413,16 @@ def main() -> None:
         print("DoH hits:", HITS)
         print("SOCKS routes:", PROXY_EVENTS)
         print("TLS SNI:", SNI)
+    except AssertionError:
+        debug_path = ROOT / "smartdns-debug.log"
+        if LOG_FILE is not None:
+            LOG_FILE.write("\\n=== SmartDNS debug log (tail) ===\\n")
+            if debug_path.is_file():
+                LOG_FILE.write(debug_path.read_text(errors="replace")[-24000:])
+            with LOCK:
+                LOG_FILE.write(f"\\n=== HITS ===\\n{HITS}\\n=== SOCKS EVENTS ===\\n{PROXY_EVENTS}\\n=== SNI ===\\n{SNI}\\n")
+            LOG_FILE.flush()
+        raise
     finally:
         cleanup()
     verify_strace(Path(trace_path) if trace_path else None)
