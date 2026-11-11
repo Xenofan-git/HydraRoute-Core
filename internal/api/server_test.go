@@ -1855,6 +1855,32 @@ func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
 	}
 }
 
+func TestDNSBlocklistCatalogAPIRequiresLocalReadAndReturnsPresets(t *testing.T) {
+	server := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	response := httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localGet("/v1/dns/blocklists/catalog"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("catalog GET status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Presets []dnsblocklist.Preset `json:"presets"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Presets) != 7 {
+		t.Fatalf("catalog returned %d presets, want 7: %+v", len(payload.Presets), payload.Presets)
+	}
+	remote := httptest.NewRequest(http.MethodGet, "/v1/dns/blocklists/catalog", nil)
+	remote.RemoteAddr = "192.0.2.10:12345"
+	remote.Host = "127.0.0.1:17891"
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, remote)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("remote catalog request status=%d, want forbidden", response.Code)
+	}
+}
+
 func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
 	stateDir := t.TempDir()
 	server := NewWithStateDir(apiSupervisor(t), stateDir)
