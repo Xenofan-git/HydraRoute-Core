@@ -48,15 +48,10 @@ func FetchSubscriptionOnInterface(ctx context.Context, rawURL, interfaceName str
 			return socketErr
 		}
 	}
+	// Resolve through the system resolver first: on Debian this may be a
+	// local stub (127.0.0.53) that cannot itself be reached through a bound
+	// physical interface. The actual HTTP(S) sockets remain interface-bound.
 	resolver := net.DefaultResolver
-	if interfaceName != "" {
-		resolver = &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				return dialer.DialContext(ctx, network, address)
-			},
-		}
-	}
 	transport := &http.Transport{
 		Proxy:           nil,
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
