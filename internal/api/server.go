@@ -3984,8 +3984,8 @@ func (s *Server) dnsBlocklistItem(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
-		if !validLocalReadRequest(r) {
-			writeError(w, http.StatusForbidden, "local request required")
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
 			return
 		}
 		failures := s.blocklists.RefreshAll(r.Context())
@@ -4076,8 +4076,8 @@ func (s *Server) dnsBlocklistItem(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
-		if !validLocalReadRequest(r) {
-			writeError(w, http.StatusForbidden, "local request required")
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
 			return
 		}
 		source, err := s.blocklists.Refresh(r.Context(), id)
