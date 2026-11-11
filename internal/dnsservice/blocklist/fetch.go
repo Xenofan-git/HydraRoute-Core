@@ -12,7 +12,11 @@ import (
 // fetcher's redirect, DNS-rebinding, destination and body-size protections,
 // then parses its domain-oriented content.
 func Fetch(ctx context.Context, rawURL string) (Result, error) {
-	body, err := parser.FetchSubscription(ctx, rawURL)
+	return FetchOnInterface(ctx, rawURL, "")
+}
+
+func FetchOnInterface(ctx context.Context, rawURL, interfaceName string) (Result, error) {
+	body, err := parser.FetchSubscriptionOnInterface(ctx, rawURL, interfaceName)
 	if err != nil {
 		return Result{}, fmt.Errorf("fetch DNS blocklist: %w", err)
 	}
