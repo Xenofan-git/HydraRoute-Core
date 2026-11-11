@@ -361,12 +361,14 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 				continue
 			}
 		}
-		if m.blockedHostForType(host, q.Qtype) {
+		if isBlocked, source := m.blockDecision(host, q.Qtype); isBlocked {
 			blocked = true
 			if trackStats {
 				m.blocked.Add(1)
 			}
-			if q.Qtype == mdns.TypeA {
+			if source == blockSourceManagedList {
+				reply.Ns = append(reply.Ns, blocklistSOA(q.Name))
+			} else if q.Qtype == mdns.TypeA {
 				rr, _ := mdns.NewRR(q.Name + " 60 IN A 0.0.0.0")
 				reply.Answer = append(reply.Answer, rr)
 			}
@@ -426,26 +428,39 @@ func blocklistQueryType(qtype uint16) bool {
 	}
 }
 
+type blockSource uint8
+
+const (
+	blockSourceNone blockSource = iota
+	blockSourceExplicitRule
+	blockSourceManagedList
+)
+
 func (m *Manager) blockedHostForType(host string, qtype uint16) bool {
+	blocked, _ := m.blockDecision(host, qtype)
+	return blocked
+}
+
+func (m *Manager) blockDecision(host string, qtype uint16) (bool, blockSource) {
 	host = normalizeBlocklistDomain(host)
 	if host == "" {
-		return false
+		return false, blockSourceNone
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if !m.cfg.BlockingEnabled {
-		return false
+		return false, blockSourceNone
 	}
 	// Explicit Core rules retain their existing first-match priority and
-	// remain independent of the record-type filter used by HRDNS blocklists.
+	// response behavior, independent of the HRDNS blocklist record-type filter.
 	for _, rule := range m.cfg.Rules {
 		domain := normalizeBlocklistDomain(rule.Domain)
 		if domain != "" && (host == domain || strings.HasSuffix(host, "."+domain)) {
-			return !strings.EqualFold(rule.Action, "allow")
+			return !strings.EqualFold(rule.Action, "allow"), blockSourceExplicitRule
 		}
 	}
 	if !blocklistQueryType(qtype) {
-		return false
+		return false, blockSourceNone
 	}
 	// HRDNS evaluates the most-specific matching suffix first. At each
 	// candidate suffix an allow entry is checked before a block entry, so an
@@ -453,10 +468,10 @@ func (m *Manager) blockedHostForType(host string, qtype uint16) bool {
 	// a broader allow (and vice versa for a more-specific allow).
 	for candidate := host; candidate != ""; {
 		if _, ok := m.blocklistAllowed[candidate]; ok {
-			return false
+			return false, blockSourceManagedList
 		}
 		if _, ok := m.blocklistBlocked[candidate]; ok {
-			return true
+			return true, blockSourceManagedList
 		}
 		separator := strings.IndexByte(candidate, '.')
 		if separator < 0 {
@@ -464,7 +479,20 @@ func (m *Manager) blockedHostForType(host string, qtype uint16) bool {
 		}
 		candidate = candidate[separator+1:]
 	}
-	return false
+	return false, blockSourceNone
+}
+
+func blocklistSOA(name string) *mdns.SOA {
+	return &mdns.SOA{
+		Hdr: mdns.RR_Header{Name: mdns.Fqdn(name), Rrtype: mdns.TypeSOA, Class: mdns.ClassINET, Ttl: 30},
+		Ns: "a.gtld-servers.net.",
+		Mbox: "nstld.verisign-grs.com.",
+		Serial: 1800,
+		Refresh: 1800,
+		Retry: 900,
+		Expire: 604800,
+		Minttl: 86400,
+	}
 }
 
 func normalizeBlocklistDomain(raw string) string {
