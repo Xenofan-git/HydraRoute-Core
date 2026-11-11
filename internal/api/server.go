@@ -2703,9 +2703,12 @@ func (s *Server) runBlocklistScheduler(ctx context.Context) {
 			continue
 		case <-timer.C:
 		}
-		refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		refreshCtx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 		failures := s.blocklists.RefreshAll(refreshCtx)
 		cancel()
+		if ctx.Err() != nil {
+			return
+		}
 		s.applyDNSBlocklists()
 		if len(failures) > 0 {
 			messages := make([]string, 0, len(failures))
@@ -3609,6 +3612,7 @@ func (s *Server) applyDNSBlocklists() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	if !s.smartDNSConfig.Enabled {
+		s.smartDNSBlocklistErr = ""
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
