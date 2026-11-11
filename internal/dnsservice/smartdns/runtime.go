@@ -255,7 +255,7 @@ func (r *Runtime) swapLocked(ctx context.Context, generation, generationDir stri
 }
 
 // startGenerationWithRetryLocked mirrors HRweb's DNS service startup policy:
- // one immediate retry after a failed start, unless the caller canceled.
+// one immediate retry after a failed start, unless the caller canceled.
 func (r *Runtime) startGenerationWithRetryLocked(ctx context.Context, generation, generationDir string) error {
 	firstErr := r.startGenerationLocked(ctx, generation, generationDir)
 	if firstErr == nil {
