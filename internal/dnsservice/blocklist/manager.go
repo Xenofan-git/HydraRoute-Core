@@ -61,21 +61,25 @@ func DefaultRefreshSettings() RefreshSettings {
 }
 
 type Snapshot struct {
-	Sources  []Source            `json:"sources"`
-	Blocked  []string            `json:"blocked"`
-	Allowed  []string            `json:"allowed"`
-	Missing  map[string][]string `json:"missing,omitempty"`
-	Settings RefreshSettings     `json:"settings"`
+	Sources     []Source            `json:"sources"`
+	Blocked     []string            `json:"blocked"`
+	Allowed     []string            `json:"allowed"`
+	CustomBlock []string            `json:"custom_block"`
+	CustomAllow []string            `json:"custom_allow"`
+	Missing     map[string][]string `json:"missing,omitempty"`
+	Settings    RefreshSettings     `json:"settings"`
 }
 
 type Fetcher func(context.Context, string) (Result, error)
 type InterfaceFetcher func(context.Context, string, string) (Result, error)
 
 type persistedState struct {
-	Version  int               `json:"version"`
-	Sources  []Source          `json:"sources"`
-	Results  map[string]Result `json:"results"`
-	Settings RefreshSettings   `json:"settings,omitempty"`
+	Version     int               `json:"version"`
+	Sources     []Source          `json:"sources"`
+	Results     map[string]Result `json:"results"`
+	Settings    RefreshSettings   `json:"settings,omitempty"`
+	CustomBlock []string          `json:"custom_block,omitempty"`
+	CustomAllow []string          `json:"custom_allow,omitempty"`
 }
 
 type Manager struct {
@@ -87,6 +91,8 @@ type Manager struct {
 	fetcher          Fetcher
 	interfaceFetcher InterfaceFetcher
 	settings         RefreshSettings
+	customBlock      []string
+	customAllow      []string
 	now              func() time.Time
 }
 
@@ -131,6 +137,44 @@ func validateRefreshSettings(input RefreshSettings) (RefreshSettings, error) {
 		return RefreshSettings{}, fmt.Errorf("DNS blocklist interface name is invalid")
 	}
 	return input, nil
+}
+
+func normalizeCustomDomains(input []string) ([]string, error) {
+	if len(input) > maxCustomDomains {
+		return nil, fmt.Errorf("custom DNS list exceeds %d domains", maxCustomDomains)
+	}
+	seen := make(map[string]struct{}, len(input))
+	for _, raw := range input {
+		domain, ok := normalizeDomain(raw)
+		if !ok {
+			return nil, fmt.Errorf("invalid custom DNS domain %q", raw)
+		}
+		seen[domain] = struct{}{}
+	}
+	return sortedKeys(seen), nil
+}
+
+func (m *Manager) SaveCustomLists(block, allow []string) (Snapshot, error) {
+	normalizedBlock, err := normalizeCustomDomains(block)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	normalizedAllow, err := normalizeCustomDomains(allow)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	oldBlock := m.customBlock
+	oldAllow := m.customAllow
+	m.customBlock = normalizedBlock
+	m.customAllow = normalizedAllow
+	if err := m.persistLocked(); err != nil {
+		m.customBlock = oldBlock
+		m.customAllow = oldAllow
+		return Snapshot{}, err
+	}
+	return m.snapshotLocked(), nil
 }
 
 func (m *Manager) Settings() RefreshSettings {
@@ -405,7 +449,14 @@ func (m *Manager) RestoreEntry(id, rawDomain string) error {
 func (m *Manager) Snapshot() Snapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := Snapshot{Sources: cloneSources(m.sources), Missing: make(map[string][]string), Settings: m.settings}
+	return m.snapshotLocked()
+}
+
+func (m *Manager) snapshotLocked() Snapshot {
+	out := Snapshot{
+		Sources: cloneSources(m.sources), Missing: make(map[string][]string), Settings: m.settings,
+		CustomBlock: append([]string(nil), m.customBlock...), CustomAllow: append([]string(nil), m.customAllow...),
+	}
 	blocked := make(map[string]struct{})
 	allowed := make(map[string]struct{})
 	for _, source := range m.sources {
@@ -481,6 +532,14 @@ func (m *Manager) load() error {
 		return fmt.Errorf("invalid DNS blocklist refresh settings: %w", err)
 	}
 	m.settings = validSettings
+	m.customBlock, err = normalizeCustomDomains(state.CustomBlock)
+	if err != nil {
+		return fmt.Errorf("invalid custom block domains: %w", err)
+	}
+	m.customAllow, err = normalizeCustomDomains(state.CustomAllow)
+	if err != nil {
+		return fmt.Errorf("invalid custom allow domains: %w", err)
+	}
 	seen := make(map[string]struct{}, len(state.Sources))
 	for i := range state.Sources {
 		source := &state.Sources[i]
@@ -527,7 +586,10 @@ func (m *Manager) persistLocked() error {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 {
 		return fmt.Errorf("blocklist state directory must not be group/world writable or a symlink")
 	}
-	state := persistedState{Version: 1, Sources: cloneSources(m.sources), Results: cloneResults(m.results), Settings: m.settings}
+	state := persistedState{
+		Version: 1, Sources: cloneSources(m.sources), Results: cloneResults(m.results), Settings: m.settings,
+		CustomBlock: append([]string(nil), m.customBlock...), CustomAllow: append([]string(nil), m.customAllow...),
+	}
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
