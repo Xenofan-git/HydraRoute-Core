@@ -40,14 +40,16 @@ func (p *fakeProcess) Stop(context.Context) error {
 type fakeLauncher struct {
 	mu        sync.Mutex
 	processes []*fakeProcess
-	failNext  bool
+	failStarts int
+	attempts   int
 }
 
 func (l *fakeLauncher) Start(context.Context, string, string) (Process, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.failNext {
-		l.failNext = false
+	l.attempts++
+	if l.failStarts > 0 {
+		l.failStarts--
 		return nil, errors.New("simulated launch failure")
 	}
 	p := newFakeProcess()
@@ -102,6 +104,29 @@ func TestRuntimeApplyStagesGenerationAndStartsOnlyAfterConfigIsWritten(t *testin
 	}
 }
 
+func TestRuntimeStartRetriesOnceAfterTransientLaunchFailure(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeLauncher{failStarts: 1}
+	r.setTestHooks(launcher, func(context.Context, string) error { return nil })
+	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
+	if err := r.Apply(context.Background(), cfg, []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatalf("SmartDNS did not recover on its single startup retry: %v", err)
+	}
+	if launcher.attempts != 2 || len(launcher.processes) != 1 || !r.Status().Running {
+		t.Fatalf("startup retry attempts=%d processes=%d status=%+v", launcher.attempts, len(launcher.processes), r.Status())
+	}
+	if err := r.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeApplyRollsBackToPreviousGenerationWhenCandidateFails(t *testing.T) {
 	root := t.TempDir()
 	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
@@ -121,7 +146,7 @@ func TestRuntimeApplyRollsBackToPreviousGenerationWhenCandidateFails(t *testing.
 	}
 	oldGeneration := r.Status().Generation
 	launcher.mu.Lock()
-	launcher.failNext = true
+	launcher.failStarts = 2
 	launcher.mu.Unlock()
 	cfg.CacheSize = 128
 	if err := r.Apply(context.Background(), cfg, profile); err == nil {
