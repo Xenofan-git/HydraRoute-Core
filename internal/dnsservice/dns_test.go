@@ -180,7 +180,7 @@ func TestSmartDNSForwarderIsExclusiveAndSkipsConfiguredFallbacks(t *testing.T) {
 	fallbackAddr := startFakeDNSUpstream(t, "198.51.100.88", &fallbackHits)
 	m := &Manager{cfg: Config{
 		AutoProvider: true,
-		Servers: []Server{{Name: "Public fallback", Protocol: "Do53", Address: fallbackAddr, Enabled: true}},
+		Servers:      []Server{{Name: "Public fallback", Protocol: "Do53", Address: fallbackAddr, Enabled: true}},
 	}}
 	if err := m.SetSmartDNSForwarder(smartDNSAddr); err != nil {
 		t.Fatal(err)
