@@ -10,6 +10,33 @@ import (
 	"time"
 )
 
+func TestCatalogMatchesHRNeoBuiltInPresets(t *testing.T) {
+	presets := Catalog()
+	if len(presets) != 7 {
+		t.Fatalf("HRNeo preset count=%d, want 7", len(presets))
+	}
+	seen := make(map[string]struct{}, len(presets))
+	for _, preset := range presets {
+		if preset.ID == "" || preset.Name == "" {
+			t.Fatalf("incomplete preset: %+v", preset)
+		}
+		if _, exists := seen[preset.ID]; exists {
+			t.Fatalf("duplicate preset ID %q", preset.ID)
+		}
+		seen[preset.ID] = struct{}{}
+		if _, err := validateSourceURL(preset.URL); err != nil {
+			t.Fatalf("preset %q has invalid URL: %v", preset.ID, err)
+		}
+	}
+	if presets[0].ID != "hagezi-light" || presets[2].ID != "hagezi-pro" || presets[5].ID != "adguard-dns" || presets[6].ID != "stevenblack" {
+		t.Fatalf("unexpected HRNeo preset ordering: %+v", presets)
+	}
+	presets[0].Name = "mutated"
+	if Catalog()[0].Name != "HaGeZi Light" {
+		t.Fatal("Catalog returned mutable shared preset storage")
+	}
+}
+
 func TestManagerRefreshPreservesLastKnownGoodOnFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dns", "blocklists.json")
 	fail := false
