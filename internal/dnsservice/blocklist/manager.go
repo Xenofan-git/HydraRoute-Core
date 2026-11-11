@@ -80,6 +80,7 @@ type persistedState struct {
 
 type Manager struct {
 	mu               sync.RWMutex
+	refreshMu        sync.Mutex
 	path             string
 	sources          []Source
 	results          map[string]Result
@@ -262,6 +263,11 @@ func (m *Manager) Delete(id string) error {
 }
 
 func (m *Manager) Refresh(ctx context.Context, id string) (Source, error) {
+	// Serialize refreshes so overlapping manual and scheduled requests cannot
+	// commit out-of-order snapshots for the same source.
+	m.refreshMu.Lock()
+	defer m.refreshMu.Unlock()
+
 	m.mu.RLock()
 	index := m.sourceIndexLocked(id)
 	if index < 0 {
