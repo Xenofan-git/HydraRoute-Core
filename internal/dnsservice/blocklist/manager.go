@@ -23,6 +23,7 @@ const (
 	maxRemoved       = 10000
 	maxStateBytes    = 32 << 20
 	maxSourceNameLen = 128
+	maxCustomDomains = 100000
 )
 
 var (
@@ -457,8 +458,14 @@ func (m *Manager) snapshotLocked() Snapshot {
 		Sources: cloneSources(m.sources), Missing: make(map[string][]string), Settings: m.settings,
 		CustomBlock: append([]string(nil), m.customBlock...), CustomAllow: append([]string(nil), m.customAllow...),
 	}
-	blocked := make(map[string]struct{})
-	allowed := make(map[string]struct{})
+	blocked := make(map[string]struct{}, len(m.customBlock))
+	allowed := make(map[string]struct{}, len(m.customAllow))
+	for _, domain := range m.customBlock {
+		blocked[domain] = struct{}{}
+	}
+	for _, domain := range m.customAllow {
+		allowed[domain] = struct{}{}
+	}
 	for _, source := range m.sources {
 		result, ok := m.results[source.ID]
 		if !ok {
