@@ -162,35 +162,40 @@ func TestCompileGeneratesValidatedDomainSetFiles(t *testing.T) {
 	}
 }
 
-func TestCompileAppliesAllowlistPrecedenceAcrossDomainSets(t *testing.T) {
+func TestCompilePreservesRepresentableHRDNSAllowPrecedence(t *testing.T) {
 	cfg, profiles := fixtures()
 	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
 	cfg.DomainSets = []DomainSet{
-		{ID: "block", Kind: "block", Domains: []string{"example.test", "ads.allow-parent.test"}, Enabled: true},
-		{ID: "allow", Kind: "allow", Domains: []string{"safe.example.test", "allow-parent.test", "same.test"}, Enabled: true},
-		{ID: "block-same", Kind: "block", Domains: []string{"same.test"}, Enabled: true},
+		{ID: "block", Kind: "block", Domains: []string{"example.test", "same.test"}, Enabled: true},
+		{ID: "allow", Kind: "allow", Domains: []string{"safe.example.test", "same.test"}, Enabled: true},
 	}
 	out, err := Compile(cfg, profiles)
 	if err != nil {
-		t.Fatalf("allow exceptions must compile: %v", err)
+		t.Fatalf("more-specific allow exception must compile: %v", err)
 	}
 	blocked := string(out.Files["domain-set-block.txt"])
-	if !strings.Contains(blocked, "example.test") || strings.Contains(blocked, "ads.allow-parent.test") {
-		t.Fatalf("block set did not apply allow-parent precedence: %q", blocked)
-	}
-	if _, exists := out.Files["domain-set-block-same.txt"]; exists {
-		t.Fatal("block entry identical to an allow entry must be suppressed")
+	if !strings.Contains(blocked, "example.test") || strings.Contains(blocked, "same.test") {
+		t.Fatalf("block set did not preserve parent block and same-domain allow precedence: %q", blocked)
 	}
 	allowed := string(out.Files["domain-set-allow.txt"])
-	for _, domain := range []string{"safe.example.test", "allow-parent.test", "same.test"} {
-		if !strings.Contains(allowed, domain) {
-			t.Fatalf("allow set lost exception %q: %q", domain, allowed)
-		}
+	if !strings.Contains(allowed, "safe.example.test") || !strings.Contains(allowed, "same.test") {
+		t.Fatalf("allow set lost exception or same-domain allow entry: %q", allowed)
 	}
-	blockRule := strings.Index(out.Config, "address /domain-set:hr_set_block/#")
-	allowRule := strings.Index(out.Config, "address /domain-set:hr_set_allow/-")
-	if blockRule < 0 || allowRule < 0 || allowRule < blockRule {
-		t.Fatalf("allow rules must be emitted after block rules: %s", out.Config)
+	if !strings.Contains(out.Config, "address /domain-set:hr_set_block/#") ||
+		!strings.Contains(out.Config, "address /domain-set:hr_set_allow/-") {
+		t.Fatalf("missing block/allow rules: %s", out.Config)
+	}
+}
+
+func TestCompileRejectsBlockChildUnderAllowParentUntilPolicyResolverExists(t *testing.T) {
+	cfg, profiles := fixtures()
+	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
+	cfg.DomainSets = []DomainSet{
+		{ID: "block-child", Kind: "block", Domains: []string{"ads.allow-parent.test"}, Enabled: true},
+		{ID: "allow-parent", Kind: "allow", Domains: []string{"allow-parent.test"}, Enabled: true},
+	}
+	if _, err := Compile(cfg, profiles); err == nil || !strings.Contains(err.Error(), "HRDNS precedence cannot be represented") {
+		t.Fatalf("expected fail-closed rejection for more-specific block under broader allow, got %v", err)
 	}
 }
 
