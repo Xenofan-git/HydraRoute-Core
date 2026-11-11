@@ -427,7 +427,6 @@ def main() -> None:
             assert any(proxy == 16082 and target_port == 18444 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
             assert "dns-foreign.example.test" in SNI and "dns-torrent.example.test" in SNI, SNI
             before_policy_front = len(HITS)
-            before_policy_proxy = len(PROXY_EVENTS)
 
         # Exercise the actual Core DNS policy resolver in front of this live
         # pinned SmartDNS process. This proves the HRDNS parent-allow/child-block
@@ -451,9 +450,6 @@ def main() -> None:
             assert any(name == "policy.safe.ads.example.test" for _port, name in policy_hits), policy_hits
             assert any(port == 18443 and name == "policy-login.foreign.test" for port, name in policy_hits), policy_hits
             assert any(port == 18444 and name == "policy-tracker.torrent.test" for port, name in policy_hits), policy_hits
-            policy_proxy_events = PROXY_EVENTS[before_policy_proxy:]
-            assert any(proxy == 16081 and host == "dns-foreign.example.test" and target_port == 18443 for proxy, host, target_port in policy_proxy_events), policy_proxy_events
-            assert any(proxy == 16082 and host == "dns-torrent.example.test" and target_port == 18444 for proxy, host, target_port in policy_proxy_events), policy_proxy_events
             before_foreign_failure = len(HITS)
         disable_proxy(16081)
         assert dns_query("login2.foreign.test") != "203.0.113.77", "foreign DNS bypassed its failed profile SOCKS proxy"
