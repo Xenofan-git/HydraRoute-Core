@@ -3601,12 +3601,15 @@ func (s *Server) applyDNSBlocklists() {
 	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
 }
 
-func smartDNSForwardAddress(cfg hrsmartdns.Config) string {
-	port := cfg.ListenPort
-	if port == 0 {
-		port = hrsmartdns.DefaultConfig().ListenPort
+func smartDNSListenPort(cfg hrsmartdns.Config) int {
+	if cfg.ListenPort == 0 {
+		return hrsmartdns.DefaultConfig().ListenPort
 	}
-	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	return cfg.ListenPort
+}
+
+func smartDNSForwardAddress(cfg hrsmartdns.Config) string {
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(smartDNSListenPort(cfg)))
 }
 
 func (s *Server) smartDNSStatusError() string {
@@ -3714,6 +3717,10 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 		if cfg.ListenPort == 0 {
 			cfg.ListenPort = defaults.ListenPort
 		}
+		if s.dns != nil && s.dns.Config().Enabled && cfg.ListenPort == s.dns.Config().Port {
+			writeError(w, http.StatusConflict, "SmartDNS and Core DNS must use different loopback ports")
+			return
+		}
 		cfg.CAPath = defaults.CAPath
 		cfg.DataDir = ""
 		s.opMu.Lock()
@@ -3778,6 +3785,10 @@ func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.dns == nil || !s.dns.Config().Enabled || !s.dns.Status()["running"].(bool) {
 			writeError(w, http.StatusConflict, "start the Core DNS policy resolver before SmartDNS")
+			return
+		}
+		if s.dns.Config().Port == smartDNSListenPort(s.smartDNSConfig) {
+			writeError(w, http.StatusConflict, "SmartDNS and Core DNS must use different loopback ports")
 			return
 		}
 		// Install the exclusive forwarder before starting SmartDNS. Queries
