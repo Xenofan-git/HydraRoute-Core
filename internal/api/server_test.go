@@ -1687,8 +1687,17 @@ func TestSmartDNSAPIStoresConfigAndRebuildsPreparedGeneration(t *testing.T) {
 	if err := h.profileStore.Save(profile); err != nil {
 		t.Fatal(err)
 	}
+	dnsConfig := h.dns.Config()
+	dnsConfig.BlockingEnabled = true
+	if err := h.dns.Save(dnsConfig); err != nil {
+		t.Fatal(err)
+	}
 	cfg := hrsmartdns.Config{
 		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 15354, CacheSize: 32,
+		DomainSets: []hrsmartdns.DomainSet{
+			{ID: "block-child", Kind: "block", Domains: []string{"ads.allow-parent.test"}, Enabled: true},
+			{ID: "allow-parent", Kind: "allow", Domains: []string{"allow-parent.test"}, Enabled: true},
+		},
 		Upstreams: []hrsmartdns.Upstream{{
 			ID: "upstream1", ProfileID: "profile1", Protocol: "doh",
 			Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
@@ -1708,6 +1717,12 @@ func TestSmartDNSAPIStoresConfigAndRebuildsPreparedGeneration(t *testing.T) {
 	}
 	if h.smartDNSRuntime.Status().ConfigPath == "" {
 		t.Fatalf("prepared SmartDNS config path missing: %+v", h.smartDNSRuntime.Status())
+	}
+	if !h.dns.IsBlockedHost("ads.allow-parent.test") {
+		t.Fatal("SmartDNS block domain set was not applied to the Core DNS policy front")
+	}
+	if h.dns.IsBlockedHost("allow-parent.test") {
+		t.Fatal("SmartDNS allow domain set was not applied to the Core DNS policy front")
 	}
 	if _, err := os.Stat(h.smartDNSConfigPath); err != nil {
 		t.Fatalf("persisted SmartDNS settings missing: %v", err)
