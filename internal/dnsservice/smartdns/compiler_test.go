@@ -196,7 +196,6 @@ func TestCompileAppliesAllowlistPrecedenceAcrossDomainSets(t *testing.T) {
 	}
 }
 
-
 func TestCompileRejectsUnsafeDomainSetPaths(t *testing.T) {
 	cfg, profiles := fixtures()
 	cfg.DataDir = "/var/lib/hydraroute/../etc"
