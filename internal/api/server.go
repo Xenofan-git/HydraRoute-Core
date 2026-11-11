@@ -3075,6 +3075,9 @@ func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "Core DNS apply failed; previous DNS settings restored: "+err.Error())
 			return
 		}
+		if !c.Enabled {
+			_ = s.dns.SetSmartDNSForwarder("")
+		}
 		s.recordEvent("info", "dns", "configuration_updated", "Core DNS configuration updated")
 		writeJSON(w, 200, map[string]any{"config": s.dns.Config(), "status": s.dns.Status(), "stats": s.dns.Stats()})
 	default:
@@ -3149,6 +3152,8 @@ func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
 			if rollbackErr != nil {
 				err = fmt.Errorf("save DNS stop state failed: %v; rollback failed: %w", err, rollbackErr)
 			}
+		} else {
+			_ = s.dns.SetSmartDNSForwarder("")
 		}
 	default:
 		writeError(w, 400, "action must be start or stop")
