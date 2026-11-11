@@ -230,6 +230,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/dns/smartdns", s.smartDNSHandler)
 	s.mux.HandleFunc("/v1/dns/smartdns/", s.smartDNSAction)
 	s.mux.HandleFunc("/v1/dns/blocklists", s.dnsBlocklists)
+	s.mux.HandleFunc("/v1/dns/blocklists/catalog", s.dnsBlocklistCatalog)
 	s.mux.HandleFunc("/v1/dns/blocklists/settings", s.dnsBlocklistSettings)
 	s.mux.HandleFunc("/v1/dns/blocklists/", s.dnsBlocklistItem)
 	s.mux.Handle("/", ui.Handler())
@@ -3866,6 +3867,18 @@ func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
+}
+
+func (s *Server) dnsBlocklistCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"presets": dnsblocklist.Catalog()})
 }
 
 func (s *Server) dnsBlocklistSettings(w http.ResponseWriter, r *http.Request) {
