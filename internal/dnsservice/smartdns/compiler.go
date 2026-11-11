@@ -129,8 +129,15 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 	if !filepath.IsAbs(cfg.CAPath) || filepath.Clean(cfg.CAPath) != cfg.CAPath || !caPathPattern.MatchString(cfg.CAPath) {
 		return cfg, nil, nil, nil, nil, fmt.Errorf("invalid SmartDNS CA directory")
 	}
-	if len(cfg.DomainSets) > 0 && (cfg.DataDir == "" || !filepath.IsAbs(cfg.DataDir) || filepath.Clean(cfg.DataDir) != cfg.DataDir || !caPathPattern.MatchString(cfg.DataDir)) {
-		return cfg, nil, nil, nil, nil, fmt.Errorf("domain-set data directory must be an absolute safe path")
+	hasRouteSet := false
+	for _, set := range cfg.DomainSets {
+		if set.Enabled && strings.EqualFold(strings.TrimSpace(set.Kind), "route") {
+			hasRouteSet = true
+			break
+		}
+	}
+	if hasRouteSet && (cfg.DataDir == "" || !filepath.IsAbs(cfg.DataDir) || filepath.Clean(cfg.DataDir) != cfg.DataDir || !caPathPattern.MatchString(cfg.DataDir)) {
+		return cfg, nil, nil, nil, nil, fmt.Errorf("route domain-set data directory must be an absolute safe path")
 	}
 
 	profileMap := make(map[string]ProfileRef, len(profiles))
@@ -323,51 +330,12 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 		}
 		sets = append(sets, normalizedDomainSet{DomainSet: set, name: "hr_set_" + set.ID, file: "domain-set-" + set.ID + ".txt"})
 	}
-	// HRDNS resolves block/allow conflicts by the most-specific matching
-	// suffix: an exact/specific block wins over a broader allow, while an
-	// exact/specific allow wins over a broader block. SmartDNS 48.4 accumulates
-	// address flags across matching suffixes, so a broader allow suppresses a
-	// more-specific block. We can safely collapse identical entries (HRDNS
-	// checks allow before block at the same suffix), and SmartDNS correctly
-	// represents a more-specific allow under a broader block. The inverse
-	// relationship cannot be represented by these native address rules and
-	// must fail closed until Core has a policy resolver that implements HRDNS
-	// longest-suffix semantics.
-	allowDomains := make([]string, 0)
-	for _, set := range sets {
-		if set.Kind == "allow" {
-			allowDomains = append(allowDomains, set.Domains...)
-		}
-	}
-	for i := range sets {
-		if sets[i].Kind != "block" {
-			continue
-		}
-		filtered := make([]string, 0, len(sets[i].Domains))
-		for _, domain := range sets[i].Domains {
-			coveredByAllow := false
-			for _, allowed := range allowDomains {
-				if domain == allowed {
-					coveredByAllow = true
-					break
-				}
-				if strings.HasSuffix(domain, "."+allowed) {
-					return cfg, nil, nil, nil, nil, fmt.Errorf("block domain %q is more specific than allow domain %q; HRDNS precedence cannot be represented by SmartDNS address rules", domain, allowed)
-				}
-			}
-			if !coveredByAllow {
-				filtered = append(filtered, domain)
-			}
-		}
-		sets[i].Domains = filtered
-	}
-	nonEmpty := sets[:0]
-	for _, set := range sets {
-		if len(set.Domains) > 0 {
-			nonEmpty = append(nonEmpty, set)
-		}
-	}
-	sets = nonEmpty
+	// Block/allow sets are enforced by Core's policy-front resolver, which
+	// implements HRDNS longest-suffix semantics. They must not be compiled
+	// into SmartDNS address rules because SmartDNS accumulates suffix flags
+	// and can reverse the result for a child block beneath a parent allow.
+	// Only route sets are emitted to SmartDNS; all validated sets remain in
+	// cfg and are applied to Core DNS by the API layer.
 	priority := func(kind string) int {
 		switch kind {
 		case "block":
@@ -425,19 +393,21 @@ func Compile(cfg Config, profiles []ProfileRef) (Output, error) {
 			fmt.Fprintf(&b, "server-tls %s:%d %s\n", upstream.host, upstream.Port, base)
 		}
 	}
-	files := make(map[string][]byte, len(sets))
-	if len(sets) > 0 {
-		b.WriteString("\n# Domain sets are generated from validated domain names.\n")
-	}
+	routeSets := make([]normalizedDomainSet, 0, len(sets))
 	for _, set := range sets {
+		if set.Kind == "route" {
+			routeSets = append(routeSets, set)
+		}
+	}
+	files := make(map[string][]byte, len(routeSets))
+	if len(routeSets) > 0 {
+		b.WriteString("\n# Profile-routing domain sets are generated from validated domain names.\n")
+	}
+	for _, set := range routeSets {
 		fullPath := filepath.Join(cfg.DataDir, set.file)
 		fmt.Fprintf(&b, "domain-set -name %s -type list -file %s\n", set.name, fullPath)
 		files[set.file] = []byte(strings.Join(set.Domains, "\n") + "\n")
 		switch set.Kind {
-		case "block":
-			fmt.Fprintf(&b, "address /domain-set:%s/#\n", set.name)
-		case "allow":
-			fmt.Fprintf(&b, "address /domain-set:%s/-\n", set.name)
 		case "route":
 			fmt.Fprintf(&b, "nameserver /domain-set:%s/hr_dns_%s\n", set.name, set.ProfileID)
 		}
@@ -452,7 +422,7 @@ func Compile(cfg Config, profiles []ProfileRef) (Output, error) {
 		}
 		fmt.Fprintf(&b, "nameserver /%s/hr_dns_%s\n", pattern, rule.ProfileID)
 	}
-	return Output{Config: b.String(), Files: files, ProxyCount: len(profileIDs), UpstreamCount: len(upstreams), RuleCount: len(rules), DomainSetCount: len(sets)}, nil
+	return Output{Config: b.String(), Files: files, ProxyCount: len(profileIDs), UpstreamCount: len(upstreams), RuleCount: len(rules), DomainSetCount: len(routeSets)}, nil
 }
 
 func profileHasUpstreams(upstreams []normalizedUpstream) map[string]bool {
