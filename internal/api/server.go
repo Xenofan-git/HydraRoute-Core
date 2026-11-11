@@ -231,6 +231,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/dns/smartdns/", s.smartDNSAction)
 	s.mux.HandleFunc("/v1/dns/blocklists", s.dnsBlocklists)
 	s.mux.HandleFunc("/v1/dns/blocklists/catalog", s.dnsBlocklistCatalog)
+	s.mux.HandleFunc("/v1/dns/blocklists/custom", s.dnsBlocklistCustom)
 	s.mux.HandleFunc("/v1/dns/blocklists/settings", s.dnsBlocklistSettings)
 	s.mux.HandleFunc("/v1/dns/blocklists/", s.dnsBlocklistItem)
 	s.mux.Handle("/", ui.Handler())
@@ -3867,6 +3868,62 @@ func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
+}
+
+func (s *Server) dnsBlocklistCustom(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		writeError(w, http.StatusServiceUnavailable, "DNS blocklist state is not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		snapshot := s.blocklists.Snapshot()
+		writeJSON(w, http.StatusOK, map[string]string{
+			"block": strings.Join(snapshot.CustomBlock, "\n"),
+			"allow": strings.Join(snapshot.CustomAllow, "\n"),
+		})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var input struct {
+			Block string `json:"block"`
+			Allow string `json:"allow"`
+		}
+		if err := decodeStrictJSON(w, r, &input, 2<<20); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid custom DNS block/allow lists")
+			return
+		}
+		block, err := dnsblocklist.ParseCustomList(strings.NewReader(input.Block))
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid custom block list: "+err.Error())
+			return
+		}
+		allow, err := dnsblocklist.ParseCustomList(strings.NewReader(input.Allow))
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid custom allow list: "+err.Error())
+			return
+		}
+		snapshot, err := s.blocklists.SaveCustomLists(block, allow)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.applyDNSBlocklists()
+		s.recordEvent("info", "dns", "blocklist_custom_saved", "Custom DNS block and allow lists saved")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"block": strings.Join(snapshot.CustomBlock, "\n"),
+			"allow": strings.Join(snapshot.CustomAllow, "\n"),
+			"snapshot": snapshot,
+		})
+	default:
+		methodNotAllowed(w)
+	}
 }
 
 func (s *Server) dnsBlocklistCatalog(w http.ResponseWriter, r *http.Request) {
