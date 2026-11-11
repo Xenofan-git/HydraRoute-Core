@@ -109,6 +109,46 @@ func TestManagerSerializesConcurrentRefreshes(t *testing.T) {
 	}
 }
 
+func TestManagerCustomListsPersistAndJoinAggregateSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blocklists.json")
+	manager, err := NewManager(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := manager.SaveCustomLists(
+		[]string{"Example.COM.", "*.ads.example.test", "ads.example.test"},
+		[]string{"safe.example.com", "SAFE.example.com."},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(snapshot.CustomBlock, ",") != "ads.example.test,example.com" {
+		t.Fatalf("custom block list not normalized/deduplicated: %v", snapshot.CustomBlock)
+	}
+	if strings.Join(snapshot.CustomAllow, ",") != "safe.example.com" {
+		t.Fatalf("custom allow list not normalized/deduplicated: %v", snapshot.CustomAllow)
+	}
+	if !containsString(snapshot.Blocked, "example.com") || !containsString(snapshot.Allowed, "safe.example.com") {
+		t.Fatalf("custom lists missing from aggregate snapshot: %+v", snapshot)
+	}
+
+	reloaded, err := NewManager(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := reloaded.Snapshot()
+	if strings.Join(restored.CustomBlock, ",") != strings.Join(snapshot.CustomBlock, ",") ||
+		strings.Join(restored.CustomAllow, ",") != strings.Join(snapshot.CustomAllow, ",") {
+		t.Fatalf("custom lists did not survive restart: %+v", restored)
+	}
+	if _, err := reloaded.SaveCustomLists([]string{"bad..domain"}, nil); err == nil {
+		t.Fatal("invalid custom domain was accepted")
+	}
+	if strings.Join(reloaded.Snapshot().CustomBlock, ",") != strings.Join(snapshot.CustomBlock, ",") {
+		t.Fatal("invalid custom update changed the last good custom lists")
+	}
+}
+
 func TestManagerRefreshPreservesLastKnownGoodOnFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dns", "blocklists.json")
 	fail := false
