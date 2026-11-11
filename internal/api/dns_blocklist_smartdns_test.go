@@ -58,6 +58,14 @@ func TestBlocklistsStayInCorePolicyResolverAndDoNotMutateSmartDNSConfig(t *testi
 	if len(server.smartDNSConfig.DomainSets) != 3 || server.smartDNSConfig.DomainSets[2].ID != "custom-set" {
 		t.Fatalf("SmartDNS profile-routing domain sets unexpectedly changed: %+v", server.smartDNSConfig.DomainSets)
 	}
+	server.smartDNSConfig.Enabled = false
+	server.applyDNSBlocklists()
+	if resolver.IsBlockedHost("blocked.allow-parent.example.test") {
+		t.Fatal("disabled SmartDNS configuration still applied its custom block set")
+	}
+	if !resolver.IsBlockedHost("ads.example.test") {
+		t.Fatal("disabling SmartDNS unexpectedly disabled independently managed URL blocklists")
+	}
 }
 
 func TestSmartDNSForwardAddressDefaultsToLoopbackPort(t *testing.T) {
