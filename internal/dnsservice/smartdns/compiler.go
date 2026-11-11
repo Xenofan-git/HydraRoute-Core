@@ -323,11 +323,16 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 		}
 		sets = append(sets, normalizedDomainSet{DomainSet: set, name: "hr_set_" + set.ID, file: "domain-set-" + set.ID + ".txt"})
 	}
-	// SmartDNS address rules accumulate domain flags across matching suffixes.
-	// A more-specific allow child suppresses an inherited parent block at query
-	// time. Exact duplicates (and block children covered by an allow parent)
-	// must be removed from block sets because SmartDNS stores only one address
-	// rule at an identical domain key; the explicit allow rule then remains.
+	// HRDNS resolves block/allow conflicts by the most-specific matching
+	// suffix: an exact/specific block wins over a broader allow, while an
+	// exact/specific allow wins over a broader block. SmartDNS 48.4 accumulates
+	// address flags across matching suffixes, so a broader allow suppresses a
+	// more-specific block. We can safely collapse identical entries (HRDNS
+	// checks allow before block at the same suffix), and SmartDNS correctly
+	// represents a more-specific allow under a broader block. The inverse
+	// relationship cannot be represented by these native address rules and
+	// must fail closed until Core has a policy resolver that implements HRDNS
+	// longest-suffix semantics.
 	allowDomains := make([]string, 0)
 	for _, set := range sets {
 		if set.Kind == "allow" {
@@ -342,9 +347,12 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 		for _, domain := range sets[i].Domains {
 			coveredByAllow := false
 			for _, allowed := range allowDomains {
-				if domain == allowed || strings.HasSuffix(domain, "."+allowed) {
+				if domain == allowed {
 					coveredByAllow = true
 					break
+				}
+				if strings.HasSuffix(domain, "."+allowed) {
+					return cfg, nil, nil, nil, nil, fmt.Errorf("block domain %q is more specific than allow domain %q; HRDNS precedence cannot be represented by SmartDNS address rules", domain, allowed)
 				}
 			}
 			if !coveredByAllow {
