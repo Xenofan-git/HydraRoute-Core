@@ -339,6 +339,41 @@ func TestBlocklistDomainSetsMatchSubdomainsAndAllowExceptions(t *testing.T) {
 	}
 }
 
+func TestBlocklistLongestSuffixPrecedenceMatchesHRDNS(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true}}
+	m.SetBlocklistDomains(
+		[]string{"blocked.allow-parent.test", "example.test", "same.test"},
+		[]string{"allow-parent.test", "safe.example.test", "same.test"},
+	)
+
+	cases := []struct {
+		name    string
+		blocked bool
+	}{
+		{name: "more-specific block beats broader allow", blocked: true},
+		{name: "more-specific block also matches descendants", blocked: true},
+		{name: "more-specific allow beats broader block", blocked: false},
+		{name: "more-specific allow also matches descendants", blocked: false},
+		{name: "same-suffix allow beats block", blocked: false},
+		{name: "unmatched domain is not blocked", blocked: false},
+	}
+	domains := []string{
+		"blocked.allow-parent.test",
+		"child.blocked.allow-parent.test",
+		"safe.example.test",
+		"child.safe.example.test",
+		"same.test",
+		"unmatched.test",
+	}
+	for i, domain := range domains {
+		t.Run(cases[i].name, func(t *testing.T) {
+			if got := m.blockedHost(domain); got != cases[i].blocked {
+				t.Fatalf("blockedHost(%q)=%v, want %v", domain, got, cases[i].blocked)
+			}
+		})
+	}
+}
+
 func TestExplicitDNSRulesOverrideBlocklistDomainSets(t *testing.T) {
 	m := &Manager{cfg: Config{BlockingEnabled: true, Rules: []Rule{
 		{Domain: "ads.example.com", Action: "allow"},
