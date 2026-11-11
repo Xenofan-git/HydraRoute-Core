@@ -3487,12 +3487,51 @@ func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
+func (s *Server) smartDNSConfigWithBlocklists(base hrsmartdns.Config) hrsmartdns.Config {
+	if s.blocklists == nil {
+		return base
+	}
+	const blocklistSetID = "hrcore-blocklist"
+	const allowlistSetID = "hrcore-allowlist"
+	sets := make([]hrsmartdns.DomainSet, 0, len(base.DomainSets)+2)
+	for _, set := range base.DomainSets {
+		if set.ID == blocklistSetID || set.ID == allowlistSetID {
+			continue
+		}
+		sets = append(sets, set)
+	}
+	snapshot := s.blocklists.Snapshot()
+	if len(snapshot.Blocked) > 0 {
+		sets = append(sets, hrsmartdns.DomainSet{ID: blocklistSetID, Kind: "block", Domains: snapshot.Blocked, Enabled: true})
+	}
+	if len(snapshot.Allowed) > 0 {
+		sets = append(sets, hrsmartdns.DomainSet{ID: allowlistSetID, Kind: "allow", Domains: snapshot.Allowed, Enabled: true})
+	}
+	base.DomainSets = sets
+	return base
+}
+
 func (s *Server) applyDNSBlocklists() {
 	if s.dns == nil || s.blocklists == nil {
 		return
 	}
 	snapshot := s.blocklists.Snapshot()
 	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
+	if s.smartDNSRuntime == nil || !s.smartDNSConfig.Enabled {
+		return
+	}
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cfg := s.smartDNSConfigWithBlocklists(s.smartDNSConfig)
+	if err := s.smartDNSRuntime.Apply(ctx, cfg, s.smartDNSProfileRefs()); err != nil {
+		s.smartDNSErr = err.Error()
+		s.recordEvent("error", "dns", "smartdns_blocklist_apply_failed", "SmartDNS blocklist generation failed; previous generation retained when possible")
+		return
+	}
+	s.smartDNSErr = ""
+	s.recordEvent("info", "dns", "smartdns_blocklists_applied", "DNS blocklists synchronized to SmartDNS")
 }
 
 func (s *Server) smartDNSProfileRefs() []hrsmartdns.ProfileRef {
@@ -3598,7 +3637,7 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "cannot persist SmartDNS configuration")
 			return
 		}
-		if err := s.smartDNSRuntime.Apply(r.Context(), cfg, s.smartDNSProfileRefs()); err != nil {
+		if err := s.smartDNSRuntime.Apply(r.Context(), s.smartDNSConfigWithBlocklists(cfg), s.smartDNSProfileRefs()); err != nil {
 			if restoreErr := s.persistSmartDNSConfig(previous); restoreErr != nil {
 				s.smartDNSErr = "SmartDNS apply failed and saved configuration rollback failed: " + restoreErr.Error()
 			} else {
