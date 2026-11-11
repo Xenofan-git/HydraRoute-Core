@@ -38,8 +38,8 @@ func (p *fakeProcess) Stop(context.Context) error {
 }
 
 type fakeLauncher struct {
-	mu        sync.Mutex
-	processes []*fakeProcess
+	mu         sync.Mutex
+	processes  []*fakeProcess
 	failStarts int
 	attempts   int
 }
