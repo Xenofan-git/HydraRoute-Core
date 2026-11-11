@@ -3605,15 +3605,17 @@ func (s *Server) applyDNSBlocklists() {
 	// Both managed URL lists and configured block/allow domain sets are
 	// evaluated by the Core DNS front resolver. SmartDNS receives route sets
 	// only, avoiding inherited address-flag precedence differences.
-	for _, set := range s.smartDNSConfig.DomainSets {
-		if !set.Enabled {
-			continue
-		}
-		switch strings.ToLower(strings.TrimSpace(set.Kind)) {
-		case "block":
-			blocked = append(blocked, set.Domains...)
-		case "allow":
-			allowed = append(allowed, set.Domains...)
+	if s.smartDNSConfig.Enabled {
+		for _, set := range s.smartDNSConfig.DomainSets {
+			if !set.Enabled {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(set.Kind)) {
+			case "block":
+				blocked = append(blocked, set.Domains...)
+			case "allow":
+				allowed = append(allowed, set.Domains...)
+			}
 		}
 	}
 	s.dns.SetBlocklistDomains(blocked, allowed)
