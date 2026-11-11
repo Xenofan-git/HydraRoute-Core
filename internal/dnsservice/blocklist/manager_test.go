@@ -128,7 +128,15 @@ func TestManagerCustomListsPersistAndJoinAggregateSnapshot(t *testing.T) {
 	if strings.Join(snapshot.CustomAllow, ",") != "safe.example.com" {
 		t.Fatalf("custom allow list not normalized/deduplicated: %v", snapshot.CustomAllow)
 	}
-	if !containsString(snapshot.Blocked, "example.com") || !containsString(snapshot.Allowed, "safe.example.com") {
+	hasDomain := func(items []string, want string) bool {
+		for _, item := range items {
+			if item == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasDomain(snapshot.Blocked, "example.com") || !hasDomain(snapshot.Allowed, "safe.example.com") {
 		t.Fatalf("custom lists missing from aggregate snapshot: %+v", snapshot)
 	}
 
