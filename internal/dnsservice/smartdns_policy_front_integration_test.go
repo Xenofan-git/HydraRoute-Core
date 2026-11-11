@@ -68,7 +68,7 @@ func TestPolicyFrontAgainstRunningSmartDNS(t *testing.T) {
 		t.Fatalf("Core policy front did not block child under allow parent: answer=%q rcode=%d", got, blocked.Rcode)
 	}
 
-	allowed, err := queryA("safe.ads.example.test")
+	allowed, err := queryA("policy.safe.ads.example.test")
 	if err != nil {
 		t.Fatalf("query more-specific allow under parent block: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestPolicyFrontAgainstRunningSmartDNS(t *testing.T) {
 		t.Fatalf("child allow did not pass through to SmartDNS: answer=%q rcode=%d", got, allowed.Rcode)
 	}
 
-	for _, name := range []string{"login.foreign.test", "tracker.torrent.test"} {
+	for _, name := range []string{"policy-login.foreign.test", "policy-tracker.torrent.test"} {
 		response, err := queryA(name)
 		if err != nil {
 			t.Fatalf("profile-routed query %s: %v", name, err)
