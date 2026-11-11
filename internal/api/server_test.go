@@ -1921,10 +1921,7 @@ func TestDNSBlocklistCustomAPIUpdatesCorePolicyAndPersists(t *testing.T) {
 	}
 
 	response := httptest.NewRecorder()
-	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", map[string]string{
-		"block": "ads.parent.test\nblocked.allow-parent.test",
-		"allow": "allow-parent.test\nsafe.parent.test",
-	}))
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", `{"block":"ads.parent.test\\nblocked.allow-parent.test","allow":"allow-parent.test\\nsafe.parent.test"}`))
 	if response.Code != http.StatusOK {
 		t.Fatalf("custom list PUT status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -1953,7 +1950,7 @@ func TestDNSBlocklistCustomAPIUpdatesCorePolicyAndPersists(t *testing.T) {
 	}
 
 	response = httptest.NewRecorder()
-	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", map[string]string{"block": "bad..domain", "allow": ""}))
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", `{"block":"bad..domain","allow":""}`))
 	if response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid custom list status=%d body=%s", response.Code, response.Body.String())
 	}
