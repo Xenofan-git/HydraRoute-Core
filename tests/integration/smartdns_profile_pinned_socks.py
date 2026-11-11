@@ -69,8 +69,8 @@ def create_test_ca() -> None:
         "-extfile", str(CERTS / "server.ext"),
     ])
     run_checked(["openssl", "rehash", str(CERTS)])
-    (DATA / "ads.txt").write_text("ads.example.test\nblocked.example.test\n")
-    (DATA / "allow.txt").write_text("safe.ads.example.test\nexact.example.test\n")
+    (DATA / "ads.txt").write_text("ads.example.test\nblocked.example.test\nblocked.allow-parent.example.test\n")
+    (DATA / "allow.txt").write_text("safe.ads.example.test\nexact.example.test\nallow-parent.example.test\n")
 
 
 def read_exact(sock: socket.socket, size: int) -> bytes:
@@ -406,9 +406,13 @@ def main() -> None:
         # set by the Core compiler before this configuration reaches SmartDNS.
         assert dns_query("safe.ads.example.test") == "203.0.113.77", "child allow exception did not override parent block"
         assert dns_query("exact.example.test") == "203.0.113.77", "normalized exact allow exception did not reach upstream"
+        # Also exercise the reverse suffix direction directly against SmartDNS:
+        # a parent allow must suppress a more-specific child block.
+        assert dns_query("blocked.allow-parent.example.test") == "203.0.113.77", "parent allow did not suppress child block"
         with LOCK:
             assert any(name == "safe.ads.example.test" for _port, name in HITS), HITS
             assert any(name == "exact.example.test" for _port, name in HITS), HITS
+            assert any(name == "blocked.allow-parent.example.test" for _port, name in HITS), HITS
         assert dns_query("login.foreign.test") == "203.0.113.77", "DoH over foreign profile SOCKS failed"
         assert dns_query("tracker.torrent.test") == "203.0.113.77", "DoH over torrent profile SOCKS failed"
         with LOCK:
