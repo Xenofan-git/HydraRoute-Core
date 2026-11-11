@@ -162,8 +162,27 @@ func TestDNSPolicyFrontBlocksBeforeSmartDNSAndForwardsAllowedQueries(t *testing.
 	if err != nil {
 		t.Fatalf("blocked query: %v", err)
 	}
-	if len(blockedResponse.Answer) != 1 || blockedResponse.Answer[0].(*mdns.A).A.String() != "0.0.0.0" {
-		t.Fatalf("more-specific block was not enforced before SmartDNS: %+v", blockedResponse.Answer)
+	assertSOA := func(response *mdns.Msg, name string) {
+		t.Helper()
+		if response.Rcode != mdns.RcodeSuccess || len(response.Answer) != 0 || len(response.Ns) != 1 {
+			t.Fatalf("blocklist response for %s is not NOERROR/SOA: rcode=%d answers=%v authority=%v", name, response.Rcode, response.Answer, response.Ns)
+		}
+		soa, ok := response.Ns[0].(*mdns.SOA)
+		if !ok || soa.Hdr.Name != mdns.Fqdn(name) || soa.Hdr.Ttl != 30 ||
+			soa.Ns != "a.gtld-servers.net." || soa.Mbox != "nstld.verisign-grs.com." ||
+			soa.Serial != 1800 || soa.Refresh != 1800 || soa.Retry != 900 || soa.Expire != 604800 || soa.Minttl != 86400 {
+			t.Fatalf("blocklist SOA for %s does not match HRDNS defaults: %+v", name, response.Ns[0])
+		}
+	}
+	assertSOA(blockedResponse, "blocked.allow-parent.test")
+	for _, qtype := range []uint16{mdns.TypeAAAA, mdns.TypeSVCB, mdns.TypeHTTPS} {
+		blockedQuery := new(mdns.Msg)
+		blockedQuery.SetQuestion("blocked.allow-parent.test.", qtype)
+		blockedResponse, _, err := client.Exchange(blockedQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+		if err != nil {
+			t.Fatalf("blocked query type %d: %v", qtype, err)
+		}
+		assertSOA(blockedResponse, "blocked.allow-parent.test")
 	}
 	if smartDNSHits.Load() != 0 {
 		t.Fatalf("blocked query reached SmartDNS %d times", smartDNSHits.Load())
