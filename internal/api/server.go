@@ -3712,7 +3712,14 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid SmartDNS configuration")
 			return
 		}
-		cfg.CAPath = hrsmartdns.DefaultConfig().CAPath
+		defaults := hrsmartdns.DefaultConfig()
+		if cfg.ListenHost == "" {
+			cfg.ListenHost = defaults.ListenHost
+		}
+		if cfg.ListenPort == 0 {
+			cfg.ListenPort = defaults.ListenPort
+		}
+		cfg.CAPath = defaults.CAPath
 		cfg.DataDir = ""
 		s.opMu.Lock()
 		defer s.opMu.Unlock()
