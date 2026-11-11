@@ -3517,11 +3517,14 @@ func (s *Server) applyDNSBlocklists() {
 	}
 	snapshot := s.blocklists.Snapshot()
 	s.dns.SetBlocklistDomains(snapshot.Blocked, snapshot.Allowed)
-	if s.smartDNSRuntime == nil || !s.smartDNSConfig.Enabled {
+	if s.smartDNSRuntime == nil {
 		return
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
+	if !s.smartDNSConfig.Enabled {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cfg := s.smartDNSConfigWithBlocklists(s.smartDNSConfig)
