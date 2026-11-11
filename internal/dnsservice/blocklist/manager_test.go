@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -46,6 +47,65 @@ func TestCatalogMatchesHRNeoBuiltInPresets(t *testing.T) {
 	presets[0].Name = "mutated"
 	if Catalog()[0].Name != "HaGeZi Light" {
 		t.Fatal("Catalog returned mutable shared preset storage")
+	}
+}
+
+func TestManagerSerializesConcurrentRefreshes(t *testing.T) {
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	fetcher := func(context.Context, string) (Result, error) {
+		switch calls.Add(1) {
+		case 1:
+			close(firstStarted)
+			<-releaseFirst
+		default:
+			close(secondStarted)
+		}
+		return Result{Blocked: []string{"blocked.example.test"}}, nil
+	}
+	manager, err := NewManager(filepath.Join(t.TempDir(), "blocklists.json"), fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := manager.SaveSource(Source{Name: "First", URL: "https://lists.example/first.txt", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.SaveSource(Source{Name: "Second", URL: "https://lists.example/second.txt", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Refresh(context.Background(), first.ID)
+		firstDone <- err
+	}()
+	<-firstStarted
+	go func() {
+		_, err := manager.Refresh(context.Background(), second.ID)
+		secondDone <- err
+	}()
+
+	select {
+	case <-secondStarted:
+		t.Fatal("second refresh entered the fetcher while the first refresh was still active")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(releaseFirst)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second refresh did not start after the first completed")
+	}
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatal(err)
 	}
 }
 
