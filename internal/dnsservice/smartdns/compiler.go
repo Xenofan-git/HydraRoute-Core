@@ -323,42 +323,11 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 		}
 		sets = append(sets, normalizedDomainSet{DomainSet: set, name: "hr_set_" + set.ID, file: "domain-set-" + set.ID + ".txt"})
 	}
-	// SmartDNS resolves domain rules by the most-specific matching suffix.
-	// For the same exact domain, emit allow rules after block rules so an
-	// explicit allow exception wins. Block entries covered by an allow parent
-	// are removed below; allow child exceptions remain more specific.
-	allowDomains := make([]string, 0)
-	for _, set := range sets {
-		if set.Kind == "allow" {
-			allowDomains = append(allowDomains, set.Domains...)
-		}
-	}
-	for i := range sets {
-		if sets[i].Kind != "block" {
-			continue
-		}
-		filtered := make([]string, 0, len(sets[i].Domains))
-		for _, domain := range sets[i].Domains {
-			coveredByAllowParent := false
-			for _, allowed := range allowDomains {
-				if domain == allowed || strings.HasSuffix(domain, "."+allowed) {
-					coveredByAllowParent = true
-					break
-				}
-			}
-			if !coveredByAllowParent {
-				filtered = append(filtered, domain)
-			}
-		}
-		sets[i].Domains = filtered
-	}
-	nonEmpty := sets[:0]
-	for _, set := range sets {
-		if len(set.Domains) > 0 {
-			nonEmpty = append(nonEmpty, set)
-		}
-	}
-	sets = nonEmpty
+	// SmartDNS address rules accumulate domain flags across all matching
+	// suffixes. The special "-" address directive sets DOMAIN_FLAG_ADDR_IGN,
+	// which suppresses inherited block addresses even when the allow entry is
+	// on a parent or child domain. Emit block sets before allow sets for clear,
+	// deterministic configuration; SmartDNS combines the flags at query time.
 	priority := func(kind string) int {
 		switch kind {
 		case "block":
