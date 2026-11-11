@@ -105,6 +105,9 @@ func parseLine(line string) (Action, []string, bool) {
 	// Hosts-file entries contain an address followed by one or more names.
 	fields := strings.Fields(line)
 	if len(fields) >= 2 && net.ParseIP(fields[0]) != nil {
+		if !isBlocklistSinkholeAddress(fields[0]) {
+			return action, nil, true
+		}
 		domains := make([]string, 0, len(fields)-1)
 		for _, field := range fields[1:] {
 			if strings.HasPrefix(field, "#") {
@@ -137,6 +140,17 @@ func parseLine(line string) (Action, []string, bool) {
 		return action, nil, true
 	}
 	return action, []string{line}, false
+}
+
+func isBlocklistSinkholeAddress(value string) bool {
+	ip := net.ParseIP(value)
+	if ip == nil {
+		return false
+	}
+	return ip.Equal(net.ParseIP("0.0.0.0")) ||
+		ip.Equal(net.ParseIP("127.0.0.1")) ||
+		ip.Equal(net.ParseIP("::")) ||
+		ip.Equal(net.ParseIP("::1"))
 }
 
 func normalizeDomain(value string) (string, bool) {
