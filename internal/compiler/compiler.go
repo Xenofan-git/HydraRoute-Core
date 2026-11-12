@@ -311,8 +311,8 @@ func Compile(req CompileRequest) ([]byte, error) {
 		cfg["routing"] = map[string]any{"domainStrategy": domainStrategy, "rules": rules, "balancers": balancers}
 		cfg["api"] = map[string]any{"tag": "hr_api", "services": []string{"ObservatoryService", "RoutingService"}}
 		cfg["observatory"] = map[string]any{
-			"subjectSelector": allOutboundTags,
-			"probeUrl":        "https://www.google.com/generate_204",
+			"subjectSelector":   allOutboundTags,
+			"probeUrl":          "https://www.google.com/generate_204",
 			"probeInterval":     observatoryProbeInterval(req.ObservatoryProbeIntervalSeconds),
 			"enableConcurrency": true,
 		}
