@@ -313,7 +313,8 @@ func Compile(req CompileRequest) ([]byte, error) {
 		cfg["observatory"] = map[string]any{
 			"subjectSelector": allOutboundTags,
 			"probeUrl":        "https://www.google.com/generate_204",
-			"probeInterval":   observatoryProbeInterval(req.ObservatoryProbeIntervalSeconds, len(allOutboundTags)),
+			"probeInterval":     observatoryProbeInterval(req.ObservatoryProbeIntervalSeconds),
+			"enableConcurrency": true,
 		}
 	}
 	return json.MarshalIndent(cfg, "", "  ")
@@ -342,22 +343,15 @@ func applyL7Sniffing(inbound map[string]any, settings L7SniffingConfig) {
 	}
 }
 
-func ObservatoryProbeIntervalMS(seconds, subjects int) int {
+func ObservatoryProbeIntervalMS(seconds int) int {
 	if seconds < 5 || seconds > 3600 {
-		seconds = 30
+		seconds = 120
 	}
-	if subjects < 1 {
-		subjects = 1
-	}
-	intervalMS := (seconds * 1000) / subjects
-	if intervalMS < 100 {
-		intervalMS = 100
-	}
-	return intervalMS
+	return seconds * 1000
 }
 
-func observatoryProbeInterval(seconds, subjects int) string {
-	return fmt.Sprintf("%dms", ObservatoryProbeIntervalMS(seconds, subjects))
+func observatoryProbeInterval(seconds int) string {
+	return fmt.Sprintf("%dms", ObservatoryProbeIntervalMS(seconds))
 }
 
 func validateRouteTarget(action, profileID string, enabled map[string]bool) error {

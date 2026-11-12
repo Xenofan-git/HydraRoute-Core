@@ -13,7 +13,7 @@ let baseURL;
 let savedSelection;
 let savedRouting;
 let savedRefresh;
-let savedObservatorySettings = { probe_interval_seconds: 30 };
+let savedObservatorySettings = { probe_interval_seconds: 120 };
 let savedL7Settings = { enabled: false, http: true, tls: true, quic: true };
 let savedHealthSettings = { enabled: true, interval_seconds: 30, timeout_seconds: 4, fail_threshold: 2, recover_threshold: 2 };
 let healthSnapshot = { status: 'healthy', checked_at: new Date().toISOString(), checks: [{ name: 'api', state: 'healthy', message: 'Local API is responding' }], metrics: {} };

@@ -138,7 +138,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if opts.RetryMax < opts.RetryMin {
 		opts.RetryMax = opts.RetryMin
 	}
-	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), blocklistWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, subscriptionFetcher: parser.FetchSubscription, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
+	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), blocklistWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 120, subscriptionFetcher: parser.FetchSubscription, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
 	s.events = events.New("")
 	healthSettings := health.DefaultSettings()
 	if stateDir != "" {
@@ -1955,34 +1955,8 @@ func probeICMPEcho(ctx context.Context, host string) map[string]any {
 
 // profilePingStream mirrors HRweb's proxy.pingServers event contract: ICMP
 // echo (host-to-server, outside Xray) and proxy delay (Xray Observatory) are
-// separate events and separate measurements. Observatory has no force-probe
-// RPC, so the stream waits for the next real configured observation cycle.
-func (s *Server) observatorySubjectCount(ctx context.Context, currentProfileID string, currentNodes []service.PreviewNode) (int, error) {
-	profiles, err := s.profileStore.ListProfiles()
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, profile := range profiles {
-		if !profile.Enabled {
-			continue
-		}
-		if profile.ID == currentProfileID {
-			total += len(currentNodes)
-			continue
-		}
-		preview, previewErr := service.PreviewProfileCached(ctx, profile, s.stateDir)
-		if previewErr != nil {
-			continue
-		}
-		total += len(eligibleObservatoryNodes(preview))
-	}
-	if total < 1 {
-		total = 1
-	}
-	return total, nil
-}
-
+// separate events and separate measurements. Xray probes selected subjects
+// concurrently; this stream waits for the next complete configured cycle.
 func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -2118,22 +2092,16 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 		send(pingStreamEvent{Done: true, Error: "Xray не запущен: прокси-задержка недоступна"})
 		return
 	}
-	// Xray has no force-probe RPC. Its interval is distributed across all
-	// subjects, so a full configured cycle may take up to the panel interval.
+	// Xray probes all selected subjects concurrently. The configured interval
+	// is the pause between complete observation cycles, not a per-node slice.
 	// Keep the stream alive and let the caller cancel it if the wait is unwanted.
 	s.opMu.Lock()
 	cycleSeconds := s.observatoryInterval
 	s.opMu.Unlock()
 	if cycleSeconds < 5 || cycleSeconds > 3600 {
-		cycleSeconds = 30
+		cycleSeconds = 120
 	}
-	subjectCount, countErr := s.observatorySubjectCount(ctx, profileID, eligibleNodes)
-	if countErr != nil {
-		send(pingStreamEvent{Done: true, Error: "Не удалось определить размер пула Observatory"})
-		return
-	}
-	probeIntervalMS := compiler.ObservatoryProbeIntervalMS(cycleSeconds, subjectCount)
-	cycleDuration := time.Duration(probeIntervalMS*subjectCount) * time.Millisecond
+	cycleDuration := time.Duration(cycleSeconds) * time.Second
 	deadline := time.Now().Add(cycleDuration + 10*time.Second)
 	sent := map[string]bool{}
 	poll := time.NewTicker(500 * time.Millisecond)
@@ -3338,11 +3306,8 @@ func (s *Server) applyObservatoryInterval(seconds int) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	subjects := 1
-	if selector, ok := observatory["subjectSelector"].([]any); ok && len(selector) > 0 {
-		subjects = len(selector)
-	}
-	observatory["probeInterval"] = fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(seconds, subjects))
+	observatory["enableConcurrency"] = true
+	observatory["probeInterval"] = fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(seconds))
 	next, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return false, err

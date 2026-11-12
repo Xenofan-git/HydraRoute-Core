@@ -1303,9 +1303,12 @@ func TestObservatorySettingsImmediatelyUpdatePreparedXrayConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	observatory := decoded["observatory"].(map[string]any)
-	want := fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(137, 2))
+	want := fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(137))
 	if observatory["probeInterval"] != want {
 		t.Fatalf("probeInterval=%v want %s", observatory["probeInterval"], want)
+	}
+	if observatory["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", observatory["enableConcurrency"])
 	}
 }
 

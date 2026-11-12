@@ -181,3 +181,11 @@
 - Corrected Core's prior `xudpConcurrency=8` mismatch to `1` and updated the Mux regression assertion.
 - Evidence and address/value mapping: `research/2026-11-10-HRWEB-MUX-CONFIG-DISASSEMBLY.md`.
 - No live HRNeo or NanoPi runtime settings were changed. Awaiting CI for the updated PR #6 head.
+
+
+## 2026-11-12 — Observatory concurrency parity correction
+
+- Xray config now emits `enableConcurrency=true`; `probeInterval` is the complete cycle interval and is no longer divided by the number of selected subjects.
+- Default/fallback cycle is 120 seconds, matching the captured live HRNeo configuration. Runtime settings apply and manual SSE wait use the same full-cycle semantics.
+- Regression coverage now checks the large-pool interval and concurrency flag; a gated real-Xray integration test measures concurrent probe requests.
+- Validation: full Go tests, vet and diff-check passed in the isolated VPS worktree; both real-Xray ARM64 integration tests passed on NanoPi with Xray 26.10.31 (max four simultaneous probes). No production service was deployed or restarted.
