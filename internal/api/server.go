@@ -785,8 +785,10 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 		switch {
 		case !status.Configured:
 			add("xray", "not_configured", "No validated Xray configuration")
+		case !status.Running && status.Desired:
+			add("xray", "failed", "Xray is expected to run but is stopped; recovery is pending")
 		case !status.Running:
-			add("xray", "warning", "Xray process is stopped")
+			add("xray", "warning", "Xray process is stopped by operator")
 		default:
 			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
 			_, err := xrayapi.GetOutboundStatus(probeCtx, s.observatoryAPIAddress())

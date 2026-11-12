@@ -161,18 +161,20 @@ func TestRestoreRejectsTamperedOrPermissiveConfig(t *testing.T) {
 }
 
 
+
 func TestSupervisorRecoversUnexpectedExitButHonorsManualStop(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "first-start")
-	body := "if [ \\"$2\\" = \\"-test\\" ]; then exit 0; fi\\n" +
-		"if [ ! -e \\"" + marker + "\\" ]; then touch \\"" + marker + "\\"; exit 1; fi\\n" +
-		"trap 'exit 0' TERM\\nwhile :; do sleep 0.1; done"
+	body := `if [ "$2" = "-test" ]; then exit 0; fi
+if [ ! -e "` + marker + `" ]; then touch "` + marker + `"; exit 1; fi
+trap 'exit 0' TERM
+while :; do sleep 0.1; done`
 	binary := fakeXray(t, body)
 	s, err := NewSupervisor(binary, filepath.Join(t.TempDir(), "private", "xray.json"))
 	if err != nil { t.Fatal(err) }
-	if err := s.Prepare(context.Background(), []byte(\`{"inbounds":[],"outbounds":[]}\`)); err != nil { t.Fatal(err) }
+	if err := s.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil { t.Fatal(err) }
 	if err := s.Start(context.Background()); err != nil { t.Fatal(err) }
 	deadline := time.Now().Add(time.Second)
-	for s.Status().Running && time.Now().Before(deadline) { time.Sleep(5*time.Millisecond) }
+	for s.Status().Running && time.Now().Before(deadline) { time.Sleep(5 * time.Millisecond) }
 	if !s.Status().Desired { t.Fatal("unexpected exit cleared desired-running state") }
 	if err := s.Recover(context.Background()); err != nil { t.Fatal(err) }
 	if !s.Status().Running { t.Fatal("Xray did not recover after unexpected exit") }
