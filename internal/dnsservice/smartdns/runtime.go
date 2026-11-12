@@ -244,7 +244,7 @@ func (r *Runtime) swapLocked(ctx context.Context, generation, generationDir stri
 		if previousGeneration != "" {
 			// A canceled API request must not prevent recovery of the previously
 			// active resolver after the candidate has already stopped it.
-			rollbackCtx, cancel := context.WithTimeout(context.Background(), startupTimeout+3*time.Second)
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), 2*startupTimeout+3*time.Second)
 			rollbackErr := r.startGenerationWithRetryLocked(rollbackCtx, previousGeneration, previousDir)
 			cancel()
 			if rollbackErr != nil {
