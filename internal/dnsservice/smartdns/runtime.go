@@ -242,7 +242,12 @@ func (r *Runtime) swapLocked(ctx context.Context, generation, generationDir stri
 	} else {
 		candidateErr := err
 		if previousGeneration != "" {
-			if rollbackErr := r.startGenerationWithRetryLocked(ctx, previousGeneration, previousDir); rollbackErr != nil {
+			// A canceled API request must not prevent recovery of the previously
+			// active resolver after the candidate has already stopped it.
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), startupTimeout+3*time.Second)
+			rollbackErr := r.startGenerationWithRetryLocked(rollbackCtx, previousGeneration, previousDir)
+			cancel()
+			if rollbackErr != nil {
 				r.current = ""
 				return fmt.Errorf("candidate SmartDNS failed: %v; previous generation rollback failed: %w", candidateErr, rollbackErr)
 			}
