@@ -187,6 +187,48 @@ func TestRuntimeStatusDetectsUnexpectedProcessExit(t *testing.T) {
 	}
 }
 
+func TestRuntimeApplyRestoresPreviousGenerationAfterCallerCancellation(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeLauncher{}
+	profile := []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}
+	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
+	var cancel context.CancelFunc
+	probeCalls := 0
+	probe := func(ctx context.Context, _ string) error {
+		probeCalls++
+		if probeCalls == 2 {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
+	}
+	r.setTestHooks(launcher, probe)
+	if err := r.Apply(context.Background(), cfg, profile); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	oldGeneration := r.Status().Generation
+	ctx, stop := context.WithCancel(context.Background())
+	cancel = stop
+	cfg.CacheSize = 128
+	if err := r.Apply(ctx, cfg, profile); err == nil {
+		t.Fatal("expected candidate startup to fail after caller cancellation")
+	}
+	status := r.Status()
+	if !status.Running || status.Generation != oldGeneration {
+		t.Fatalf("previous generation was not restored after cancellation: %+v", status)
+	}
+	if launcher.attempts != 3 {
+		t.Fatalf("startup attempts=%d, want initial + canceled candidate + independent rollback", launcher.attempts)
+	}
+}
+
 func TestRuntimeRejectsNonLoopbackReadinessAddress(t *testing.T) {
 	_, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(t.TempDir(), "state"), ListenAddr: "0.0.0.0:5353"})
 	if err == nil {
