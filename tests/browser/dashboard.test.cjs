@@ -319,7 +319,7 @@ test('Observatory interval loads and persists through its settings API', async (
     await page.locator('[data-page="settings"]').click();
     const interval = page.locator('#observatoryProbeInterval');
     await interval.waitFor();
-    assert.equal(await interval.inputValue(), '30');
+    assert.equal(await interval.inputValue(), '120');
     await interval.fill('120');
     await page.locator('#saveObservatorySettings').click();
     await page.getByText('Интервал применён к конфигурации Xray').waitFor();
