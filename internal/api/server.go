@@ -440,7 +440,10 @@ func (s *Server) runRecoveryLoop(ctx context.Context, component string, recoverF
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
-				select { case <-timer.C: default: }
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			return
 		case <-timer.C:
