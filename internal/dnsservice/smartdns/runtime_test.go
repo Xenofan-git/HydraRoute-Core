@@ -312,7 +312,9 @@ func TestRuntimeRecoversUnexpectedExitButHonorsManualStop(t *testing.T) {
 	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
 	profiles := []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}
 	if err := r.Apply(context.Background(), cfg, profiles); err != nil { t.Fatal(err) }
-	if err := r.Start(context.Background()); err != nil { t.Fatal(err) }
+	r.SetDesiredRunning(true)
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	if !r.Status().Running { t.Fatal("boot recovery did not start desired SmartDNS") }
 	launcher.processes[0].exit(fmt.Errorf("simulated crash"))
 	deadline := time.Now().Add(time.Second)
 	for r.Status().Running && time.Now().Before(deadline) { time.Sleep(time.Millisecond) }
