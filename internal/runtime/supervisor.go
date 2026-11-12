@@ -165,25 +165,37 @@ func (s *Supervisor) SnapshotConfig() ([]byte, error) {
 }
 
 func (s *Supervisor) Start(ctx context.Context) error {
-	if err := ctx.Err(); err != nil { return err }
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.configured { return fmt.Errorf("no validated config has been prepared") }
+	if !s.configured {
+		return fmt.Errorf("no validated config has been prepared")
+	}
 	s.desired = true
-	if s.running { return fmt.Errorf("Xray is already running") }
+	if s.running {
+		return fmt.Errorf("Xray is already running")
+	}
 	return s.startLocked(ctx)
 }
 
 func (s *Supervisor) Recover(ctx context.Context) error {
-	if err := ctx.Err(); err != nil { return err }
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.desired || !s.configured || s.running { return nil }
+	if !s.desired || !s.configured || s.running {
+		return nil
+	}
 	return s.startLocked(ctx)
 }
 
 func (s *Supervisor) startLocked(ctx context.Context) error {
-	if err := ctx.Err(); err != nil { return err }
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	cmd := exec.Command(s.binary, "run", "-config", s.configPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
