@@ -360,12 +360,14 @@ func TestRuntimeRecoversUnresponsiveProcessAfterThreeChecks(t *testing.T) {
 	unresponsive := false
 	r.setTestHooks(launcher, func(context.Context, string) error {
 		if unresponsive {
-		return errors.New("simulated DNS timeout")
-	}
+			return errors.New("simulated DNS timeout")
+		}
 		return nil
 	})
 	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
-	if err := r.Apply(context.Background(), cfg, []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}); err != nil { t.Fatal(err) }
+	if err := r.Apply(context.Background(), cfg, []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}); err != nil {
+		t.Fatal(err)
+	}
 	r.SetDesiredRunning(true)
 	if err := r.Recover(context.Background()); err != nil {
 		t.Fatal(err)
@@ -376,11 +378,11 @@ func TestRuntimeRecoversUnresponsiveProcessAfterThreeChecks(t *testing.T) {
 	unresponsive = true
 	for i := 0; i < 2; i++ {
 		if err := r.Recover(context.Background()); err == nil {
-		t.Fatalf("probe %d should fail", i+1)
-	}
+			t.Fatalf("probe %d should fail", i+1)
+		}
 		if len(launcher.processes) != 1 {
-		t.Fatal("restarted before failure threshold")
-	}
+			t.Fatal("restarted before failure threshold")
+		}
 	}
 	unresponsive = false
 	if err := r.Recover(context.Background()); err != nil {
@@ -404,8 +406,8 @@ func TestRuntimeRecoversUnresponsiveProcessAfterThreeChecks(t *testing.T) {
 	r.setTestHooks(nil, func(context.Context, string) error {
 		probes++
 		if probes <= 1 {
-		return errors.New("simulated DNS timeout")
-	}
+			return errors.New("simulated DNS timeout")
+		}
 		return nil
 	})
 	if err := r.Recover(context.Background()); err != nil {
