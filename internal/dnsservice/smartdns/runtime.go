@@ -53,16 +53,16 @@ type RuntimeStatus struct {
 }
 
 type Runtime struct {
-	mu       sync.Mutex
-	cfg      RuntimeConfig
-	launcher Launcher
-	probe    Probe
-	process  Process
-	waitDone chan error
-	current  string
-	desired  bool
+	mu            sync.Mutex
+	cfg           RuntimeConfig
+	launcher      Launcher
+	probe         Probe
+	process       Process
+	waitDone      chan error
+	current       string
+	desired       bool
 	probeFailures int
-	status   RuntimeStatus
+	status        RuntimeStatus
 }
 
 func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
