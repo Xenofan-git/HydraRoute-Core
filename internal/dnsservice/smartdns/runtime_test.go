@@ -426,3 +426,51 @@ func TestRuntimeRecoversUnresponsiveProcessAfterThreeChecks(t *testing.T) {
 		t.Fatal("operator stop was overridden")
 	}
 }
+
+
+func TestRuntimeRetriesAfterUnresponsiveRestartFails(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeLauncher{}
+	unresponsive := false
+	r.setTestHooks(launcher, func(context.Context, string) error {
+		if unresponsive {
+			return errors.New("simulated stalled DNS")
+		}
+		return nil
+	})
+	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
+	profiles := []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}
+	if err := r.Apply(context.Background(), cfg, profiles); err != nil {
+		t.Fatal(err)
+	}
+	r.SetDesiredRunning(true)
+	if err := r.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	launcher.mu.Lock()
+	launcher.failStarts = 2
+	launcher.mu.Unlock()
+	unresponsive = true
+	for i := 0; i < 3; i++ {
+		if err := r.Recover(context.Background()); err == nil {
+			t.Fatalf("readiness failure %d unexpectedly succeeded", i+1)
+		}
+	}
+	if status := r.Status(); status.Running || !status.Desired {
+		t.Fatalf("failed restart must remain stopped but desired: %+v", status)
+	}
+	unresponsive = false
+	if err := r.Recover(context.Background()); err != nil {
+		t.Fatalf("subsequent recovery did not restart SmartDNS: %v", err)
+	}
+	if len(launcher.processes) != 2 || !r.Status().Running {
+		t.Fatalf("recovery did not launch replacement: processes=%d status=%+v", len(launcher.processes), r.Status())
+	}
+	if err := r.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
