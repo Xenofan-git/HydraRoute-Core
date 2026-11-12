@@ -72,3 +72,17 @@ Commits:
 - 15c0317745b7b72465bd9229a2e68f404df11bec — full two-attempt rollback time budget.
 
 The latest CI attempt on commit 245d41b8434f2278ecfe363c4cbb9665d1d381b4 failed almost immediately; GitHub returned no job steps or downloadable logs (BlobNotFound). This is not treated as a code-test result. A fresh CI run is required on the latest head. No NanoPi deployment or host DNS/network changes.
+
+
+## Authoritative implementation correction (2026-11-12)
+
+This section supersedes the earlier implementation description above wherever it says managed block/allow lists are converted to SmartDNS domain sets, that the compiler normalizes block/allow overlaps, or that SmartDNS native allow flags enforce precedence. Those statements describe an intermediate design and are no longer current.
+
+Current branch behavior:
+- HRDNS most-specific-suffix allow/block evaluation is implemented in the Core DNS policy resolver.
+- Managed URL blocklists and custom SmartDNS block/allow sets are merged into the Core policy-front snapshot.
+- SmartDNS compiles profile-routing domain sets only; it does not receive native block/allow address rules.
+- Core DNS forwards exclusively to SmartDNS while the sidecar is active. A failed SmartDNS forward returns SERVFAIL; no public DNS fallback is used.
+- The blocklist refresh scheduler is a separate opt-in daily local-time job (default 04:30), with optional interface-bound HTTP(S) fetches. No retry loop was observed in the original HRweb scheduled job, so none is invented here.
+
+The current source confirms the optional interface is applied at the HTTP(S) socket layer through the existing subscription fetch transport, while DNS hostname resolution remains on the system resolver for local-stub compatibility.
