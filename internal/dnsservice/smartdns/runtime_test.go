@@ -349,3 +349,49 @@ func TestRuntimeRecoversUnexpectedExitButHonorsManualStop(t *testing.T) {
 		t.Fatalf("recovery overrode manual Stop: attempts=%d status=%+v", launcher.attempts, r.Status())
 	}
 }
+
+
+func TestRuntimeRecoversUnresponsiveProcessAfterThreeChecks(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
+	if err != nil { t.Fatal(err) }
+	launcher := &fakeLauncher{}
+	unresponsive := false
+	r.setTestHooks(launcher, func(context.Context, string) error {
+		if unresponsive { return errors.New("simulated DNS timeout") }
+		return nil
+	})
+	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
+	if err := r.Apply(context.Background(), cfg, []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}); err != nil { t.Fatal(err) }
+	r.SetDesiredRunning(true)
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	if len(launcher.processes) != 1 { t.Fatal("initial process missing") }
+	unresponsive = true
+	for i := 0; i < 2; i++ {
+		if err := r.Recover(context.Background()); err == nil { t.Fatalf("probe %d should fail", i+1) }
+		if len(launcher.processes) != 1 { t.Fatal("restarted before failure threshold") }
+	}
+	unresponsive = false
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	unresponsive = true
+	for i := 0; i < 2; i++ { _ = r.Recover(context.Background()) }
+	unresponsive = false
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	// A third consecutive failure must restart the child without clearing desired state.
+	unresponsive = true
+	for i := 0; i < 2; i++ { _ = r.Recover(context.Background()) }
+	// Allow the replacement to become ready.
+	probes := 0
+	r.setTestHooks(nil, func(context.Context, string) error {
+		probes++
+		if probes <= 1 { return errors.New("simulated DNS timeout") }
+		return nil
+	})
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	if len(launcher.processes) != 2 || !r.Status().Running || !r.Status().Desired {
+		t.Fatalf("unresponsive SmartDNS was not restarted: processes=%d status=%+v", len(launcher.processes), r.Status())
+	}
+	if err := r.Stop(context.Background()); err != nil { t.Fatal(err) }
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	if len(launcher.processes) != 2 { t.Fatal("operator stop was overridden") }
+}
