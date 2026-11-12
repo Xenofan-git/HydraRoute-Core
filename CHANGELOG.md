@@ -198,3 +198,6 @@
 - Native strace showed a read-only Linux neighbor-table lookup: NETLINK_ROUTE subscription to RTMGRP_NEIGH and RTM_GETNEIGH dump only. It did not read host resolv.conf, execute host networking tools, bind non-loopback listeners or perform non-loopback IP I/O.
 - The isolation harness now permits only this specific read-only neighbor query and continues to reject other netlink requests/groups. Core DNS policy-front E2E remains a separate Go integration test.
 - No SmartDNS installation/systemd unit, host DNS/route/firewall change or production service start.
+
+
+- Follow-up: made the read-only NETLINK_ROUTE allow-list robust to strace rendering numeric or symbolic `RTM_GETNEIGH` / `RTMGRP_NEIGH` constants across runner versions.

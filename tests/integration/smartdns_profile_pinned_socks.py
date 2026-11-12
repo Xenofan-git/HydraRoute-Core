@@ -352,11 +352,14 @@ def verify_strace(trace_path: Path | None) -> None:
         match = re.search(r"(?:sendto|sendmsg)\((\d+),", line)
         if match and int(match.group(1)) in netlink_fds:
             dump_flags = "0x300" in line or ("NLM_F_ROOT" in line and "NLM_F_MATCH" in line) or "NLM_F_DUMP" in line
-            if "nlmsg_type=0x1e" not in line or "NLM_F_REQUEST" not in line or not dump_flags:
+            get_neigh = "nlmsg_type=0x1e" in line or "nlmsg_type=RTM_GETNEIGH" in line
+            if not get_neigh or "NLM_F_REQUEST" not in line or not dump_flags:
                 raise AssertionError(f"SmartDNS issued a non-read-only netlink request: {line}")
     for line in trace.splitlines():
-        if "bind(" in line and "AF_NETLINK" in line and "nl_groups=0x000004" not in line:
-            raise AssertionError(f"SmartDNS subscribed to an unexpected netlink group: {line}")
+        if "bind(" in line and "AF_NETLINK" in line:
+            neighbor_group = any(marker in line for marker in ("nl_groups=0x000004", "nl_groups=0x4", "nl_groups=4", "nl_groups=RTMGRP_NEIGH"))
+            if not neighbor_group:
+                raise AssertionError(f"SmartDNS subscribed to an unexpected netlink group: {line}")
     if '"/etc/resolv.conf"' in trace:
         raise AssertionError("SmartDNS read the host /etc/resolv.conf")
     if re.search(r'execve\(".*/(ip|iptables|ip6tables|nft|ipset|conntrack)"', trace):
