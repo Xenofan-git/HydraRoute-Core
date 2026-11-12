@@ -186,13 +186,13 @@ func (r *Runtime) Start(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reapLocked()
-	if r.process != nil {
-		return nil
-	}
 	if r.current == "" {
 		return fmt.Errorf("SmartDNS has no prepared configuration")
 	}
 	r.desired = true
+	if r.process != nil {
+		return nil
+	}
 	generationDir := filepath.Join(r.cfg.StateDir, "generations", r.current)
 	if err := r.startGenerationWithRetryLocked(ctx, r.current, generationDir); err != nil {
 		r.status.LastError = err.Error()

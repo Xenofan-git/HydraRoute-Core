@@ -169,8 +169,8 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.configured { return fmt.Errorf("no validated config has been prepared") }
-	if s.running { return fmt.Errorf("Xray is already running") }
 	s.desired = true
+	if s.running { return fmt.Errorf("Xray is already running") }
 	return s.startLocked(ctx)
 }
 
