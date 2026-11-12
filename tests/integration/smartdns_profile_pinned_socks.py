@@ -338,8 +338,25 @@ def verify_strace(trace_path: Path | None) -> None:
         print("SKIP: strace unavailable; runtime proxy/TLS checks still executed")
         return
     trace = trace_path.read_text(errors="replace")
-    if re.search(r"socket\((AF|PF)_NETLINK", trace):
-        raise AssertionError("SmartDNS opened a NETLINK socket")
+    # SmartDNS 48.4 performs read-only neighbor discovery through
+    # NETLINK_ROUTE: subscribe to RTMGRP_NEIGH and dump RTM_GETNEIGH.
+    # Permit only that read-only request; any other netlink write/request fails.
+    netlink_fds = set()
+    for line in trace.splitlines():
+        match = re.search(r"socket\(AF_NETLINK,[^)]*\)\s+=\s+(\d+)", line)
+        if match:
+            if "NETLINK_ROUTE" not in line:
+                raise AssertionError(f"SmartDNS opened an unexpected netlink family: {line}")
+            netlink_fds.add(int(match.group(1)))
+    for line in trace.splitlines():
+        match = re.search(r"(?:sendto|sendmsg)\((\d+),", line)
+        if match and int(match.group(1)) in netlink_fds:
+            dump_flags = "0x300" in line or ("NLM_F_ROOT" in line and "NLM_F_MATCH" in line) or "NLM_F_DUMP" in line
+            if "nlmsg_type=0x1e" not in line or "NLM_F_REQUEST" not in line or not dump_flags:
+                raise AssertionError(f"SmartDNS issued a non-read-only netlink request: {line}")
+    for line in trace.splitlines():
+        if "bind(" in line and "AF_NETLINK" in line and "nl_groups=0x000004" not in line:
+            raise AssertionError(f"SmartDNS subscribed to an unexpected netlink group: {line}")
     if '"/etc/resolv.conf"' in trace:
         raise AssertionError("SmartDNS read the host /etc/resolv.conf")
     if re.search(r'execve\(".*/(ip|iptables|ip6tables|nft|ipset|conntrack)"', trace):
@@ -407,12 +424,10 @@ def main() -> None:
         # set by the Core compiler before this configuration reaches SmartDNS.
         assert dns_query("safe.ads.example.test") == "203.0.113.77", "child allow exception did not override parent block"
         assert dns_query("exact.example.test") == "203.0.113.77", "normalized exact allow exception did not reach upstream"
-        # Engine-behavior regression probe, not an HRDNS-parity expectation:
+        # Engine-behavior probe, not an HRDNS-parity expectation:
         # SmartDNS 48.4 accumulates the parent allow flag and therefore lets this
-        # query through. HRDNS instead evaluates the most-specific matching
-        # suffix first and blocks this child. The Core compiler must reject
-        # this unrepresentable overlap until a Core-owned policy resolver is
-        # wired in; this raw SmartDNS fixture records the engine limitation.
+        # raw native-engine query through. Core's separate DNS policy front
+        # evaluates HRDNS longest-suffix precedence before forwarding to SmartDNS.
         assert dns_query("blocked.allow-parent.example.test") == "203.0.113.77", "SmartDNS native parent-allow behavior changed"
         with LOCK:
             assert any(name == "safe.ads.example.test" for _port, name in HITS), HITS

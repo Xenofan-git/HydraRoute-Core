@@ -189,3 +189,12 @@
 - Default/fallback cycle is 120 seconds, matching the captured live HRNeo configuration. Runtime settings apply and manual SSE wait use the same full-cycle semantics.
 - Regression coverage now checks the large-pool interval and concurrency flag; a gated real-Xray integration test measures concurrent probe requests.
 - Validation: full Go tests, vet and diff-check passed in the isolated VPS worktree; both real-Xray ARM64 integration tests passed on NanoPi with Xray 26.10.31 (max four simultaneous probes). No production service was deployed or restarted.
+
+
+## 2026-11-12 — SmartDNS native ARM64 runtime acceptance
+
+- Ran the staged SmartDNS 48.4 ARM64 binary on NanoPi in an isolated foreground process with loopback-only test listeners and local fake SOCKS5/DoH endpoints.
+- Static/domain-set answers, TLS certificate/SNI, two profile-pinned SOCKS5 DoH paths, per-profile failure isolation and fail-closed default behavior all passed.
+- Native strace showed a read-only Linux neighbor-table lookup: NETLINK_ROUTE subscription to RTMGRP_NEIGH and RTM_GETNEIGH dump only. It did not read host resolv.conf, execute host networking tools, bind non-loopback listeners or perform non-loopback IP I/O.
+- The isolation harness now permits only this specific read-only neighbor query and continues to reject other netlink requests/groups. Core DNS policy-front E2E remains a separate Go integration test.
+- No SmartDNS installation/systemd unit, host DNS/route/firewall change or production service start.
