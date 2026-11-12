@@ -505,7 +505,8 @@ func (m *Manager) CheckBlock(host string) (BlockCheck, error) {
 	if !result.Enabled {
 		return result, nil
 	}
-	result.Blocked, source := m.blockDecisionLocked(host, mdns.TypeA)
+	blocked, source := m.blockDecisionLocked(host, mdns.TypeA)
+	result.Blocked = blocked
 	result.Matched = source != blockSourceNone
 	switch source {
 	case blockSourceExplicitRule:
