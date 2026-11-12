@@ -259,12 +259,15 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		return fmt.Errorf("API listen address must be a literal loopback IP")
 	}
 	defer s.closeWatchlist()
+	xrayStartedHere := false
 	if s.refreshOpts.AutoStart && s.supervisor != nil {
 		status := s.supervisor.Status()
 		if status.Configured && !status.Running {
 			startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			if err := s.supervisor.Start(startCtx); err != nil {
 				s.recordEvent("error", "runtime", "xray_autostart_failed", "Xray failed to start during API recovery")
+			} else {
+				xrayStartedHere = true
 			}
 			cancel()
 		}
@@ -274,7 +277,7 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		if err := s.dns.Start(); err != nil {
 			// Startup must not leave an autostarted Xray child behind when
 			// the Core DNS policy front fails to bind.
-			if s.refreshOpts.AutoStart && s.supervisor != nil {
+			if xrayStartedHere {
 				stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 				_ = s.supervisor.Stop(stopCtx)
 				cancel()
@@ -288,7 +291,7 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		if dnsStarted {
 			_ = s.dns.Stop()
 		}
-		if s.refreshOpts.AutoStart && s.supervisor != nil {
+		if xrayStartedHere {
 			stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			_ = s.supervisor.Stop(stopCtx)
 			cancel()
