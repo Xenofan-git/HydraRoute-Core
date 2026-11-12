@@ -301,3 +301,26 @@ func TestRuntimeReadinessProbeRejectsNonDNSResponse(t *testing.T) {
 		t.Fatal("closed DNS port passed readiness probe")
 	}
 }
+
+
+func TestRuntimeRecoversUnexpectedExitButHonorsManualStop(t *testing.T) {
+	root := t.TempDir()
+	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
+	if err != nil { t.Fatal(err) }
+	launcher := &fakeLauncher{}
+	r.setTestHooks(launcher, func(context.Context, string) error { return nil })
+	cfg := Config{Enabled: true, ListenPort: 15353, Upstreams: []Upstream{{ID: "u1", ProfileID: "p1", Protocol: "doh", Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true}}}
+	profiles := []ProfileRef{{ID: "p1", Enabled: true, Listen: "127.0.0.1", Port: 16001}}
+	if err := r.Apply(context.Background(), cfg, profiles); err != nil { t.Fatal(err) }
+	if err := r.Start(context.Background()); err != nil { t.Fatal(err) }
+	launcher.processes[0].exit(fmt.Errorf("simulated crash"))
+	deadline := time.Now().Add(time.Second)
+	for r.Status().Running && time.Now().Before(deadline) { time.Sleep(time.Millisecond) }
+	if !r.Status().Desired { t.Fatal("unexpected exit cleared desired-running state") }
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	if !r.Status().Running || launcher.attempts != 2 { t.Fatalf("recovery failed: attempts=%d status=%+v", launcher.attempts, r.Status()) }
+	if err := r.Stop(context.Background()); err != nil { t.Fatal(err) }
+	if r.Status().Desired { t.Fatal("manual Stop did not clear desired-running state") }
+	if err := r.Recover(context.Background()); err != nil { t.Fatal(err) }
+	if r.Status().Running || launcher.attempts != 2 { t.Fatalf("recovery overrode manual Stop: attempts=%d status=%+v", launcher.attempts, r.Status()) }
+}

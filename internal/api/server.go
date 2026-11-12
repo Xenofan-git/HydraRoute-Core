@@ -259,6 +259,16 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		return fmt.Errorf("API listen address must be a literal loopback IP")
 	}
 	defer s.closeWatchlist()
+	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		status := s.supervisor.Status()
+		if status.Configured && !status.Running {
+			startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			if err := s.supervisor.Start(startCtx); err != nil {
+				s.recordEvent("error", "runtime", "xray_autostart_failed", "Xray failed to start during API recovery")
+			}
+			cancel()
+		}
+	}
 	dnsStarted := false
 	if s.dns != nil && s.dns.Config().Enabled {
 		if err := s.dns.Start(); err != nil {
@@ -273,6 +283,15 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		return err
 	}
+	if s.refreshOpts.AutoStart && s.smartDNSRuntime != nil && s.smartDNSConfig.Enabled {
+		s.smartDNSRuntime.SetDesiredRunning(true)
+		startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		if err := s.startSmartDNSWithPolicyForwarder(startCtx); err != nil {
+			s.smartDNSErr = err.Error()
+			s.recordEvent("error", "dns", "smartdns_autostart_failed", "SmartDNS could not be restored during API startup; recovery will retry")
+		}
+		cancel()
+	}
 	s.recordEvent("info", "api", "started", "HydraRoute Core API started")
 	srv := &http.Server{Addr: address, Handler: s.mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	serveErr := make(chan error, 1)
@@ -281,6 +300,10 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	monitorDone := make(chan struct{})
 	go func() { defer close(monitorDone); s.runHealthMonitor(monitorCtx) }()
 	defer func() { monitorCancel(); <-monitorDone }()
+	recoveryCtx, recoveryCancel := context.WithCancel(ctx)
+	recoveryDone := make(chan struct{})
+	go func() { defer close(recoveryDone); s.runProcessRecovery(recoveryCtx) }()
+	defer func() { recoveryCancel(); <-recoveryDone }()
 	schedulerCtx, schedulerCancel := context.WithCancel(ctx)
 	schedulerDone := make(chan struct{})
 	if s.refreshOpts.RefreshInterval > 0 {
@@ -354,6 +377,95 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		return nil
 	}
+}
+
+const managedRecoveryInitial = 5 * time.Second
+const managedRecoveryMaximum = 5 * time.Minute
+
+func (s *Server) runProcessRecovery(ctx context.Context) {
+	var wg sync.WaitGroup
+	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.runRecoveryLoop(ctx, "runtime", func(callCtx context.Context) error {
+				return s.supervisor.Recover(callCtx)
+			})
+		}()
+	}
+	if s.refreshOpts.AutoStart && s.smartDNSRuntime != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.runRecoveryLoop(ctx, "dns", func(callCtx context.Context) error {
+				status := s.smartDNSRuntime.Status()
+				if !status.Desired {
+					return nil
+				}
+				if err := s.configureSmartDNSPolicyForwarder(); err != nil {
+					return err
+				}
+				return s.smartDNSRuntime.Recover(callCtx)
+			})
+		}()
+	}
+	wg.Wait()
+}
+
+func (s *Server) runRecoveryLoop(ctx context.Context, component string, recoverFn func(context.Context) error) {
+	delay := managedRecoveryInitial
+	for {
+		callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		err := recoverFn(callCtx)
+		cancel()
+		wait := managedRecoveryInitial
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			s.recordEvent("warning", component, "automatic_recovery_retry", component+" automatic recovery attempt failed")
+			wait = delay
+			delay *= 2
+			if delay > managedRecoveryMaximum {
+				delay = managedRecoveryMaximum
+			}
+		} else {
+			delay = managedRecoveryInitial
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select { case <-timer.C: default: }
+			}
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Server) configureSmartDNSPolicyForwarder() error {
+	if s.dns == nil || !s.dns.Config().Enabled {
+		return fmt.Errorf("Core DNS policy resolver is disabled")
+	}
+	if running, _ := s.dns.Status()["running"].(bool); !running {
+		return fmt.Errorf("Core DNS policy resolver is not running")
+	}
+	if s.dns.Config().Port == smartDNSListenPort(s.smartDNSConfig) {
+		return fmt.Errorf("SmartDNS and Core DNS must use different loopback ports")
+	}
+	return s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(s.smartDNSConfig))
+}
+
+func (s *Server) startSmartDNSWithPolicyForwarder(ctx context.Context) error {
+	if err := s.configureSmartDNSPolicyForwarder(); err != nil {
+		return err
+	}
+	if err := s.smartDNSRuntime.Start(ctx); err != nil {
+		return err
+	}
+	s.smartDNSErr = ""
+	return nil
 }
 
 func (s *Server) recordEvent(level, component, eventType, message string) {
@@ -692,6 +804,28 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 		add("dns", "healthy", "Core DNS resolver is running")
 	} else {
 		add("dns", "failed", "Core DNS resolver is enabled but stopped")
+	}
+	if s.smartDNSRuntime == nil {
+		add("smartdns", "not_configured", "SmartDNS runtime is unavailable")
+	} else if !s.smartDNSConfig.Enabled {
+		add("smartdns", "disabled", "SmartDNS is disabled")
+	} else {
+		status := s.smartDNSRuntime.Status()
+		switch {
+		case !status.Running && status.Desired:
+			add("smartdns", "failed", "SmartDNS is expected to run but is stopped; recovery is pending")
+		case !status.Running:
+			add("smartdns", "warning", "SmartDNS is stopped by operator")
+		default:
+			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			err := s.smartDNSRuntime.Ready(probeCtx)
+			cancel()
+			if err != nil {
+				add("smartdns", "failed", "SmartDNS DNS readiness probe failed")
+			} else {
+				add("smartdns", "healthy", "SmartDNS process and DNS readiness probe are responding")
+			}
+		}
 	}
 	assetDir := strings.TrimSpace(os.Getenv("XRAY_LOCATION_ASSET"))
 	geoState := "healthy"
@@ -3757,16 +3891,16 @@ func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
 		s.setSmartDNSPolicyConfig(cfg)
 		s.smartDNSErr = ""
 		s.applyDNSBlocklists()
-		if s.dns != nil {
-			if (wasRunning || wasForwarding) && cfg.Enabled {
-				if err := s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(cfg)); err != nil {
-					s.smartDNSErr = err.Error()
-					writeError(w, http.StatusInternalServerError, "SmartDNS restarted but policy forwarding could not be updated")
-					return
-				}
-			} else if !cfg.Enabled {
-				_ = s.dns.SetSmartDNSForwarder("")
+		shouldRun := cfg.Enabled && (wasRunning || wasForwarding || s.refreshOpts.AutoStart)
+		if shouldRun {
+			s.smartDNSRuntime.SetDesiredRunning(true)
+			if err := s.startSmartDNSWithPolicyForwarder(r.Context()); err != nil {
+				s.smartDNSErr = err.Error()
+				writeError(w, http.StatusBadGateway, "SmartDNS configuration was saved but automatic startup failed; recovery will retry")
+				return
 			}
+		} else if s.dns != nil && !cfg.Enabled {
+			_ = s.dns.SetSmartDNSForwarder("")
 		}
 		s.recordEvent("info", "dns", "smartdns_config_prepared", "SmartDNS configuration prepared")
 		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": ""})
@@ -3807,11 +3941,7 @@ func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
 		}
 		// Install the exclusive forwarder before starting SmartDNS. Queries
 		// during startup must fail closed rather than leak to public DNS.
-		if err := s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(s.smartDNSConfig)); err != nil {
-			writeError(w, http.StatusInternalServerError, "cannot attach SmartDNS as the exclusive DNS upstream")
-			return
-		}
-		if err := s.smartDNSRuntime.Start(r.Context()); err != nil {
+		if err := s.startSmartDNSWithPolicyForwarder(r.Context()); err != nil {
 			s.smartDNSErr = err.Error()
 			s.recordEvent("error", "dns", "smartdns_start_failed", "SmartDNS failed to start; Core DNS remains fail-closed")
 			writeError(w, http.StatusBadGateway, "SmartDNS failed to start; DNS forwarding remains fail-closed")

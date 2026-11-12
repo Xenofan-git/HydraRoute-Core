@@ -43,6 +43,7 @@ type RuntimeConfig struct {
 
 type RuntimeStatus struct {
 	Enabled     bool      `json:"enabled"`
+	Desired     bool      `json:"desired"`
 	Running     bool      `json:"running"`
 	PID         int       `json:"pid,omitempty"`
 	Generation  string    `json:"generation,omitempty"`
@@ -59,6 +60,7 @@ type Runtime struct {
 	process  Process
 	waitDone chan error
 	current  string
+	desired  bool
 	status   RuntimeStatus
 }
 
@@ -109,6 +111,7 @@ func (r *Runtime) Status() RuntimeStatus {
 	defer r.mu.Unlock()
 	r.reapLocked()
 	status := r.status
+	status.Desired = r.desired
 	status.Running = r.process != nil
 	return status
 }
@@ -139,6 +142,7 @@ func (r *Runtime) Apply(ctx context.Context, cfg Config, profiles []ProfileRef) 
 	r.reapLocked()
 
 	if !cfg.Enabled {
+		r.desired = false
 		if r.process != nil {
 			if err := r.process.Stop(ctx); err != nil {
 				return fmt.Errorf("stop SmartDNS while disabling: %w", err)
@@ -188,6 +192,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 	if r.current == "" {
 		return fmt.Errorf("SmartDNS has no prepared configuration")
 	}
+	r.desired = true
 	generationDir := filepath.Join(r.cfg.StateDir, "generations", r.current)
 	if err := r.startGenerationWithRetryLocked(ctx, r.current, generationDir); err != nil {
 		r.status.LastError = err.Error()
@@ -199,6 +204,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 func (r *Runtime) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.desired = false
 	r.reapLocked()
 	if r.process == nil {
 		return nil
@@ -213,6 +219,42 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	r.status.Running = false
 	r.status.PID = 0
 	return nil
+}
+
+func (r *Runtime) SetDesiredRunning(desired bool) {
+	r.mu.Lock()
+	r.desired = desired && r.current != ""
+	r.mu.Unlock()
+}
+
+// Recover restarts SmartDNS after an unexpected exit without overriding Stop.
+func (r *Runtime) Recover(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reapLocked()
+	if !r.desired || r.process != nil {
+		return nil
+	}
+	if r.current == "" {
+		return fmt.Errorf("SmartDNS has no prepared configuration")
+	}
+	generationDir := filepath.Join(r.cfg.StateDir, "generations", r.current)
+	if err := r.startGenerationWithRetryLocked(ctx, r.current, generationDir); err != nil {
+		r.status.LastError = err.Error()
+		return err
+	}
+	r.status.LastError = ""
+	return nil
+}
+
+func (r *Runtime) Ready(ctx context.Context) error {
+	r.mu.Lock()
+	address, running, probe := r.cfg.ListenAddr, r.process != nil, r.probe
+	r.mu.Unlock()
+	if !running {
+		return fmt.Errorf("SmartDNS process is not running")
+	}
+	return probe(ctx, address)
 }
 
 func (r *Runtime) swapLocked(ctx context.Context, generation, generationDir string) error {

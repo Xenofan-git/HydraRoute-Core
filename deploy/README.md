@@ -11,4 +11,17 @@ Before installing, review `ExecStart`. It includes `-autostart`: Xray starts aft
 
 Profile encryption key path: `/var/lib/hydraroute/state/profiles/profiles.key`. Back it up together with encrypted profile files.
 
-Do not install or enable this unit without explicit operator approval.
+This repository change does not install or enable the unit. Enable it only during an approved deployment.
+
+
+## Automatic recovery after reboot and process failure
+
+Enable the Core unit at installation time so systemd starts it on every boot:
+
+```sh
+sudo systemctl enable --now hydraroute-core.service
+```
+
+The unit uses `Restart=on-failure` with a five-second delay and no start-rate lockout. Its `-autostart` option restores the last validated Xray configuration and starts Xray. When SmartDNS is enabled in the saved configuration, Core starts its sidecar after the Core DNS policy resolver is ready. Core supervises unexpected Xray and SmartDNS exits with bounded exponential retry delays (5 seconds up to 5 minutes); an explicit Stop action disables recovery for that component until it is started again. Health Monitor probes SmartDNS DNS readiness as well as process state.
+
+A first-install system with no saved Xray configuration remains safely unconfigured; add profiles and prepare a valid configuration before expecting Xray to start. SmartDNS remains off unless its saved configuration is enabled.

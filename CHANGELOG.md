@@ -201,3 +201,13 @@
 
 
 - Follow-up: made the read-only NETLINK_ROUTE allow-list robust to strace rendering numeric or symbolic `RTM_GETNEIGH` / `RTMGRP_NEIGH` constants across runner versions.
+
+
+## 2026-11-12 — Automatic boot and crash recovery
+
+- Added desired-running state and recovery methods for managed Xray and SmartDNS processes. Unexpected exits are restarted; explicit operator Stop clears the desired state and is not overridden by recovery.
+- With the existing systemd `-autostart` option, Core restores Xray and automatically starts an enabled SmartDNS sidecar after the Core DNS policy resolver is ready.
+- Added independent bounded exponential recovery loops (5 seconds to 5 minutes) for Xray and SmartDNS.
+- Health Monitor now reports SmartDNS process and DNS readiness.
+- Systemd unit disables start-rate lockout for repeated failure recovery; deployment documentation requires `systemctl enable --now hydraroute-core.service` so it starts after reboot.
+- No service was installed, enabled or restarted on NanoPi as part of this code change.
