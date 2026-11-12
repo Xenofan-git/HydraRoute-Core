@@ -144,7 +144,24 @@ func parseLine(line string) (Action, []string, bool) {
 
 // ParseCustomList parses the HRweb custom block/allow textarea format.
 func ParseCustomList(reader io.Reader) ([]string, error) {
-	parsed, err := Parse(reader)
+	data, err := io.ReadAll(io.LimitReader(reader, defaultMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > defaultMaxBytes {
+		return nil, fmt.Errorf("custom DNS list too large")
+	}
+	for _, line := range strings.Split(string(data), string([]byte{10})) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		_, domains, ignored := parseLine(line)
+		if ignored || len(domains) == 0 {
+			return nil, fmt.Errorf("invalid custom DNS list entry")
+		}
+	}
+	parsed, err := Parse(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
