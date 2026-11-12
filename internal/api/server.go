@@ -323,6 +323,8 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	defer func() { schedulerCancel(); <-schedulerDone }()
 	select {
 	case err := <-serveErr:
+		recoveryCancel()
+		<-recoveryDone
 		if s.dns != nil {
 			_ = s.dns.Stop()
 		}
@@ -348,6 +350,8 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		return err
 	case <-ctx.Done():
+		recoveryCancel()
+		<-recoveryDone
 		monitorCancel()
 		<-monitorDone
 		s.closeWatchlist()
