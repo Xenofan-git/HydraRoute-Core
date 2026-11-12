@@ -272,6 +272,13 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	dnsStarted := false
 	if s.dns != nil && s.dns.Config().Enabled {
 		if err := s.dns.Start(); err != nil {
+			// Startup must not leave an autostarted Xray child behind when
+			// the Core DNS policy front fails to bind.
+			if s.refreshOpts.AutoStart && s.supervisor != nil {
+				stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				_ = s.supervisor.Stop(stopCtx)
+				cancel()
+			}
 			return fmt.Errorf("start saved DNS service: %w", err)
 		}
 		dnsStarted = true
@@ -280,6 +287,11 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	if err != nil {
 		if dnsStarted {
 			_ = s.dns.Stop()
+		}
+		if s.refreshOpts.AutoStart && s.supervisor != nil {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			_ = s.supervisor.Stop(stopCtx)
+			cancel()
 		}
 		return err
 	}
