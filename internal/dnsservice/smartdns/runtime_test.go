@@ -427,7 +427,6 @@ func TestRuntimeRecoversUnresponsiveProcessAfterThreeChecks(t *testing.T) {
 	}
 }
 
-
 func TestRuntimeRetriesAfterUnresponsiveRestartFails(t *testing.T) {
 	root := t.TempDir()
 	r, err := NewRuntime(RuntimeConfig{BinaryPath: "/usr/bin/smartdns", StateDir: filepath.Join(root, "state")})
