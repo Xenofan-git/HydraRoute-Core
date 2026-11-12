@@ -61,6 +61,7 @@ type Runtime struct {
 	waitDone chan error
 	current  string
 	desired  bool
+	probeFailures int
 	status   RuntimeStatus
 }
 
@@ -232,8 +233,37 @@ func (r *Runtime) Recover(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.reapLocked()
-	if !r.desired || r.process != nil {
+	if !r.desired {
+		r.probeFailures = 0
 		return nil
+	}
+	if r.process != nil {
+		probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+		err := r.probe(probeCtx, r.cfg.ListenAddr)
+		cancel()
+		if err == nil {
+			r.probeFailures = 0
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		r.probeFailures++
+		if r.probeFailures < 3 {
+			return fmt.Errorf("SmartDNS readiness failed (%d/3): %w", r.probeFailures, err)
+		}
+		// Restart only after three consecutive failed readiness checks.
+		// Keep the policy-front forwarder pinned to SmartDNS (fail closed).
+		stopCtx, stopCancel := context.WithTimeout(ctx, 3*time.Second)
+		stopErr := r.process.Stop(stopCtx)
+		stopCancel()
+		if stopErr != nil {
+			return fmt.Errorf("stop unresponsive SmartDNS: %w", stopErr)
+		}
+		r.process = nil
+		r.waitDone = nil
+		r.status.Running = false
+		r.status.PID = 0
 	}
 	if r.current == "" {
 		return fmt.Errorf("SmartDNS has no prepared configuration")
@@ -244,6 +274,7 @@ func (r *Runtime) Recover(ctx context.Context) error {
 		return err
 	}
 	r.status.LastError = ""
+	r.probeFailures = 0
 	return nil
 }
 
