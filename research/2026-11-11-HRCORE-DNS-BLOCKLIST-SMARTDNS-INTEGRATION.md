@@ -58,3 +58,17 @@ Core now persists these settings with the blocklist state (legacy state files wi
 An optional interface name is validated and used for outbound HTTP(S) blocklist sockets through Linux `SO_BINDTODEVICE`. DNS hostname resolution remains through the system resolver to preserve compatibility with local resolver stubs such as 127.0.0.53; actual HTTP(S) connections are bound to the selected interface. An empty interface uses normal system routing.
 
 Tests cover default settings, normalization, invalid times/interface names, persistence across restart, interface-fetcher selection, API GET/PUT, wake-up signaling and next-daily-run calculation.
+
+
+## Runtime cancellation rollback hardening (2026-11-12)
+
+A lifecycle review found that candidate generation startup can be canceled after the previous SmartDNS process has already been stopped. Reusing the canceled request context for rollback made restoration impossible and could leave the DNS sidecar unavailable.
+
+Runtime rollback now uses a separate bounded context (2 * startupTimeout + 3s) for the previous generation. Candidate startup still honors the caller context and does not retry after cancellation; the independent rollback context is used only to restore the known-good generation. A regression test cancels the caller during candidate readiness and verifies that the previous generation returns to Running.
+
+Commits:
+- 4cab6a3fe6c9ebe4b7569f28fffeffa4a4934f8b — independent rollback context.
+- 245d41b8434f2278ecfe363c4cbb9665d1d381b4 — cancellation/rollback regression test.
+- 15c0317745b7b72465bd9229a2e68f404df11bec — full two-attempt rollback time budget.
+
+The latest CI attempt on commit 245d41b8434f2278ecfe363c4cbb9665d1d381b4 failed almost immediately; GitHub returned no job steps or downloadable logs (BlobNotFound). This is not treated as a code-test result. A fresh CI run is required on the latest head. No NanoPi deployment or host DNS/network changes.
