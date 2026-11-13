@@ -90,3 +90,49 @@ func TestDegradedRemainsLatchedAcrossIntermittentRecovery(t *testing.T) {
 		t.Fatalf("second consecutive recovery=%s", got)
 	}
 }
+
+func TestDisabledComponentResetsFailureAndRecoveryCounters(t *testing.T) {
+	m := New(DefaultSettings())
+	now := time.Now()
+	check := func(state string) string {
+		t.Helper()
+		return m.Apply([]Check{{Name: "dns", State: state}}, Metrics{}, now).Checks[0].State
+	}
+	if got := check("failed"); got != "checking" {
+		t.Fatalf("initial failure=%s", got)
+	}
+	if got := check("disabled"); got != "disabled" {
+		t.Fatalf("disabled state=%s", got)
+	}
+	if got := check("failed"); got != "checking" {
+		t.Fatalf("stale failures survived disabling: %s", got)
+	}
+	if got := check("failed"); got != "degraded" {
+		t.Fatalf("second failure=%s", got)
+	}
+	if got := check("healthy"); got != "degraded" {
+		t.Fatalf("first recovery=%s", got)
+	}
+	if got := check("disabled"); got != "disabled" {
+		t.Fatalf("disabled after degraded=%s", got)
+	}
+	if got := check("healthy"); got != "healthy" {
+		t.Fatalf("stale degraded state survived disabling: %s", got)
+	}
+}
+
+func TestHealthMonitorThresholdOneDegradesAndRecoversImmediately(t *testing.T) {
+	settings := DefaultSettings()
+	settings.FailThreshold = 1
+	settings.RecoverThreshold = 1
+	m := New(settings)
+	now := time.Now()
+	failed := m.Apply([]Check{{Name: "smartdns", State: "failed"}}, Metrics{}, now)
+	if failed.Status != "degraded" || failed.Checks[0].State != "degraded" {
+		t.Fatalf("failure with threshold one=%+v", failed)
+	}
+	healthy := m.Apply([]Check{{Name: "smartdns", State: "healthy"}}, Metrics{}, now)
+	if healthy.Status != "healthy" || healthy.Checks[0].State != "healthy" {
+		t.Fatalf("recovery with threshold one=%+v", healthy)
+	}
+}
