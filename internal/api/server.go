@@ -55,6 +55,7 @@ type geoDataAssetStatus struct {
 }
 
 type geoDataStatusResponse struct {
+	Update geodata.StoreStatus  `json:"update"`
 	Ready  bool                 `json:"ready"`
 	Assets []geoDataAssetStatus `json:"assets"`
 	Error  string               `json:"error,omitempty"`
@@ -1024,6 +1025,9 @@ func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := geoDataStatusResponse{Assets: []geoDataAssetStatus{{Name: "geoip.dat"}, {Name: "geosite.dat"}}}
+	if s.stateDir != "" {
+		result.Update = geodata.InspectStore(filepath.Join(s.stateDir, "geodata"))
+	}
 	assetDir := strings.TrimSpace(os.Getenv("XRAY_LOCATION_ASSET"))
 	if assetDir == "" || !filepath.IsAbs(assetDir) {
 		result.Error = "Xray asset directory is not configured"
