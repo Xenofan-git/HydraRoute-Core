@@ -41,6 +41,15 @@ func (s *GenerationStore) Bootstrap(source string, check func(string) error) (st
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
+	// A managed generation contains only the two standard databases. Refuse
+	// migration if custom assets would become inaccessible to Xray.
+	audit, err := AuditLegacyAssets(source)
+	if err != nil {
+		return "", err
+	}
+	if len(audit.Extra) != 0 {
+		return "", fmt.Errorf("legacy asset directory contains additional files requiring an explicit migration plan: %v", audit.Extra)
+	}
 	assets := make([][]byte, 0, 2)
 	for _, name := range []string{"geoip.dat", "geosite.dat"} {
 		data, err := readCandidate(filepath.Join(source, name))

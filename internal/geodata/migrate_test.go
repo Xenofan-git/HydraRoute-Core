@@ -42,3 +42,26 @@ func TestBootstrapPreservesLegacyAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestBootstrapRefusesToDropCustomAssets(t *testing.T) {
+	source := t.TempDir()
+	root := t.TempDir()
+	entry := append(field(1, []byte("RU")), field(2, field(1, []byte{127}))...)
+	data := field(1, entry)
+	for _, name := range []string{"geoip.dat", "geosite.dat", "custom.dat"} {
+		if err := os.WriteFile(filepath.Join(source, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &GenerationStore{Root: root}
+	if _, err := store.Bootstrap(source, func(string) error { return nil }); err == nil {
+		t.Fatal("bootstrap silently dropped custom asset")
+	}
+	current, err := store.Current()
+	if err != nil || current != "" {
+		t.Fatalf("bootstrap modified current: %q %v", current, err)
+	}
+	if _, err := os.Stat(filepath.Join(source, "custom.dat")); err != nil {
+		t.Fatal("custom asset lost: ", err)
+	}
+}
