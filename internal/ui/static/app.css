@@ -320,3 +320,8 @@ button,input,select,textarea{font-size:inherit}
 .connection-card-foot [data-profile-test]{margin-left:auto}
 /* Match space below the wrapped balancer mode to the top inset of the profile toggle. */
 .connection-card{padding-bottom:23px}
+/* Align the settings and delete controls with the connection name row. */
+.connection-card-head{display:flex;align-items:center}
+.connection-card-head .connection-card-title,.connection-card-head .connection-card-actions{align-self:center}
+.connection-card-head .connection-card-actions{display:flex;align-items:center;flex-wrap:nowrap}
+.connection-card-head .connection-card-actions .network-icon-btn{display:inline-flex;align-items:center;justify-content:center;flex:none}
