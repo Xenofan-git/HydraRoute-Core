@@ -263,3 +263,6 @@ button,input,select,textarea{font-size:inherit}
 .subscription-filters textarea::placeholder{color:rgba(255,255,255,.55)}
 /* All subscription sort arrows are white, including inactive arrows. */
 .subscription-table thead .subscription-sort-arrow,.subscription-table thead .subscription-sort-arrow.active{color:#fff}
+/* White sortable table headers: Name, Ping and Latency. */
+.subscription-table thead .subscription-sort{color:#fff}
+.subscription-table thead .subscription-sort:hover{color:#fff}
