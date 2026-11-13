@@ -1712,6 +1712,45 @@ func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
 // A failed API bind must only clean up Xray when this Serve call started it.
 // A DNS bind failure occurs before the API listener exists. It must not leak
 // the newly started Xray child or stop an Xray process already in service.
+func TestRecoveryLoopRecordsSuccessOnlyAfterFailure(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	recovered := make(chan struct{})
+	done := make(chan struct{})
+	calls := 0
+	go func() {
+		defer close(done)
+		h.runRecoveryLoop(ctx, "dns", func(context.Context) error {
+			calls++
+			if calls == 1 {
+				return fmt.Errorf("temporary DNS failure")
+			}
+			close(recovered)
+			return nil
+		})
+	}()
+	select {
+	case <-recovered:
+	case <-time.After(7 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("automatic recovery did not retry")
+	}
+	cancel()
+	<-done
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/events?limit=20"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("events status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if strings.Count(body, `"type":"automatic_recovery_retry"`) != 1 ||
+		strings.Count(body, `"type":"automatic_recovery_succeeded"`) != 1 {
+		t.Fatalf("expected one failure and one success event: %s", body)
+	}
+}
+
 func TestRecoveryLoopStopsPromptlyOnCancellation(t *testing.T) {
 	h := New(apiSupervisor(t))
 	ctx, cancel := context.WithCancel(context.Background())
