@@ -153,3 +153,16 @@ button,input,select,textarea{font-size:inherit}
 
 /* HRNeo-style outlined navigation glyphs, keeping the Core violet theme. */
 .nav-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:26px}.nav-icon svg{display:block;width:24px;height:24px;stroke:currentColor}.nav-item:hover .nav-icon svg,.nav-item.active .nav-icon svg{filter:drop-shadow(0 0 5px var(--glow))}
+/* HRNeo reference: compact balancer cards, three across on wide screens. */
+.connection-cards{grid-template-columns:repeat(3,minmax(0,350px));max-width:none;gap:14px;align-items:start}
+.connection-card{padding:14px 15px;min-height:164px}
+.connection-card-head{min-height:36px}
+.connection-card-title{gap:9px}
+.connection-card-title b{font-size:14px}
+.connection-tags{margin-top:9px}
+.connection-card-foot{margin-top:9px;padding-top:8px;gap:7px}
+.connection-card-actions .network-icon-btn,.connection-card-actions .network-icon-btn.danger{color:#fff}
+.connection-card-actions .network-icon-btn:hover{color:#fff;border-color:var(--accent)}
+@media(max-width:1270px){.connection-cards{grid-template-columns:repeat(2,minmax(0,350px))}}
+@media(max-width:850px){.connection-cards{grid-template-columns:minmax(0,350px)}}
+@media(max-width:650px){.connection-cards{grid-template-columns:minmax(0,1fr);max-width:none}.connection-card{min-height:0;padding:14px}}
