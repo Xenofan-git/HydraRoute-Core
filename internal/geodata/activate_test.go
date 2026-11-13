@@ -116,6 +116,10 @@ func TestActivateStopFailureKeepsOldGeneration(t *testing.T) {
 	if current != baseline || f.starts != 0 {
 		t.Fatalf("failed stop changed generation or restarted runtime: %q %+v", current, f)
 	}
+	pending, err := s.pendingTransaction()
+	if err != nil || pending == nil || pending.Previous != baseline {
+		t.Fatalf("lost recovery journal on ambiguous stop: %+v %v", pending, err)
+	}
 }
 
 func TestActivateRequiresBootstrappedStore(t *testing.T) {

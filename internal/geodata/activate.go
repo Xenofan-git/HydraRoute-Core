@@ -68,8 +68,9 @@ func (s *GenerationStore) Activate(ctx context.Context, geoip, geosite []byte, p
 	err = runtime.Stop(stopCtx)
 	cancel()
 	if err != nil {
-		_ = s.clearTransaction()
-		return "", fmt.Errorf("stop Xray before update: %w", err)
+		// A failed Stop can still have terminated the process. Keep the
+		// durable recovery target until the supervisor state is reconciled.
+		return "", fmt.Errorf("stop Xray before update (recovery journal retained): %w", err)
 	}
 	if err := s.writeTransaction(previous, "stopped"); err != nil {
 		restartCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
