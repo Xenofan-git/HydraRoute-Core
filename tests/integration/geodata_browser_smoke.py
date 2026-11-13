@@ -37,5 +37,15 @@ try:
  wait.until(lambda _: 'simulated preflight failure' in d.find_element(By.ID,'toast').text)
  assert d.find_element(By.CSS_SELECTOR,'[data-geodata-action="preflight"]').is_enabled()
  assert not any(p=='/v1/geodata/activate' for p,_ in requests)
- print('PASS: Chromium rendered GeoData form; preflight JSON correct; server error shown; buttons reenabled; no activation')
+ # Browser confirmation is a hard gate before a potentially disruptive update.
+ d.execute_script('window.confirm = () => false')
+ d.find_element(By.CSS_SELECTOR,'[data-geodata-action="activate"]').click()
+ assert not any(p=='/v1/geodata/activate' for p,_ in requests),'cancelled activation reached API'
+ d.execute_script('window.confirm = () => true')
+ d.find_element(By.CSS_SELECTOR,'[data-geodata-action="activate"]').click()
+ wait.until(lambda _:any(p=='/v1/geodata/activate' for p,_ in requests))
+ activation=[body for path,body in requests if path=='/v1/geodata/activate']
+ assert len(activation)==1 and activation[0]['geosite']['sha256']=='b'*64
+ wait.until(lambda _:d.find_element(By.CSS_SELECTOR,'[data-geodata-action="activate"]').is_enabled())
+ print('PASS: Chromium rendered GeoData form; preflight JSON correct; server error shown; buttons reenabled; cancelled activation blocked; confirmed activation sent once')
 finally:d.quit();server.shutdown()
