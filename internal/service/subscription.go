@@ -104,10 +104,34 @@ func filterWords(raw string) []string {
 // Flag emoji filter terms also match the country code or country name in a node label.
 // Ordinary text terms retain the original substring matching semantics.
 func filterTermMatches(name, term string) bool {
-	// Match flags embedded in Hysteria2 or other protocol server names.
-	if strings.Contains(name, term) { return true }
 	if strings.Contains(name, term) {
 		return true
+	}
+	// ISO 3166-1 flags work for every proxy protocol and every country.
+	for code, names := range allCountryNames {
+		if term != countryEmoji(code) {
+			continue
+		}
+		for _, alias := range names {
+			alias = strings.ToLower(alias)
+			if strings.Contains(alias, " ") {
+				if strings.Contains(name, alias) {
+					return true
+				}
+			} else {
+				for _, token := range strings.FieldsFunc(name, func(r rune) bool { return !((r >= 'a' && r <= 'z') || (r >= 'а' && r <= 'я') || r == 'ё') }) {
+					if token == alias {
+						return true
+					}
+				}
+			}
+		}
+		for _, token := range strings.FieldsFunc(name, func(r rune) bool { return !(r >= 'a' && r <= 'z') }) {
+			if token == code {
+				return true
+			}
+		}
+		return false
 	}
 	aliases := map[string][]string{
 		"🇷🇺": {"ru", "russia", "россия", "москва", "moscow"}, "🇩🇪": {"de", "germany", "германия"}, "🇵🇱": {"pl", "poland", "польша"}, "🇳🇴": {"no", "norway", "норвегия"}, "🇳🇱": {"nl", "netherlands", "нидерланды", "голландия", "амстердам"}, "🇫🇮": {"fi", "finland", "финляндия"}, "🇸🇪": {"se", "sweden", "швеция"}, "🇱🇻": {"lv", "latvia", "латвия"}, "🇪🇪": {"ee", "estonia", "эстония"}, "🇫🇷": {"fr", "france", "франция"}, "🇪🇸": {"es", "spain", "испания"}, "🇮🇹": {"it", "italy", "италия"}, "🇹🇷": {"tr", "turkey", "турция"}, "🇺🇸": {"us", "usa", "сша"}, "🇯🇵": {"jp", "japan", "япония"}, "🇬🇧": {"gb", "uk", "britain", "великобритания"}, "🇸🇬": {"sg", "singapore", "сингапур"}, "🇰🇿": {"kz", "kazakhstan", "казахстан"}, "🇨🇿": {"cz", "czechia", "чехия"}, "🇨🇭": {"ch", "switzerland", "швейцария"}, "🇦🇹": {"at", "austria", "австрия"},

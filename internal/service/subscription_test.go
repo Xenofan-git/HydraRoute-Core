@@ -250,3 +250,21 @@ func TestFlagEmojiSubscriptionFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestAllCountryFlagFilters(t *testing.T) {
+	cases := []struct {
+		name, flag string
+		matched    bool
+	}{
+		{"BR Sao Paulo Hysteria2", "🇧🇷", true},
+		{"Hysteria2 Norway", "🇳🇴", true},
+		{"Hysteria2 Япония", "🇯🇵", true},
+		{"VLESS CA Toronto", "🇨🇦", true},
+		{"Hysteria2 Brazil", "🇨🇦", false},
+	}
+	for _, c := range cases {
+		if got := !serverFiltered(c.name, c.flag, "", false); got != c.matched {
+			t.Errorf("%q with %s: matched=%v want=%v", c.name, c.flag, got, c.matched)
+		}
+	}
+}
