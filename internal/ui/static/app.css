@@ -269,8 +269,7 @@ button,input,select,textarea{font-size:inherit}
 /* White select-all / deselect-all caption in server table header. */
 .subscription-table thead th:first-child .subscription-check{color:#fff}
 
-/* Explicit text-emoji insertion: copied SVG flag images are not textarea text. */
-.subscription-flag-picker{grid-column:1/-1;display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:#fff;font-size:12px}
-.subscription-flag-picker button{border:1px solid rgba(255,255,255,.22);border-radius:7px;background:rgba(255,255,255,.06);padding:4px 7px;cursor:pointer;font-size:17px;line-height:1.25}
-.subscription-flag-picker button:hover,.subscription-flag-picker button:focus-visible{border-color:#fff}
-.subscription-flag-picker small{color:#c6cedd}
+/* SVG flag stays crisp while selectable text carries its Unicode emoji. */
+.subscription-server-flag{position:relative;user-select:text;cursor:copy}
+.subscription-server-flag .subscription-flag-emoji{position:absolute;inset:0;white-space:nowrap;color:transparent;font-size:12px;user-select:text}
+.subscription-server-flag img{position:relative;pointer-events:none}
