@@ -185,3 +185,17 @@ button,input,select,textarea{font-size:inherit}
 .subscription-modal{width:min(790px,96vw)}
 .subscription-server-flag img{display:block;width:22px;height:15px;object-fit:cover;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.15)}
 @media(max-width:700px){.subscription-modal{width:100%}.subscription-server-flag img{width:19px;height:13px}}
+
+/* Align protocol/name left and latency measurements to the right like HRNeo. */
+.subscription-table{table-layout:fixed}
+.subscription-col-check{width:118px}
+.subscription-col-protocol{width:76px}
+.subscription-col-name{width:auto}
+.subscription-col-ping{width:73px}
+.subscription-col-delay{width:91px}
+.subscription-table td:nth-child(2),.subscription-table td.subscription-server-name{text-align:left}
+.subscription-table th:nth-child(3),.subscription-table th:nth-child(4),.subscription-table td.node-ping,.subscription-table td.node-delay{text-align:right}
+.subscription-table td.subscription-server-name{padding-left:5px}
+.subscription-table td.subscription-server-name b{font-family:Arial,"Segoe UI",sans-serif;font-weight:400;letter-spacing:0;line-height:1.4}
+.subscription-table td.subscription-server-name small{font-weight:400}
+@media(max-width:700px){.subscription-col-check{width:83px}.subscription-col-protocol{width:47px}.subscription-col-ping{width:43px}.subscription-col-delay{width:65px}.subscription-table td.subscription-server-name{padding-left:3px}}
