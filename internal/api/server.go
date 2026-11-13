@@ -3022,6 +3022,13 @@ func (s *Server) runtime(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		switch strings.ToLower(body.Action) {
 		case "start":
+			// Manual starts must not bypass the same crash-recovery guard
+			// used by CLI autostart and the background recovery loop.
+			if err := s.checkGeoDataStartup(); err != nil {
+				s.recordEvent("error", "geodata", "runtime_start_blocked", "Xray start blocked by pending GeoData recovery")
+				writeError(w, http.StatusConflict, "GeoData recovery required before Xray start")
+				return
+			}
 			if err := s.supervisor.Start(ctx); err != nil {
 				s.recordEvent("error", "runtime", "start_failed", "Xray failed to start")
 				writeError(w, http.StatusConflict, err.Error())
