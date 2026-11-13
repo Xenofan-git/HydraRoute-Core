@@ -1712,6 +1712,36 @@ func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
 // A failed API bind must only clean up Xray when this Serve call started it.
 // A DNS bind failure occurs before the API listener exists. It must not leak
 // the newly started Xray child or stop an Xray process already in service.
+func TestRecoveryLoopStopsPromptlyOnCancellation(t *testing.T) {
+	h := New(apiSupervisor(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	called := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.runRecoveryLoop(ctx, "runtime", func(context.Context) error {
+			select {
+			case <-called:
+			default:
+				close(called)
+			}
+			return fmt.Errorf("simulated recovery failure")
+		})
+	}()
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("recovery callback was not invoked")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("recovery loop did not stop promptly during backoff")
+	}
+}
+
 func TestServeDNSBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
 	for _, alreadyRunning := range []bool{false, true} {
 		name := "autostarted"
