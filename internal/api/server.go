@@ -1036,7 +1036,14 @@ func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
+	// A managed generation uses an atomic `current` symlink. Accept only
+	// that exact, validated link; arbitrary symlink asset directories remain
+	// forbidden.
+	managedCurrent := s.stateDir != "" && assetDir == filepath.Join(s.stateDir, "geodata", "current") && result.Update.Ready && !result.Update.Pending && result.Update.Error == ""
 	dirInfo, err := os.Lstat(assetDir)
+	if managedCurrent && err == nil && dirInfo.Mode()&os.ModeSymlink != 0 {
+		dirInfo, err = os.Stat(assetDir)
+	}
 	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || dirInfo.Mode().Perm()&0002 != 0 {
 		result.Error = "Xray asset directory is unavailable or unsafe"
 		writeJSON(w, http.StatusOK, result)
