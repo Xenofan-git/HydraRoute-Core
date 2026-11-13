@@ -144,46 +144,65 @@ func TestCompileGeneratesValidatedDomainSetFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.DomainSetCount != 3 || len(out.Files) != 3 {
-		t.Fatalf("domain-set output=%+v files=%v", out, out.Files)
+	if out.DomainSetCount != 1 || len(out.Files) != 1 {
+		t.Fatalf("only route domain sets should be emitted to SmartDNS: output=%+v files=%v", out, out.Files)
 	}
 	for _, expected := range []string{
-		"domain-set -name hr_set_ads -type list -file /var/lib/hydraroute/state/dns/sets/domain-set-ads.txt",
-		"address /domain-set:hr_set_ads/#",
-		"address /domain-set:hr_set_trusted/-",
+		"domain-set -name hr_set_torrent-domains -type list -file /var/lib/hydraroute/state/dns/sets/domain-set-torrent-domains.txt",
 		"nameserver /domain-set:hr_set_torrent-domains/hr_dns_torrent",
 	} {
 		if !strings.Contains(out.Config, expected) {
 			t.Errorf("missing domain-set directive %q:\n%s", expected, out.Config)
 		}
 	}
-	if got := string(out.Files["domain-set-ads.txt"]); got != "a.ads.test\nz.ads.test\n" {
-		t.Fatalf("domain-set file is not deduplicated/sorted: %q", got)
+	if _, exists := out.Files["domain-set-ads.txt"]; exists {
+		t.Fatal("block domain set must be enforced by Core policy front, not SmartDNS address rules")
+	}
+	if _, exists := out.Files["domain-set-trusted.txt"]; exists {
+		t.Fatal("allow domain set must be enforced by Core policy front, not SmartDNS address rules")
+	}
+	if got := string(out.Files["domain-set-torrent-domains.txt"]); got != "tracker.test\n" {
+		t.Fatalf("route domain-set file mismatch: %q", got)
 	}
 }
 
-func TestCompileRejectsBlockAllowConflictsAndUnsafeDomainSetPaths(t *testing.T) {
+func TestCompileLeavesBlockAndAllowSetsForCorePolicyFront(t *testing.T) {
 	cfg, profiles := fixtures()
-	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
 	cfg.DomainSets = []DomainSet{
-		{ID: "block", Kind: "block", Domains: []string{"same.test"}, Enabled: true},
-		{ID: "allow", Kind: "allow", Domains: []string{"same.test"}, Enabled: true},
+		{ID: "block", Kind: "block", Domains: []string{"example.test", "same.test"}, Enabled: true},
+		{ID: "allow", Kind: "allow", Domains: []string{"safe.example.test", "same.test"}, Enabled: true},
 	}
-	if _, err := Compile(cfg, profiles); err == nil {
-		t.Fatal("expected block/allow conflict rejection")
+	out, err := Compile(cfg, profiles)
+	if err != nil {
+		t.Fatalf("overlapping block/allow sets must compile through Core policy front: %v", err)
 	}
-	cfg, profiles = fixtures()
-	cfg.DataDir = "/var/lib/hydraroute/state/dns/sets"
+	if out.DomainSetCount != 0 || len(out.Files) != 0 {
+		t.Fatalf("block/allow sets unexpectedly generated SmartDNS files: %+v", out)
+	}
+	if strings.Contains(out.Config, "address /domain-set:") {
+		t.Fatalf("block/allow address directives must not be emitted: %s", out.Config)
+	}
+}
+
+func TestCompileAcceptsBlockChildUnderAllowParentForCorePolicyFront(t *testing.T) {
+	cfg, profiles := fixtures()
 	cfg.DomainSets = []DomainSet{
-		{ID: "block", Kind: "block", Domains: []string{"example.test"}, Enabled: true},
-		{ID: "allow", Kind: "allow", Domains: []string{"sub.example.test"}, Enabled: true},
+		{ID: "block-child", Kind: "block", Domains: []string{"ads.allow-parent.test"}, Enabled: true},
+		{ID: "allow-parent", Kind: "allow", Domains: []string{"allow-parent.test"}, Enabled: true},
 	}
-	if _, err := Compile(cfg, profiles); err == nil {
-		t.Fatal("expected suffix-overlap block/allow rejection")
+	out, err := Compile(cfg, profiles)
+	if err != nil {
+		t.Fatalf("Core policy front must support child block beneath parent allow: %v", err)
 	}
-	cfg, profiles = fixtures()
+	if len(out.Files) != 0 || out.DomainSetCount != 0 {
+		t.Fatalf("block/allow sets must not be emitted as SmartDNS address rules: %+v", out)
+	}
+}
+
+func TestCompileRejectsUnsafeDomainSetPaths(t *testing.T) {
+	cfg, profiles := fixtures()
 	cfg.DataDir = "/var/lib/hydraroute/../etc"
-	cfg.DomainSets = []DomainSet{{ID: "block", Kind: "block", Domains: []string{"ads.test"}, Enabled: true}}
+	cfg.DomainSets = []DomainSet{{ID: "route", Kind: "route", ProfileID: "foreign", Domains: []string{"ads.test"}, Enabled: true}}
 	if _, err := Compile(cfg, profiles); err == nil {
 		t.Fatal("expected unsafe data directory rejection")
 	}

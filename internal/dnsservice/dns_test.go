@@ -95,6 +95,224 @@ func freeDNSPort(t *testing.T) int {
 	return port
 }
 
+func startFakeDNSUpstream(t *testing.T, answerIP string, hits *atomic.Int32) string {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := mdns.NewServeMux()
+	mux.HandleFunc(".", func(w mdns.ResponseWriter, req *mdns.Msg) {
+		if hits != nil {
+			hits.Add(1)
+		}
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		if len(req.Question) > 0 {
+			var record string
+			switch req.Question[0].Qtype {
+			case mdns.TypeA:
+				record = req.Question[0].Name + " 30 IN A " + answerIP
+			case mdns.TypeTXT:
+				record = req.Question[0].Name + " 30 IN TXT \"passed-through\""
+			}
+			if record != "" {
+				rr, parseErr := mdns.NewRR(record)
+				if parseErr != nil {
+					t.Errorf("build fake DNS answer: %v", parseErr)
+					return
+				}
+				resp.Answer = append(resp.Answer, rr)
+			}
+		}
+		_ = w.WriteMsg(resp)
+	})
+	server := &mdns.Server{PacketConn: pc, Handler: mux}
+	go func() { _ = server.ActivateAndServe() }()
+	t.Cleanup(func() { _ = server.Shutdown() })
+	return pc.LocalAddr().String()
+}
+
+func TestDNSPolicyFrontBlocksBeforeSmartDNSAndForwardsAllowedQueries(t *testing.T) {
+	var smartDNSHits atomic.Int32
+	smartDNSAddr := startFakeDNSUpstream(t, "203.0.113.77", &smartDNSHits)
+	m := New(filepath.Join(t.TempDir(), "dns", "config.json"))
+	cfg := m.Config()
+	cfg.Port = freeDNSPort(t)
+	cfg.BlockingEnabled = true
+	if err := m.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	m.SetBlocklistDomains(
+		[]string{"blocked.allow-parent.test"},
+		[]string{"allow-parent.test"},
+	)
+	if err := m.SetSmartDNSForwarder(smartDNSAddr); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Stop() }()
+
+	client := &mdns.Client{Net: "udp", Timeout: 2 * time.Second}
+	blockedQuery := new(mdns.Msg)
+	blockedQuery.SetQuestion("blocked.allow-parent.test.", mdns.TypeA)
+	blockedResponse, _, err := client.Exchange(blockedQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if err != nil {
+		t.Fatalf("blocked query: %v", err)
+	}
+	assertSOA := func(response *mdns.Msg, name string) {
+		t.Helper()
+		if response.Rcode != mdns.RcodeSuccess || len(response.Answer) != 0 || len(response.Ns) != 1 {
+			t.Fatalf("blocklist response for %s is not NOERROR/SOA: rcode=%d answers=%v authority=%v", name, response.Rcode, response.Answer, response.Ns)
+		}
+		soa, ok := response.Ns[0].(*mdns.SOA)
+		if !ok || soa.Hdr.Name != mdns.Fqdn(name) || soa.Hdr.Ttl != 30 ||
+			soa.Ns != "a.gtld-servers.net." || soa.Mbox != "nstld.verisign-grs.com." ||
+			soa.Serial != 1800 || soa.Refresh != 1800 || soa.Retry != 900 || soa.Expire != 604800 || soa.Minttl != 86400 {
+			t.Fatalf("blocklist SOA for %s does not match HRDNS defaults: %+v", name, response.Ns[0])
+		}
+	}
+	assertSOA(blockedResponse, "blocked.allow-parent.test")
+	for _, qtype := range []uint16{mdns.TypeAAAA, mdns.TypeSVCB, mdns.TypeHTTPS} {
+		blockedQuery := new(mdns.Msg)
+		blockedQuery.SetQuestion("blocked.allow-parent.test.", qtype)
+		blockedResponse, _, err := client.Exchange(blockedQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+		if err != nil {
+			t.Fatalf("blocked query type %d: %v", qtype, err)
+		}
+		assertSOA(blockedResponse, "blocked.allow-parent.test")
+	}
+	if smartDNSHits.Load() != 0 {
+		t.Fatalf("blocked query reached SmartDNS %d times", smartDNSHits.Load())
+	}
+
+	allowedQuery := new(mdns.Msg)
+	allowedQuery.SetQuestion("other.allow-parent.test.", mdns.TypeA)
+	allowedResponse, _, err := client.Exchange(allowedQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if err != nil {
+		t.Fatalf("allowed query: %v", err)
+	}
+	if len(allowedResponse.Answer) != 1 || allowedResponse.Answer[0].(*mdns.A).A.String() != "203.0.113.77" {
+		t.Fatalf("allow-parent query was not forwarded to SmartDNS: %+v", allowedResponse.Answer)
+	}
+	if smartDNSHits.Load() != 1 {
+		t.Fatalf("SmartDNS received %d queries, want exactly one", smartDNSHits.Load())
+	}
+
+	// HRDNS applies managed blocklists to A/AAAA/SVCB/HTTPS records, not TXT.
+	// A TXT lookup for the same blocked hostname must still reach SmartDNS.
+	txtQuery := new(mdns.Msg)
+	txtQuery.SetQuestion("blocked.allow-parent.test.", mdns.TypeTXT)
+	txtResponse, _, err := client.Exchange(txtQuery, net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
+	if err != nil {
+		t.Fatalf("TXT query for blocked host: %v", err)
+	}
+	if len(txtResponse.Answer) != 1 || txtResponse.Answer[0].Header().Rrtype != mdns.TypeTXT {
+		t.Fatalf("TXT query was incorrectly blocked: %+v", txtResponse.Answer)
+	}
+	if smartDNSHits.Load() != 2 {
+		t.Fatalf("SmartDNS received %d queries after TXT pass-through, want two", smartDNSHits.Load())
+	}
+}
+
+func TestBlocklistAppliesOnlyToHRDNSRecordTypes(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true}}
+	m.SetBlocklistDomains([]string{"blocked.example.test"}, nil)
+	cases := []struct {
+		name  string
+		qtype uint16
+		want  bool
+	}{
+		{name: "A", qtype: mdns.TypeA, want: true},
+		{name: "AAAA", qtype: mdns.TypeAAAA, want: true},
+		{name: "SVCB", qtype: mdns.TypeSVCB, want: true},
+		{name: "HTTPS", qtype: mdns.TypeHTTPS, want: true},
+		{name: "TXT", qtype: mdns.TypeTXT, want: false},
+		{name: "MX", qtype: mdns.TypeMX, want: false},
+		{name: "CNAME", qtype: mdns.TypeCNAME, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := m.blockedHostForType("blocked.example.test", tc.qtype); got != tc.want {
+				t.Fatalf("blockedHostForType(%s)=%v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExplicitDNSRulesRemainIndependentOfBlocklistRecordTypes(t *testing.T) {
+	m := &Manager{cfg: Config{
+		BlockingEnabled: true,
+		Rules:           []Rule{{Domain: "explicit.example.test", Action: "block"}},
+	}}
+	if !m.blockedHostForType("explicit.example.test", mdns.TypeTXT) {
+		t.Fatal("explicit Core DNS rule unexpectedly inherited the blocklist record-type filter")
+	}
+}
+
+func TestSmartDNSForwarderIsExclusiveAndSkipsConfiguredFallbacks(t *testing.T) {
+	var smartDNSHits, fallbackHits atomic.Int32
+	smartDNSAddr := startFakeDNSUpstream(t, "203.0.113.77", &smartDNSHits)
+	fallbackAddr := startFakeDNSUpstream(t, "198.51.100.88", &fallbackHits)
+	m := &Manager{cfg: Config{
+		AutoProvider: true,
+		Servers:      []Server{{Name: "Public fallback", Protocol: "Do53", Address: fallbackAddr, Enabled: true}},
+	}}
+	if err := m.SetSmartDNSForwarder(smartDNSAddr); err != nil {
+		t.Fatal(err)
+	}
+	query := new(mdns.Msg)
+	query.SetQuestion("routed.example.test.", mdns.TypeA)
+	response := new(mdns.Msg)
+	if err := m.forward(query, response); err != nil {
+		t.Fatalf("forward through SmartDNS: %v", err)
+	}
+	if len(response.Answer) != 1 || response.Answer[0].(*mdns.A).A.String() != "203.0.113.77" {
+		t.Fatalf("unexpected SmartDNS response: %+v", response.Answer)
+	}
+	if smartDNSHits.Load() != 1 || fallbackHits.Load() != 0 {
+		t.Fatalf("SmartDNS/fallback hit counts = %d/%d, want 1/0", smartDNSHits.Load(), fallbackHits.Load())
+	}
+}
+
+func TestSmartDNSForwarderFailureDoesNotFallBackToPublicDNS(t *testing.T) {
+	var fallbackHits atomic.Int32
+	fallbackAddr := startFakeDNSUpstream(t, "198.51.100.88", &fallbackHits)
+	m := &Manager{cfg: Config{
+		Servers: []Server{{Name: "Public fallback", Protocol: "Do53", Address: fallbackAddr, Enabled: true}},
+	}}
+	unusedAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(freeDNSPort(t)))
+	if err := m.SetSmartDNSForwarder(unusedAddr); err != nil {
+		t.Fatal(err)
+	}
+	query := new(mdns.Msg)
+	query.SetQuestion("routed.example.test.", mdns.TypeA)
+	if err := m.forward(query, new(mdns.Msg)); err == nil {
+		t.Fatal("expected unavailable SmartDNS upstream to fail")
+	}
+	if got := fallbackHits.Load(); got != 0 {
+		t.Fatalf("public fallback received %d queries after SmartDNS failure", got)
+	}
+}
+
+func TestSetSmartDNSForwarderRequiresLoopback(t *testing.T) {
+	m := &Manager{}
+	if err := m.SetSmartDNSForwarder("8.8.8.8:5354"); err == nil {
+		t.Fatal("expected non-loopback SmartDNS forwarder to be rejected")
+	}
+	if err := m.SetSmartDNSForwarder("127.0.0.1:5354"); err != nil {
+		t.Fatalf("valid loopback SmartDNS forwarder rejected: %v", err)
+	}
+	if err := m.SetSmartDNSForwarder("127.0.0.1:53"); err != nil {
+		t.Fatalf("valid privileged loopback SmartDNS port rejected: %v", err)
+	}
+	if err := m.SetSmartDNSForwarder(""); err != nil {
+		t.Fatalf("clear SmartDNS forwarder: %v", err)
+	}
+}
+
 func TestStopClosesUDPAndTCPListenersAndAllowsRestart(t *testing.T) {
 	m := New(filepath.Join(t.TempDir(), "dns", "config.json"))
 	cfg := m.Config()
@@ -325,5 +543,73 @@ func TestDo53RetriesOverTCPWhenUDPResponseIsTruncated(t *testing.T) {
 	}
 	if udpCount.Load() != 1 || tcpCount.Load() != 1 {
 		t.Fatalf("expected one UDP then one TCP request, got UDP=%d TCP=%d", udpCount.Load(), tcpCount.Load())
+	}
+}
+
+func TestBlocklistDomainSetsMatchSubdomainsAndAllowExceptions(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true}}
+	m.SetBlocklistDomains([]string{"Ads.Example.com."}, []string{"safe.ads.example.com"})
+	if !m.blockedHost("tracker.ads.example.com") {
+		t.Fatal("blocklist parent domain did not match subdomain")
+	}
+	if m.blockedHost("safe.ads.example.com") || m.blockedHost("child.safe.ads.example.com") {
+		t.Fatal("allow exception did not override matching blocklist domain")
+	}
+}
+
+func TestBlocklistLongestSuffixPrecedenceMatchesHRDNS(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true}}
+	m.SetBlocklistDomains(
+		[]string{"blocked.allow-parent.test", "example.test", "same.test"},
+		[]string{"allow-parent.test", "safe.example.test", "same.test"},
+	)
+
+	cases := []struct {
+		name    string
+		blocked bool
+	}{
+		{name: "more-specific block beats broader allow", blocked: true},
+		{name: "more-specific block also matches descendants", blocked: true},
+		{name: "more-specific allow beats broader block", blocked: false},
+		{name: "more-specific allow also matches descendants", blocked: false},
+		{name: "same-suffix allow beats block", blocked: false},
+		{name: "unmatched domain is not blocked", blocked: false},
+	}
+	domains := []string{
+		"blocked.allow-parent.test",
+		"child.blocked.allow-parent.test",
+		"safe.example.test",
+		"child.safe.example.test",
+		"same.test",
+		"unmatched.test",
+	}
+	for i, domain := range domains {
+		t.Run(cases[i].name, func(t *testing.T) {
+			if got := m.blockedHost(domain); got != cases[i].blocked {
+				t.Fatalf("blockedHost(%q)=%v, want %v", domain, got, cases[i].blocked)
+			}
+		})
+	}
+}
+
+func TestExplicitDNSRulesOverrideBlocklistDomainSets(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: true, Rules: []Rule{
+		{Domain: "ads.example.com", Action: "allow"},
+		{Domain: "safe.example.com", Action: "block"},
+	}}}
+	m.SetBlocklistDomains([]string{"ads.example.com", "safe.example.com"}, []string{"safe.example.com"})
+	if m.blockedHost("ads.example.com") {
+		t.Fatal("explicit allow rule did not override blocklist")
+	}
+	if !m.blockedHost("safe.example.com") {
+		t.Fatal("explicit block rule did not override allow exception")
+	}
+}
+
+func TestBlocklistDomainSetsRespectBlockingEnabled(t *testing.T) {
+	m := &Manager{cfg: Config{BlockingEnabled: false}}
+	m.SetBlocklistDomains([]string{"ads.example.com"}, nil)
+	if m.blockedHost("ads.example.com") {
+		t.Fatal("blocklist should be inactive when blocking is disabled")
 	}
 }

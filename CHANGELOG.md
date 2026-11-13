@@ -1,4 +1,14 @@
 
+## 2026-11-11 — DNS blocklist and SmartDNS policy parity
+
+- Unified managed URL blocklists and configured SmartDNS block/allow domain sets in the Core DNS policy front; the SmartDNS compiler now emits only profile-routing domain sets, preserving HRDNS most-specific-suffix semantics for nested allow/block rules.
+- Matched HRDNS blocklist RR-type scope (A, AAAA, SVCB, HTTPS) and negative NOERROR/SOA response tuple; TXT/MX/CNAME and other types continue upstream.
+- Added the seven HRNeo built-in DNS blocklist presets (HaGeZi Light/Multi/Pro, OISD small/big, AdGuard DNS Filter, StevenBlack) plus custom URL support in the dashboard.
+- Tightened hosts-file parsing to recognized sinkhole addresses only (0.0.0.0, 127.0.0.1, ::, ::1); preserved ABP allow/block parsing, last-known-good snapshots, atomic persistence and optional interface-bound fetch.
+- Auto-update now defaults to opt-in at 04:30, matching HRweb UI behavior; scheduled refresh and manual failures are visible in events.
+- Manual refresh POST endpoints require same-origin JSON. SmartDNS lifecycle tests use private state directories and Core DNS/SmartDNS port/start guards remain fail-closed.
+- Added unit/API/runtime integration coverage. CI is running on PR #7; no NanoPi runtime deployment performed.
+
 ## 2026-11-09 — Full HRNeo functional parity scope
 - Зафиксирована цель переноса всего функционала оригинального HydraRoute Neo в независимый Debian/Ubuntu ARM64 HydraRoute Core.
 - Добавлена матрица функциональных групп: профили/подписки/балансировка, proxy lifecycle, Phobos/WireGuard, DNS, Geo/FQDN, health/events/system/speed, API/UI/files.
@@ -171,3 +181,33 @@
 - Corrected Core's prior `xudpConcurrency=8` mismatch to `1` and updated the Mux regression assertion.
 - Evidence and address/value mapping: `research/2026-11-10-HRWEB-MUX-CONFIG-DISASSEMBLY.md`.
 - No live HRNeo or NanoPi runtime settings were changed. Awaiting CI for the updated PR #6 head.
+
+
+## 2026-11-12 — Observatory concurrency parity correction
+
+- Xray config now emits `enableConcurrency=true`; `probeInterval` is the complete cycle interval and is no longer divided by the number of selected subjects.
+- Default/fallback cycle is 120 seconds, matching the captured live HRNeo configuration. Runtime settings apply and manual SSE wait use the same full-cycle semantics.
+- Regression coverage now checks the large-pool interval and concurrency flag; a gated real-Xray integration test measures concurrent probe requests.
+- Validation: full Go tests, vet and diff-check passed in the isolated VPS worktree; both real-Xray ARM64 integration tests passed on NanoPi with Xray 26.10.31 (max four simultaneous probes). No production service was deployed or restarted.
+
+
+## 2026-11-12 — SmartDNS native ARM64 runtime acceptance
+
+- Ran the staged SmartDNS 48.4 ARM64 binary on NanoPi in an isolated foreground process with loopback-only test listeners and local fake SOCKS5/DoH endpoints.
+- Static/domain-set answers, TLS certificate/SNI, two profile-pinned SOCKS5 DoH paths, per-profile failure isolation and fail-closed default behavior all passed.
+- Native strace showed a read-only Linux neighbor-table lookup: NETLINK_ROUTE subscription to RTMGRP_NEIGH and RTM_GETNEIGH dump only. It did not read host resolv.conf, execute host networking tools, bind non-loopback listeners or perform non-loopback IP I/O.
+- The isolation harness now permits only this specific read-only neighbor query and continues to reject other netlink requests/groups. Core DNS policy-front E2E remains a separate Go integration test.
+- No SmartDNS installation/systemd unit, host DNS/route/firewall change or production service start.
+
+
+- Follow-up: made the read-only NETLINK_ROUTE allow-list robust to strace rendering numeric or symbolic `RTM_GETNEIGH` / `RTMGRP_NEIGH` constants across runner versions.
+
+
+## 2026-11-12 — Automatic boot and crash recovery
+
+- Added desired-running state and recovery methods for managed Xray and SmartDNS processes. Unexpected exits are restarted; explicit operator Stop clears the desired state and is not overridden by recovery.
+- With the existing systemd `-autostart` option, Core restores Xray and automatically starts an enabled SmartDNS sidecar after the Core DNS policy resolver is ready.
+- Added independent bounded exponential recovery loops (5 seconds to 5 minutes) for Xray and SmartDNS.
+- Health Monitor now reports SmartDNS process and DNS readiness.
+- Systemd unit disables start-rate lockout for repeated failure recovery; deployment documentation requires `systemctl enable --now hydraroute-core.service` so it starts after reboot.
+- No service was installed, enabled or restarted on NanoPi as part of this code change.

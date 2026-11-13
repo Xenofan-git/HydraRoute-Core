@@ -53,6 +53,17 @@ jobs:
           unzip -q "$xray_zip" -d "$RUNNER_TEMP/xray"
           go run ./cmd/hrcore -input internal/compiler/testdata/shared-routing.json -output "$RUNNER_TEMP/shared-routing.json"
           (cd "$RUNNER_TEMP/xray" && XRAY_LOCATION_ASSET="$RUNNER_TEMP/xray" ./xray run -test -config "$RUNNER_TEMP/shared-routing.json")
+      - name: Verify GeoData migration with real isolated Xray
+        env:
+          HRCORE_TEST_XRAY: ${{ runner.temp }}/xray/xray
+          HRCORE_TEST_XRAY_ASSETS: ${{ runner.temp }}/xray
+          HRCORE_TEST_GO: go
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -v ./internal/geodata -run '^TestLiveXray(GeoDataActivationAndRollback|ServiceAssetPathMigrationAndRevert)$'
+          bash tests/integration/geodata_hrapi_smoke.sh
+
       - name: Set up Python for L7 integration tests
         uses: actions/setup-python@v5
         with:

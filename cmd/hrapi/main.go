@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"hydraroute.local/core/internal/api"
+	"hydraroute.local/core/internal/geodata"
 	hrruntime "hydraroute.local/core/internal/runtime"
 )
 
@@ -32,11 +34,25 @@ func main() {
 	if *refreshInterval < 0 || (*refreshInterval > 0 && *refreshInterval < time.Minute) || *retryMin < 5*time.Second || *retryMax < *retryMin {
 		fatal(fmt.Errorf("refresh interval must be zero or at least 1m; retry-min must be at least 5s and retry-max must be >= retry-min"))
 	}
+	// Recover an interrupted asset switch before validating the saved Xray
+	// config or starting any listener. Never recover unrelated asset paths.
+	if *autoStart || *restoreConfig {
+		recovered, recoveryErr := geodata.RecoverStartup(filepath.Join(*stateDir, "geodata"), *xray, *config, os.Getenv("XRAY_LOCATION_ASSET"))
+		fatal(recoveryErr)
+		if recovered {
+			fmt.Fprintln(os.Stderr, "hrapi: recovered previous GeoData generation before Xray restore")
+		}
+	}
 	if *restoreConfig {
 		restoreCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		err := supervisor.Restore(restoreCtx)
 		cancel()
 		fatal(err)
+	}
+	// The CLI starts Xray before api.Server.Serve; guard this path too.
+	// A pending update must never be bypassed by the earlier CLI autostart.
+	if *autoStart {
+		fatal(geodata.CheckAssetStartupReady(filepath.Join(*stateDir, "geodata"), os.Getenv("XRAY_LOCATION_ASSET")))
 	}
 	if *autoStart && supervisor.Status().Configured {
 		startCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
