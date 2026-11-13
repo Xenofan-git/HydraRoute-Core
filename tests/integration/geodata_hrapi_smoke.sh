@@ -55,6 +55,14 @@ import json,sys
 v=json.load(open(sys.argv[1]));assert v.get('update',{}).get('ready'),v
 PY
 stop_app
+# Managed mode must fail closed if a database is corrupt. Legacy mode must
+# remain independently startable even if the managed store is damaged.
+printf 'corrupt' > "$root/state/geodata/generation-0/geoip.dat"
+if start_app "$root/state/geodata/current" >/dev/null 2>&1; then
+ echo 'FAIL: hrapi accepted corrupt managed GeoData' >&2
+ exit 1
+fi
+if [[ -n $pid ]]; then wait "$pid" 2>/dev/null || true; pid=''; fi
 start_app "$root/legacy"
 for name in geoip.dat geosite.dat; do cmp -- "$root/legacy/$name" "$HRCORE_TEST_XRAY_ASSETS/$name"; done
-printf 'PASS: full hrapi + Xray autostart legacy -> managed -> legacy, runtime healthy, assets intact\n'
+printf 'PASS: full hrapi + Xray autostart legacy -> managed -> legacy, runtime healthy, corrupt managed startup blocked, legacy recovered\n'

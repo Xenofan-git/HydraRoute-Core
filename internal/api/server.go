@@ -426,7 +426,7 @@ func (s *Server) checkGeoDataStartup() error {
 	if s.stateDir == "" {
 		return nil
 	}
-	return geodata.CheckStartupReady(filepath.Join(s.stateDir, "geodata"))
+	return geodata.CheckAssetStartupReady(filepath.Join(s.stateDir, "geodata"), os.Getenv("XRAY_LOCATION_ASSET"))
 }
 
 const managedRecoveryInitial = 5 * time.Second

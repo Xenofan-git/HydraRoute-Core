@@ -52,7 +52,7 @@ func main() {
 	// The CLI starts Xray before api.Server.Serve; guard this path too.
 	// A pending update must never be bypassed by the earlier CLI autostart.
 	if *autoStart {
-		fatal(geodata.CheckStartupReady(filepath.Join(*stateDir, "geodata")))
+		fatal(geodata.CheckAssetStartupReady(filepath.Join(*stateDir, "geodata"), os.Getenv("XRAY_LOCATION_ASSET")))
 	}
 	if *autoStart && supervisor.Status().Configured {
 		startCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)

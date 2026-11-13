@@ -79,3 +79,20 @@ remains a separately executed development-VPS smoke test.
 This CI change has been validated locally on the Moscow development VPS. It
 must not be reported as green GitHub Actions until the branch is pushed and
 GitHub completes the workflow.
+
+## Managed-mode startup fail-closed audit
+
+`CheckAssetStartupReady` distinguishes legacy asset paths from the exact
+managed `<stateDir>/geodata/current` path. A missing store remains allowed
+only for legacy installations; managed startup now rejects a missing store,
+missing current generation, missing GeoIP/GeoSite, symlinks, and invalid
+protobuf databases. Both `cmd/hrapi` pre-autostart and the API's secondary
+startup guard call it; `RecoverStartup` uses it even when no journal exists.
+The full hrapi smoke test deliberately corrupts managed GeoIP, confirms
+managed autostart fails, then restarts with the untouched legacy assets.
+
+Remaining review item: the guard reads generation assets before launching
+Xray, but a separately privileged local actor with write access to the
+private state directory could still modify files between check and launch.
+The production state directory must remain writable only by the dedicated
+service account. No live migration or production service changes occurred.

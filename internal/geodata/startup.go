@@ -15,7 +15,7 @@ func RecoverStartup(root, binary, config, assetPath string) (bool, error) {
 		return false, errors.New("absolute geodata root required")
 	}
 	if _, err := os.Lstat(root); os.IsNotExist(err) {
-		return false, nil
+		return false, CheckAssetStartupReady(root, assetPath)
 	} else if err != nil {
 		return false, err
 	}
@@ -25,7 +25,7 @@ func RecoverStartup(root, binary, config, assetPath string) (bool, error) {
 		return false, err
 	}
 	if tx == nil {
-		return false, CheckStartupReady(root)
+		return false, CheckAssetStartupReady(root, assetPath)
 	}
 	expected := filepath.Join(root, "current")
 	if assetPath != expected {
@@ -45,5 +45,5 @@ func RecoverStartup(root, binary, config, assetPath string) (bool, error) {
 	if err != nil {
 		return restored, err
 	}
-	return restored, CheckStartupReady(root)
+	return restored, CheckAssetStartupReady(root, assetPath)
 }

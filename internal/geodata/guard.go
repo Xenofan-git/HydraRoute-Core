@@ -36,3 +36,34 @@ func CheckStartupReady(root string) error {
 	}
 	return nil
 }
+
+// CheckAssetStartupReady additionally requires a complete generation when
+// Xray explicitly uses this store. Legacy asset paths retain their original
+// missing-store compatibility behavior.
+func CheckAssetStartupReady(root, assetPath string) error {
+	if err := CheckStartupReady(root); err != nil {
+		return err
+	}
+	if assetPath != filepath.Join(root, "current") {
+		return nil
+	}
+	s := &GenerationStore{Root: root}
+	current, err := s.Current()
+	if err != nil {
+		return fmt.Errorf("managed GeoData pointer: %w", err)
+	}
+	if current == "" {
+		return fmt.Errorf("managed GeoData generation is missing")
+	}
+	dir := filepath.Join(root, current)
+	for _, name := range []string{"geoip.dat", "geosite.dat"} {
+		data, err := readCandidate(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("managed %s: %w", name, err)
+		}
+		if err := Validate(name, data); err != nil {
+			return fmt.Errorf("managed %s invalid: %w", name, err)
+		}
+	}
+	return nil
+}
