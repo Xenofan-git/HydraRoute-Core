@@ -150,3 +150,6 @@ button,input,select,textarea{font-size:inherit}
 .subscription-sort{border:0;background:transparent;color:inherit;font:inherit;font-weight:700;padding:2px 4px;cursor:pointer}.subscription-sort:hover{color:var(--accent)}
 
 .event-list .info-row{align-items:flex-start;gap:14px}.event-list .info-row>span:first-child{min-width:150px}.event-list small{display:block;color:var(--muted);font-size:11px;margin-top:3px}.event-message{flex:1;text-align:right;overflow-wrap:anywhere}
+
+/* HRNeo-style outlined navigation glyphs, keeping the Core violet theme. */
+.nav-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:26px}.nav-icon svg{display:block;width:24px;height:24px;stroke:currentColor}.nav-item:hover .nav-icon svg,.nav-item.active .nav-icon svg{filter:drop-shadow(0 0 5px var(--glow))}
