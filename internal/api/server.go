@@ -442,15 +442,17 @@ func (s *Server) runProcessRecovery(ctx context.Context) {
 
 func (s *Server) runRecoveryLoop(ctx context.Context, component string, recoverFn func(context.Context) error) {
 	delay := managedRecoveryInitial
+	hadFailure := false
 	for {
 		callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		err := recoverFn(callCtx)
 		cancel()
+		if ctx.Err() != nil {
+			return
+		}
 		wait := managedRecoveryInitial
 		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
+			hadFailure = true
 			s.recordEvent("warning", component, "automatic_recovery_retry", component+" automatic recovery attempt failed")
 			wait = delay
 			delay *= 2
@@ -458,6 +460,10 @@ func (s *Server) runRecoveryLoop(ctx context.Context, component string, recoverF
 				delay = managedRecoveryMaximum
 			}
 		} else {
+			if hadFailure {
+				s.recordEvent("info", component, "automatic_recovery_succeeded", component+" automatic recovery succeeded")
+				hadFailure = false
+			}
 			delay = managedRecoveryInitial
 		}
 		timer := time.NewTimer(wait)
