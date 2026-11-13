@@ -106,9 +106,9 @@ func (m *Monitor) Apply(checks []Check, metrics Metrics, at time.Time) Snapshot 
 			m.recovery[check.Name] = 0
 			if m.failures[check.Name] >= m.settings.FailThreshold {
 				state = "degraded"
-			} else if previous := m.states[check.Name]; previous != "" {
-				state = previous
 			} else {
+				// A failing probe must never be reported as healthy, even
+				// while waiting for the configured failure threshold.
 				state = "checking"
 			}
 		case "healthy":
