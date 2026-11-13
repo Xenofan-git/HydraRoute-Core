@@ -22,3 +22,7 @@ Added `XrayCheck` with bounded execution of the configured Xray binary's `run -t
 Deployment compatibility finding: current systemd unit sets `XRAY_LOCATION_ASSET=/usr/local/libexec/hydraroute`, which is also `WorkingDirectory` and contains the Xray executable. It is protected by `ProtectSystem=strict`; only `/var/lib/hydraroute` is writable. Therefore no updater can safely overwrite the existing asset directory in-place. Integration requires explicit migration of the asset location into a private generation store and coordinated Xray restart/health check with rollback. Never rewrite the live asset files or unit without a tested migration and user-authorized deployment.
 
 Remaining security work: schema-level semantic checks for GeoIP/GeoSite, safe DNS/public IP handling and TLS trust review, generation crash recovery and post-switch rollback, cross-process locking, API authorization, UI and integration tests. No production change or GitHub push yet.
+
+## Fourth development pass — migration bootstrap
+
+Added `GenerationStore.Bootstrap(source, check)` to import the immutable legacy pair into `generation-0`, preserving source assets, refusing repeat initialization, and validating the copied pair with an Xray callback. Unit tests pass. Migration is NOT executed on NanoPi. Deployment integration and systemd changes remain pending; see `research/2026-11-13-GEODATA-MIGRATION-PLAN.md`.
