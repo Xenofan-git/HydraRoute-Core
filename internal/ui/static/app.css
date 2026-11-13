@@ -261,3 +261,5 @@ button,input,select,textarea{font-size:inherit}
 .subscription-filters label{color:#fff;font-weight:400}
 .subscription-filters textarea{color:#fff;font-weight:400;caret-color:#fff}
 .subscription-filters textarea::placeholder{color:rgba(255,255,255,.55)}
+/* All subscription sort arrows are white, including inactive arrows. */
+.subscription-table thead .subscription-sort-arrow,.subscription-table thead .subscription-sort-arrow.active{color:#fff}
