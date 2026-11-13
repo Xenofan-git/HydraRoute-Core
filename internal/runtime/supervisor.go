@@ -271,3 +271,6 @@ func boundedOutput(b []byte) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+
+// Paths exposes the immutable executable and config paths for isolated preflight.
+func (s *Supervisor) Paths() (string, string) { return s.binary, s.configPath }

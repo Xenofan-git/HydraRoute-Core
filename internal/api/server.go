@@ -30,6 +30,7 @@ import (
 	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
 	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 	"hydraroute.local/core/internal/events"
+	"hydraroute.local/core/internal/geodata"
 	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
@@ -54,6 +55,7 @@ type geoDataAssetStatus struct {
 }
 
 type geoDataStatusResponse struct {
+	Update geodata.StoreStatus  `json:"update"`
 	Ready  bool                 `json:"ready"`
 	Assets []geoDataAssetStatus `json:"assets"`
 	Error  string               `json:"error,omitempty"`
@@ -220,6 +222,8 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/interfaces", s.interfaces)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/geodata/status", s.geoDataStatus)
+	s.mux.HandleFunc("/v1/geodata/preflight", s.geoDataPreflight)
+	s.mux.HandleFunc("/v1/geodata/activate", s.geoDataActivate)
 	s.mux.HandleFunc("/v1/watchlist/status", s.watchlistStatus)
 	s.mux.HandleFunc("/v1/events", s.eventCollection)
 	s.mux.HandleFunc("/v1/events/stream", s.eventStream)
@@ -261,6 +265,14 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	defer s.closeWatchlist()
 	xrayStartedHere := false
 	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		// Serialize the startup guard and Xray start with other API lifecycle
+		// operations; the recovery loop uses this same operation mutex.
+		s.opMu.Lock()
+		if err := s.checkGeoDataStartup(); err != nil {
+			s.opMu.Unlock()
+			s.recordEvent("error", "geodata", "startup_blocked", "Pending or unsafe GeoData state blocks Xray autostart")
+			return fmt.Errorf("Xray autostart blocked: %w", err)
+		}
 		status := s.supervisor.Status()
 		if status.Configured && !status.Running {
 			startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -271,6 +283,7 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 			}
 			cancel()
 		}
+		s.opMu.Unlock()
 	}
 	dnsStarted := false
 	if s.dns != nil && s.dns.Config().Enabled {
@@ -407,6 +420,15 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	}
 }
 
+// checkGeoDataStartup is deliberately read-only: automatic rollback requires
+// an explicit validated Xray preflight and coordinated lifecycle transition.
+func (s *Server) checkGeoDataStartup() error {
+	if s.stateDir == "" {
+		return nil
+	}
+	return geodata.CheckAssetStartupReady(filepath.Join(s.stateDir, "geodata"), os.Getenv("XRAY_LOCATION_ASSET"))
+}
+
 const managedRecoveryInitial = 5 * time.Second
 const managedRecoveryMaximum = 5 * time.Minute
 
@@ -417,6 +439,14 @@ func (s *Server) runProcessRecovery(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			s.runRecoveryLoop(ctx, "runtime", func(callCtx context.Context) error {
+				if err := s.checkGeoDataStartup(); err != nil {
+					return err
+				}
+				s.opMu.Lock()
+				defer s.opMu.Unlock()
+				if err := s.checkGeoDataStartup(); err != nil {
+					return err
+				}
 				return s.supervisor.Recover(callCtx)
 			})
 		}()
@@ -997,13 +1027,23 @@ func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := geoDataStatusResponse{Assets: []geoDataAssetStatus{{Name: "geoip.dat"}, {Name: "geosite.dat"}}}
+	if s.stateDir != "" {
+		result.Update = geodata.InspectStore(filepath.Join(s.stateDir, "geodata"))
+	}
 	assetDir := strings.TrimSpace(os.Getenv("XRAY_LOCATION_ASSET"))
 	if assetDir == "" || !filepath.IsAbs(assetDir) {
 		result.Error = "Xray asset directory is not configured"
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
+	// A managed generation uses an atomic `current` symlink. Accept only
+	// that exact, validated link; arbitrary symlink asset directories remain
+	// forbidden.
+	managedCurrent := s.stateDir != "" && assetDir == filepath.Join(s.stateDir, "geodata", "current") && result.Update.Ready && !result.Update.Pending && result.Update.Error == ""
 	dirInfo, err := os.Lstat(assetDir)
+	if managedCurrent && err == nil && dirInfo.Mode()&os.ModeSymlink != 0 {
+		dirInfo, err = os.Stat(assetDir)
+	}
 	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || dirInfo.Mode().Perm()&0002 != 0 {
 		result.Error = "Xray asset directory is unavailable or unsafe"
 		writeJSON(w, http.StatusOK, result)
@@ -2990,6 +3030,13 @@ func (s *Server) runtime(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		switch strings.ToLower(body.Action) {
 		case "start":
+			// Manual starts must not bypass the same crash-recovery guard
+			// used by CLI autostart and the background recovery loop.
+			if err := s.checkGeoDataStartup(); err != nil {
+				s.recordEvent("error", "geodata", "runtime_start_blocked", "Xray start blocked by pending GeoData recovery")
+				writeError(w, http.StatusConflict, "GeoData recovery required before Xray start")
+				return
+			}
 			if err := s.supervisor.Start(ctx); err != nil {
 				s.recordEvent("error", "runtime", "start_failed", "Xray failed to start")
 				writeError(w, http.StatusConflict, err.Error())
