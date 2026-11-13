@@ -275,3 +275,13 @@ button,input,select,textarea{font-size:inherit}
 .subscription-server-flag img{position:relative;pointer-events:none}
 
 .observatory-note .subscription-server-flag{display:inline-flex;vertical-align:middle;margin:0 4px 0 6px}
+
+/* SVG flags render inside editable filter fields even on Windows without emoji flags. */
+.subscription-filters textarea{display:none}
+.subscription-rich-filter{min-height:110px;max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid rgba(255,185,75,.2);border-radius:10px;background:rgba(3,12,31,.45);color:#fff;padding:10px;font-size:12px;line-height:1.6;outline:none}
+.subscription-rich-filter:focus{border-color:rgba(255,255,255,.6)}
+.subscription-rich-filter[contenteditable=false]{opacity:.5}
+.filter-inline-flag{display:inline-block;vertical-align:-2px;width:19px;height:13px;margin:0 2px;object-fit:cover;border-radius:2px}
+/* Slightly smaller flag for Observatory balancer candidate only. */
+.observatory-note .subscription-server-flag{min-width:14px;margin:0 3px 0 5px}
+.observatory-note .subscription-server-flag img{width:14px;height:10px}
