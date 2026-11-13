@@ -382,6 +382,46 @@ func TestServeContextShutdownStopsManagedRuntime(t *testing.T) {
 	}
 }
 
+func TestServeContextShutdownStopsCoreDNS(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	_ = udp.Close()
+	cfg := h.dns.Config()
+	cfg.Enabled = true
+	cfg.Port = port
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.Serve(ctx, "127.0.0.1:0") }()
+	deadline := time.Now().Add(2 * time.Second)
+	for !h.dns.Status()["running"].(bool) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !h.dns.Status()["running"].(bool) {
+		cancel()
+		<-done
+		t.Fatal("Core DNS did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("API did not shut down")
+	}
+	if h.dns.Status()["running"].(bool) {
+		t.Fatal("Core DNS remained running after API shutdown")
+	}
+}
+
 func TestMutatingEndpointsRejectCrossOriginAndNonJSON(t *testing.T) {
 	h := New(apiSupervisor(t))
 	req := localPost("/v1/runtime", `{"action":"stop"}`)
