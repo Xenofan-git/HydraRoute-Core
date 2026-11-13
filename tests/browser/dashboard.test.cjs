@@ -392,3 +392,27 @@ test('Health Monitor settings persist and event journal is visible', async () =>
     await page.close();
   }
 });
+
+test('pasting a copied country flag into a filter immediately filters servers', async () => {
+  const previous = preview.nodes.map(n => n.name);
+  preview.nodes[0].name = 'NL Hysteria2 Amsterdam';
+  preview.nodes[1].name = 'DE VLESS Berlin';
+  const page = await browser.newPage({ permissions: ['clipboard-read', 'clipboard-write'] });
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="hydra"]').click();
+    await page.locator('[data-preview-servers="foreign"]').click();
+    await page.locator('[data-sub-tab="filters"]').click();
+    await page.locator('.subscription-node-row .subscription-server-flag').first().click();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), '🇳🇱');
+    await page.locator('[data-filter-editor="filterInclude"]').click();
+    await page.keyboard.press('ControlOrMeta+V');
+    await page.locator('[data-filter-editor="filterInclude"] img.filter-inline-flag').waitFor();
+    assert.equal(await page.locator('.subscription-table-wrap .subscription-node-row').count(), 1);
+    assert.match(await page.locator('.subscription-node-row').first().textContent(), /Hysteria2/);
+  } finally {
+    await page.close();
+    preview.nodes.forEach((n,i) => n.name = previous[i]);
+  }
+});
