@@ -223,6 +223,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/geodata/status", s.geoDataStatus)
 	s.mux.HandleFunc("/v1/geodata/preflight", s.geoDataPreflight)
+	s.mux.HandleFunc("/v1/geodata/activate", s.geoDataActivate)
 	s.mux.HandleFunc("/v1/watchlist/status", s.watchlistStatus)
 	s.mux.HandleFunc("/v1/events", s.eventCollection)
 	s.mux.HandleFunc("/v1/events/stream", s.eventStream)
