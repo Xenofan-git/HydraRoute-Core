@@ -303,3 +303,6 @@ button,input,select,textarea{font-size:inherit}
 
 .connection-card-foot [data-profile-test]{display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .connection-speed-wifi{width:16px;height:16px;flex:none;display:block}
+/* Fine-tune connection action glyph proportions. */
+.connection-speed-wifi{width:13px;height:13px}
+.connection-card-actions [data-connection-menu]{font-size:21px}
