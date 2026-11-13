@@ -26,3 +26,9 @@ Remaining security work: schema-level semantic checks for GeoIP/GeoSite, safe DN
 ## Fourth development pass — migration bootstrap
 
 Added `GenerationStore.Bootstrap(source, check)` to import the immutable legacy pair into `generation-0`, preserving source assets, refusing repeat initialization, and validating the copied pair with an Xray callback. Unit tests pass. Migration is NOT executed on NanoPi. Deployment integration and systemd changes remain pending; see `research/2026-11-13-GEODATA-MIGRATION-PLAN.md`.
+
+## Fifth development pass — supervisor orchestration
+
+Implemented a development-only `GenerationStore.Activate` operation with an adapter to the existing Xray Supervisor. Preflight occurs before stopping the running process. A failed start or failed supplied health probe triggers an attempt to stop the new process, roll back to the prior generation, restart and recheck the old runtime. Unit tests cover success, failed start, failed health probe, preflight rejection, failed stop, and missing baseline. All project Go tests and module vet pass.
+
+SAFETY GATES STILL OPEN: This method is not exposed via API or called by production; its health probe is caller-supplied and not yet connected to Xray's live API; no persistent crash-recovery transaction journal; no cross-process lock; `Publish` can report an error after a successful pointer rename (e.g. fsync failure), so caller must reconcile current generation rather than assume no switch; no coordination with API opMu/health recovery loop; no migration of XRAY_LOCATION_ASSET or ext assets. Do not deploy until these are resolved and failure-injection tests cover them.
