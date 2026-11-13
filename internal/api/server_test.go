@@ -1710,6 +1710,50 @@ func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
 }
 
 // A failed API bind must only clean up Xray when this Serve call started it.
+// A DNS bind failure occurs before the API listener exists. It must not leak
+// the newly started Xray child or stop an Xray process already in service.
+func TestServeDNSBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
+	for _, alreadyRunning := range []bool{false, true} {
+		name := "autostarted"
+		if alreadyRunning {
+			name = "preexisting"
+		}
+		t.Run(name, func(t *testing.T) {
+			supervisor := apiSupervisor(t)
+			if err := supervisor.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+				t.Fatal(err)
+			}
+			if alreadyRunning {
+				if err := supervisor.Start(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = supervisor.Stop(context.Background()) }()
+			}
+			h := NewWithOptions(supervisor, t.TempDir(), Options{AutoStart: true})
+			blocker, err := net.ListenPacket("udp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer blocker.Close()
+			cfg := h.dns.Config()
+			cfg.Enabled = true
+			cfg.Port = blocker.LocalAddr().(*net.UDPAddr).Port
+			if err := h.dns.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.Serve(context.Background(), "127.0.0.1:0"); err == nil {
+				t.Fatal("expected Core DNS bind conflict")
+			}
+			if got := supervisor.Status().Running; got != alreadyRunning {
+				t.Fatalf("Xray running=%v after DNS bind failure, want %v", got, alreadyRunning)
+			}
+			if h.dns.Status()["running"].(bool) {
+				t.Fatal("Core DNS remained running after failed startup")
+			}
+		})
+	}
+}
+
 func TestServeBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
 	for _, alreadyRunning := range []bool{false, true} {
 		name := "autostarted"
