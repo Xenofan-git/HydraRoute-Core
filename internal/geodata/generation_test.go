@@ -77,3 +77,36 @@ func TestGenerationRejectsUnsafeRootAndLink(t *testing.T) {
 		t.Fatal("accepted symlink root")
 	}
 }
+
+func TestGenerationRejectsDanglingCurrent(t *testing.T) {
+	root := t.TempDir()
+	s := &GenerationStore{Root: root}
+	if err := os.Symlink("generation-999", filepath.Join(root, "current")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Current(); err == nil {
+		t.Fatal("accepted dangling current generation")
+	}
+}
+
+func TestGenerationXrayPreflightFailureDoesNotActivate(t *testing.T) {
+	root := t.TempDir()
+	entry := append(field(1, []byte("RU")), field(2, field(1, []byte{127}))...)
+	data := field(1, entry)
+	s := &GenerationStore{Root: root}
+	cfg := filepath.Join(root, "config.json")
+	if err := os.WriteFile(cfg, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(root, "fake-xray")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Publish(data, data, (XrayCheck{Binary: script, Config: cfg}).Check); err == nil {
+		t.Fatal("failed Xray preflight must block publish")
+	}
+	current, err := s.Current()
+	if err != nil || current != "" {
+		t.Fatalf("failed preflight activated generation: %q %v", current, err)
+	}
+}

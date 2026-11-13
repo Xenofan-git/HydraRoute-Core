@@ -109,6 +109,10 @@ func (s *GenerationStore) Current() (string, error) {
 	if !validGeneration(target) {
 		return "", errors.New("unsafe current generation link")
 	}
+	info, err := os.Lstat(filepath.Join(s.Root, target))
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("current generation target is missing or unsafe")
+	}
 	return target, nil
 }
 func (s *GenerationStore) switchTo(target string) error {
