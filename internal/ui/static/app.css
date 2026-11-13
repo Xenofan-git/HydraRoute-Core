@@ -266,3 +266,5 @@ button,input,select,textarea{font-size:inherit}
 /* White sortable table headers: Name, Ping and Latency. */
 .subscription-table thead .subscription-sort{color:#fff}
 .subscription-table thead .subscription-sort:hover{color:#fff}
+/* White select-all / deselect-all caption in server table header. */
+.subscription-table thead th:first-child .subscription-check{color:#fff}
