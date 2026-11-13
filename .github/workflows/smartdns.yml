@@ -8,6 +8,12 @@ on:
       - 'third_party/smartdns/**'
       - 'tests/integration/smartdns_profile_pinned_socks.py'
       - '.github/workflows/smartdns.yml'
+  pull_request:
+    paths:
+      - 'internal/dnsservice/smartdns/**'
+      - 'third_party/smartdns/**'
+      - 'tests/integration/smartdns_profile_pinned_socks.py'
+      - '.github/workflows/smartdns.yml'
 
 permissions:
   contents: read
@@ -15,55 +21,29 @@ permissions:
 jobs:
   build:
     name: Build SmartDNS ${{ matrix.arch }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
+            runner: ubuntu-24.04
             cc: gcc
             ar: ar
             machine: Advanced Micro Devices X86-64
           - arch: arm64
-            cc: aarch64-linux-gnu-gcc
-            ar: aarch64-linux-gnu-ar
+            runner: ubuntu-24.04-arm
+            cc: gcc
+            ar: ar
             machine: AArch64
     steps:
       - name: Checkout HydraRoute Core
         uses: actions/checkout@v4
 
       - name: Install native build dependencies
-        if: matrix.arch == 'amd64'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential binutils git libssl-dev file
-
-      - name: Install ARM64 cross-build dependencies
-        if: matrix.arch == 'arm64'
-        run: |
-          # The runner's default archive/security mirrors are native-architecture only.
-          # Keep them amd64-only and resolve ARM64 packages from Ubuntu Ports.
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i '/^Architectures:/d; /^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
-          elif [ -f /etc/apt/sources.list ]; then
-            sudo sed -i -E '/^deb /{ /\[arch=/! s/^deb /deb [arch=amd64] /; }' /etc/apt/sources.list
-          else
-            echo 'Could not locate the Ubuntu APT source list to scope native repositories' >&2
-            exit 1
-          fi
-          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports/
-          Suites: noble noble-updates noble-backports noble-security
-          Components: main universe restricted multiverse
-          Architectures: arm64
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          EOF
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install -y build-essential binutils git file \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu libc6-dev-arm64-cross \
-            libssl-dev:arm64
 
       - name: Fetch pinned SmartDNS source and apply Core isolation patch
         run: |
@@ -85,9 +65,6 @@ jobs:
           chmod +x "$RUNNER_TEMP/build-bin/nproc"
           cd "$RUNNER_TEMP/smartdns"
           EXTRA_LDFLAGS=""
-          if [ "$SMARTDNS_ARCH" = arm64 ]; then
-            EXTRA_LDFLAGS="-L/usr/lib/aarch64-linux-gnu"
-          fi
           PATH="$RUNNER_TEMP/build-bin:$PATH" make -C src -j2 \
             CC="$SMARTDNS_CC" AR="$SMARTDNS_AR" \
             WITH_ZLIB=0 VER=48.4 EXTRA_LDFLAGS="$EXTRA_LDFLAGS"
@@ -127,6 +104,16 @@ jobs:
           sudo apt-get install -y openssl strace
           chmod +x "$RUNNER_TEMP/smartdns/smartdns"
 
+      - name: Set up Go for managed runtime integration
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify managed SmartDNS start, readiness and stop
+        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns/smartdns
+        run: go test -count=1 -v -run TestRuntimeWithSmartDNSBinary ./internal/dnsservice/smartdns
+
       - name: Verify TLS, profile-pinned SOCKS and fail-closed isolation
         env:
           SMARTDNS_BINARY: ${{ runner.temp }}/smartdns/smartdns
@@ -135,7 +122,7 @@ jobs:
   sandbox-arm64:
     name: Verify ARM64 profile-pinned SOCKS, TLS and fail-closed isolation under QEMU
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout HydraRoute Core
         uses: actions/checkout@v4
@@ -146,48 +133,41 @@ jobs:
           name: smartdns-arm64-release48.4
           path: ${{ runner.temp }}/smartdns-arm64
 
-      - name: Install QEMU and ARM64 runtime libraries
-        shell: bash
+      - name: Install native ARM64 runtime test tools
         run: |
-          set -euo pipefail
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i '/^Architectures:/d; /^Types: deb$/a Architectures: amd64' /etc/apt/sources.list.d/ubuntu.sources
-          elif [ -f /etc/apt/sources.list ]; then
-            sudo sed -i -E '/^deb /{ /\[arch=/! s/^deb /deb [arch=amd64] /; }' /etc/apt/sources.list
-          else
-            echo 'Could not locate the Ubuntu APT source list to scope native repositories' >&2
-            exit 1
-          fi
-          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports/
-          Suites: noble noble-updates noble-backports noble-security
-          Components: main universe restricted multiverse
-          Architectures: arm64
-          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
-          EOF
-          sudo dpkg --add-architecture arm64
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static libc6:arm64 libssl3:arm64 libgcc-s1:arm64 openssl strace
+          sudo apt-get install -y openssl strace
+          chmod +x "$RUNNER_TEMP/smartdns-arm64/smartdns"
           file "$RUNNER_TEMP/smartdns-arm64/smartdns"
           readelf -h "$RUNNER_TEMP/smartdns-arm64/smartdns" | grep -F AArch64
-          cat > "$RUNNER_TEMP/smartdns-arm64/smartdns-qemu" <<EOF
-          #!/usr/bin/env bash
-          exec qemu-aarch64-static -strace -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" "\$@"
-          EOF
-          chmod +x "$RUNNER_TEMP/smartdns-arm64/smartdns-qemu"
-          qemu-aarch64-static --version
-          readelf -l "$RUNNER_TEMP/smartdns-arm64/smartdns" | grep -F 'Requesting program interpreter' || true
-          ls -l /lib/ld-linux-aarch64.so.1 /lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 /usr/lib/aarch64-linux-gnu/libssl.so.3 2>&1 || true
-          set +e
-          qemu-aarch64-static -strace -L / "$RUNNER_TEMP/smartdns-arm64/smartdns" -v
-          echo "QEMU SmartDNS version preflight rc=$?"
-          set -e
 
-      - name: Verify ARM64 SmartDNS isolation under QEMU
+      - name: Set up Go for managed runtime integration
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify managed SmartDNS start, readiness and stop
         env:
-          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns-qemu
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns
+        run: go test -count=1 -v -run TestRuntimeWithSmartDNSBinary ./internal/dnsservice/smartdns
+
+      - name: Verify native ARM64 SmartDNS isolation
+        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns
           SMARTDNS_DNS_TIMEOUT: "8"
           SMARTDNS_STARTUP_TIMEOUT: "30"
           SMARTDNS_NO_STRACE: "0"
         run: python3 tests/integration/smartdns_profile_pinned_socks.py
+
+      - name: Upload ARM64 runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartdns-arm64-qemu-diagnostics
+          path: |
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.log
+            /tmp/hrcore-smartdns-sandbox-*/smartdns-internal.log
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.strace
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.conf
+          if-no-files-found: warn
+          retention-days: 7

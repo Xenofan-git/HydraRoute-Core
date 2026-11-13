@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -18,11 +19,40 @@ const MaxSubscriptionBytes = 8 << 20
 // FetchSubscription downloads a plain or Base64 subscription body over HTTP(S).
 // It rejects private/local destinations, unsafe redirects and oversized bodies.
 func FetchSubscription(ctx context.Context, rawURL string) (string, error) {
+	return FetchSubscriptionOnInterface(ctx, rawURL, "")
+}
+
+// FetchSubscriptionOnInterface binds outbound HTTP(S) connections to the
+// requested Linux network interface. Hostname resolution uses the system
+// resolver so local DNS stubs remain reachable. An empty interface uses
+// normal system routing.
+func FetchSubscriptionOnInterface(ctx context.Context, rawURL, interfaceName string) (string, error) {
 	u, err := validateSubscriptionURL(rawURL)
 	if err != nil {
 		return "", err
 	}
+	if interfaceName != "" {
+		iface, err := net.InterfaceByName(interfaceName)
+		if err != nil || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			return "", fmt.Errorf("DNS blocklist interface %q is unavailable or not an active network interface", interfaceName)
+		}
+	}
 	dialer := &net.Dialer{Timeout: 8 * time.Second, KeepAlive: 30 * time.Second}
+	if interfaceName != "" {
+		dialer.Control = func(network, address string, raw syscall.RawConn) error {
+			var socketErr error
+			if err := raw.Control(func(fd uintptr) {
+				socketErr = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, interfaceName)
+			}); err != nil {
+				return err
+			}
+			return socketErr
+		}
+	}
+	// Resolve through the system resolver first: on Debian this may be a
+	// local stub (127.0.0.53) that cannot itself be reached through a bound
+	// physical interface. The actual HTTP(S) sockets remain interface-bound.
+	resolver := net.DefaultResolver
 	transport := &http.Transport{
 		Proxy:           nil,
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
@@ -31,7 +61,7 @@ func FetchSubscription(ctx context.Context, rawURL string) (string, error) {
 			if err != nil {
 				return nil, fmt.Errorf("invalid subscription destination")
 			}
-			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			ips, err := resolver.LookupIPAddr(ctx, host)
 			if err != nil {
 				return nil, fmt.Errorf("subscription host lookup failed")
 			}

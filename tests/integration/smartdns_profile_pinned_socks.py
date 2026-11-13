@@ -23,6 +23,7 @@ STARTUP_TIMEOUT = float(os.environ.get("SMARTDNS_STARTUP_TIMEOUT", "10"))
 if not SMARTDNS or not Path(SMARTDNS).is_file():
     raise SystemExit("SMARTDNS_BINARY must point to the built SmartDNS executable")
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 ROOT = Path(tempfile.mkdtemp(prefix="hrcore-smartdns-sandbox-"))
 CERTS = ROOT / "certs"
 DATA = ROOT / "data"
@@ -31,6 +32,7 @@ HITS: list[tuple[int, str]] = []
 PROXY_EVENTS: list[tuple[int, str, int]] = []
 SNI: list[str | None] = []
 DISABLED_PROXIES: set[int] = set()
+ACTIVE_PROXY_CLIENTS: dict[int, set[socket.socket]] = {}
 LOCK = threading.Lock()
 HTTP_SERVERS: list[ThreadingHTTPServer] = []
 SOCKS_SERVERS: list[socketserver.ThreadingTCPServer] = []
@@ -68,7 +70,8 @@ def create_test_ca() -> None:
         "-extfile", str(CERTS / "server.ext"),
     ])
     run_checked(["openssl", "rehash", str(CERTS)])
-    (DATA / "ads.txt").write_text("ads.example.test\n")
+    (DATA / "ads.txt").write_text("ads.example.test\nblocked.example.test\nblocked.allow-parent.example.test\n")
+    (DATA / "allow.txt").write_text("safe.ads.example.test\nexact.example.test\nallow-parent.example.test\n")
 
 
 def read_exact(sock: socket.socket, size: int) -> bytes:
@@ -121,7 +124,6 @@ class DoHHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/dns-message")
         self.send_header("Content-Length", str(len(response)))
-        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(response)
 
@@ -149,6 +151,9 @@ def start_doh_servers() -> None:
 class SocksHandler(socketserver.BaseRequestHandler):
     def handle(self) -> None:
         client = self.request
+        proxy_port = self.server.server_address[1]
+        with LOCK:
+            ACTIVE_PROXY_CLIENTS.setdefault(proxy_port, set()).add(client)
         client.settimeout(6)
         try:
             version, method_count = read_exact(client, 2)
@@ -169,7 +174,6 @@ class SocksHandler(socketserver.BaseRequestHandler):
             else:
                 return
             target_port = struct.unpack("!H", read_exact(client, 2))[0]
-            proxy_port = self.server.server_address[1]
             with LOCK:
                 PROXY_EVENTS.append((proxy_port, host, target_port))
             if proxy_port in DISABLED_PROXIES:
@@ -206,6 +210,24 @@ class SocksHandler(socketserver.BaseRequestHandler):
                 client.sendall(b"\x05\x05\x00\x01\x7f\x00\x00\x01\x00\x00")
             except OSError:
                 pass
+        finally:
+            with LOCK:
+                ACTIVE_PROXY_CLIENTS.get(proxy_port, set()).discard(client)
+
+
+def disable_proxy(port: int) -> None:
+    with LOCK:
+        DISABLED_PROXIES.add(port)
+        clients = list(ACTIVE_PROXY_CLIENTS.get(port, set()))
+    for client in clients:
+        try:
+            client.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            client.close()
+        except OSError:
+            pass
 
 
 class SocksServer(socketserver.ThreadingTCPServer):
@@ -221,6 +243,7 @@ def start_socks_servers() -> None:
 
 
 def build_config() -> Path:
+    debug_log = ROOT / "smartdns-debug.log"
     config = f"""bind 127.0.0.1:16053
 bind-tcp 127.0.0.1:16053
 cache-size 4096
@@ -230,7 +253,8 @@ local-ptr-enable no
 mdns-lookup no
 expand-ptr-from-address no
 audit-enable no
-log-level error
+log-level debug
+log-file {debug_log}
 speed-check-mode none
 ca-path {CERTS}
 proxy-server socks5://127.0.0.1:16081 -name hr_proxy_foreign
@@ -238,10 +262,13 @@ proxy-server socks5://127.0.0.1:16082 -name hr_proxy_torrent
 server-https https://dns-foreign.example.test:18443/dns-query -group hr_dns_foreign -exclude-default-group -proxy hr_proxy_foreign -host-name dns-foreign.example.test -tls-host-verify dns-foreign.example.test -host-ip 127.0.0.1 -http-host dns-foreign.example.test
 server-https https://dns-torrent.example.test:18444/dns-query -group hr_dns_torrent -exclude-default-group -proxy hr_proxy_torrent -host-name dns-torrent.example.test -tls-host-verify dns-torrent.example.test -host-ip 127.0.0.1 -http-host dns-torrent.example.test
 domain-set -name hr_set_ads -type list -file {DATA / 'ads.txt'}
+domain-set -name hr_set_allow -type list -file {DATA / 'allow.txt'}
 address /domain-set:hr_set_ads/#
+address /domain-set:hr_set_allow/-
 address /allowed.example.test/203.0.113.5
 nameserver /foreign.test/hr_dns_foreign
 nameserver /torrent.test/hr_dns_torrent
+nameserver /example.test/hr_dns_foreign
 """
     path = ROOT / "smartdns.conf"
     path.write_text(config)
@@ -311,8 +338,28 @@ def verify_strace(trace_path: Path | None) -> None:
         print("SKIP: strace unavailable; runtime proxy/TLS checks still executed")
         return
     trace = trace_path.read_text(errors="replace")
-    if re.search(r"socket\((AF|PF)_NETLINK", trace):
-        raise AssertionError("SmartDNS opened a NETLINK socket")
+    # SmartDNS 48.4 performs read-only neighbor discovery through
+    # NETLINK_ROUTE: subscribe to RTMGRP_NEIGH and dump RTM_GETNEIGH.
+    # Permit only that read-only request; any other netlink write/request fails.
+    netlink_fds = set()
+    for line in trace.splitlines():
+        match = re.search(r"socket\(AF_NETLINK,[^)]*\)\s+=\s+(\d+)", line)
+        if match:
+            if "NETLINK_ROUTE" not in line:
+                raise AssertionError(f"SmartDNS opened an unexpected netlink family: {line}")
+            netlink_fds.add(int(match.group(1)))
+    for line in trace.splitlines():
+        match = re.search(r"(?:sendto|sendmsg)\((\d+),", line)
+        if match and int(match.group(1)) in netlink_fds:
+            dump_flags = "0x300" in line or ("NLM_F_ROOT" in line and "NLM_F_MATCH" in line) or "NLM_F_DUMP" in line
+            get_neigh = "nlmsg_type=0x1e" in line or "nlmsg_type=RTM_GETNEIGH" in line
+            if not get_neigh or "NLM_F_REQUEST" not in line or not dump_flags:
+                raise AssertionError(f"SmartDNS issued a non-read-only netlink request: {line}")
+    for line in trace.splitlines():
+        if "bind(" in line and "AF_NETLINK" in line:
+            neighbor_group = any(marker in line for marker in ("nl_groups=0x000004", "nl_groups=0x4", "nl_groups=4", "nl_groups=RTMGRP_NEIGH"))
+            if not neighbor_group:
+                raise AssertionError(f"SmartDNS subscribed to an unexpected netlink group: {line}")
     if '"/etc/resolv.conf"' in trace:
         raise AssertionError("SmartDNS read the host /etc/resolv.conf")
     if re.search(r'execve\(".*/(ip|iptables|ip6tables|nft|ipset|conntrack)"', trace):
@@ -370,9 +417,25 @@ def main() -> None:
         assert dns_query("allowed.example.test") == "203.0.113.5", "static allow response failed"
         before_ads = len(HITS)
         ads_result = dns_query("ads.example.test")
-        assert ads_result != "203.0.113.77", f"domain-set query escaped to DoH: {ads_result}"
+        blocked_result = dns_query("blocked.example.test")
+        assert ads_result != "203.0.113.77", f"block domain-set query escaped to DoH: {ads_result}"
+        assert blocked_result != "203.0.113.77", f"second block domain-set query escaped to DoH: {blocked_result}"
         with LOCK:
-            assert len(HITS) == before_ads, "domain-set query unexpectedly reached a DoH upstream"
+            assert len(HITS) == before_ads, "blocked domain-set query unexpectedly reached a DoH upstream"
+        # SmartDNS DOMAIN_FLAG_ADDR_IGN must override a matching parent block
+        # suffix. Exact Block/Allow duplicates are normalized out of the block
+        # set by the Core compiler before this configuration reaches SmartDNS.
+        assert dns_query("safe.ads.example.test") == "203.0.113.77", "child allow exception did not override parent block"
+        assert dns_query("exact.example.test") == "203.0.113.77", "normalized exact allow exception did not reach upstream"
+        # Engine-behavior probe, not an HRDNS-parity expectation:
+        # SmartDNS 48.4 accumulates the parent allow flag and therefore lets this
+        # raw native-engine query through. Core's separate DNS policy front
+        # evaluates HRDNS longest-suffix precedence before forwarding to SmartDNS.
+        assert dns_query("blocked.allow-parent.example.test") == "203.0.113.77", "SmartDNS native parent-allow behavior changed"
+        with LOCK:
+            assert any(name == "safe.ads.example.test" for _port, name in HITS), HITS
+            assert any(name == "exact.example.test" for _port, name in HITS), HITS
+            assert any(name == "blocked.allow-parent.example.test" for _port, name in HITS), HITS
         assert dns_query("login.foreign.test") == "203.0.113.77", "DoH over foreign profile SOCKS failed"
         assert dns_query("tracker.torrent.test") == "203.0.113.77", "DoH over torrent profile SOCKS failed"
         with LOCK:
@@ -381,8 +444,32 @@ def main() -> None:
             assert any(proxy == 16081 and target_port == 18443 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
             assert any(proxy == 16082 and target_port == 18444 for proxy, _host, target_port in PROXY_EVENTS), PROXY_EVENTS
             assert "dns-foreign.example.test" in SNI and "dns-torrent.example.test" in SNI, SNI
+            before_policy_front = len(HITS)
+
+        # Exercise the actual Core DNS policy resolver in front of this live
+        # pinned SmartDNS process. This proves the HRDNS parent-allow/child-block
+        # case is stopped before SmartDNS, while allowed queries still use the
+        # profile-pinned SOCKS/DoH groups.
+        policy_env = os.environ.copy()
+        policy_env["HRCORE_SMARTDNS_TEST_ADDR"] = "127.0.0.1:16053"
+        subprocess.run(
+            [
+                "go", "test", "./internal/dnsservice",
+                "-run", "^TestPolicyFrontAgainstRunningSmartDNS$",
+                "-count=1",
+            ],
+            cwd=REPO_ROOT,
+            env=policy_env,
+            check=True,
+        )
+        with LOCK:
+            policy_hits = HITS[before_policy_front:]
+            assert not any(name == "blocked.allow-parent.example.test" for _port, name in policy_hits), policy_hits
+            assert any(name == "policy.safe.ads.example.test" for _port, name in policy_hits), policy_hits
+            assert any(port == 18443 and name == "policy-login.foreign.test" for port, name in policy_hits), policy_hits
+            assert any(port == 18444 and name == "policy-tracker.torrent.test" for port, name in policy_hits), policy_hits
             before_foreign_failure = len(HITS)
-        DISABLED_PROXIES.add(16081)
+        disable_proxy(16081)
         assert dns_query("login2.foreign.test") != "203.0.113.77", "foreign DNS bypassed its failed profile SOCKS proxy"
         with LOCK:
             assert len(HITS) == before_foreign_failure, f"foreign query reached DoH after its proxy was disabled: {HITS[before_foreign_failure:]}"
@@ -397,6 +484,16 @@ def main() -> None:
         print("DoH hits:", HITS)
         print("SOCKS routes:", PROXY_EVENTS)
         print("TLS SNI:", SNI)
+    except AssertionError:
+        debug_path = ROOT / "smartdns-debug.log"
+        if LOG_FILE is not None:
+            LOG_FILE.write("\\n=== SmartDNS debug log (tail) ===\\n")
+            if debug_path.is_file():
+                LOG_FILE.write(debug_path.read_text(errors="replace")[-24000:])
+            with LOCK:
+                LOG_FILE.write(f"\\n=== HITS ===\\n{HITS}\\n=== SOCKS EVENTS ===\\n{PROXY_EVENTS}\\n=== SNI ===\\n{SNI}\\n")
+            LOG_FILE.flush()
+        raise
     finally:
         cleanup()
     verify_strace(Path(trace_path) if trace_path else None)

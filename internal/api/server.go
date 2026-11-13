@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/net/proxy"
 	"io"
 	"mime"
 	"net"
@@ -24,9 +23,14 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/net/proxy"
+
 	"hydraroute.local/core/internal/compiler"
 	"hydraroute.local/core/internal/dnsservice"
+	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
+	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 	"hydraroute.local/core/internal/events"
+	"hydraroute.local/core/internal/geodata"
 	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
@@ -41,6 +45,7 @@ import (
 
 const maxRequestBytes = 8 << 20
 const maxGeoDataAssetBytes = 128 << 20
+const smartDNSBinaryPath = "/usr/local/libexec/hydraroute/smartdns"
 
 type geoDataAssetStatus struct {
 	Name      string `json:"name"`
@@ -50,6 +55,7 @@ type geoDataAssetStatus struct {
 }
 
 type geoDataStatusResponse struct {
+	Update geodata.StoreStatus  `json:"update"`
 	Ready  bool                 `json:"ready"`
 	Assets []geoDataAssetStatus `json:"assets"`
 	Error  string               `json:"error,omitempty"`
@@ -79,11 +85,21 @@ type Server struct {
 	profileStore        *profiles.Store
 	routingStore        *routeconfig.Store
 	dns                 *dnsservice.Manager
+	dnsPolicyMu         sync.RWMutex
+	smartDNSPolicyOn    bool
+	smartDNSDomainSets  []hrsmartdns.DomainSet
+	blocklists          *dnsblocklist.Manager
+	blocklistsErr       string
+	smartDNSRuntime     *hrsmartdns.Runtime
+	smartDNSConfig      hrsmartdns.Config
+	smartDNSConfigPath  string
+	smartDNSErr         string
 	opMu                sync.Mutex
 	refreshMu           sync.Mutex
 	refreshOpts         Options
 	refreshState        RefreshStatus
 	refreshWake         chan struct{}
+	blocklistWake       chan struct{}
 	probeMu             sync.RWMutex
 	probeSaveMu         sync.Mutex
 	probeCache          map[string]map[string]xrayapi.OutboundStatus
@@ -124,7 +140,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	if opts.RetryMax < opts.RetryMin {
 		opts.RetryMax = opts.RetryMin
 	}
-	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 30, subscriptionFetcher: parser.FetchSubscription, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
+	s := &Server{supervisor: supervisor, stateDir: stateDir, refreshOpts: opts, refreshState: RefreshStatus{Enabled: opts.RefreshInterval > 0, IntervalSeconds: int64(opts.RefreshInterval.Seconds())}, refreshWake: make(chan struct{}, 1), blocklistWake: make(chan struct{}, 1), probeCache: make(map[string]map[string]xrayapi.OutboundStatus), observatoryInterval: 120, subscriptionFetcher: parser.FetchSubscription, l7Settings: compiler.L7SniffingConfig{HTTP: true, TLS: true, QUIC: true}, mux: http.NewServeMux()}
 	s.events = events.New("")
 	healthSettings := health.DefaultSettings()
 	if stateDir != "" {
@@ -136,6 +152,40 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
 		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
+		s.smartDNSConfig = hrsmartdns.DefaultConfig()
+		s.smartDNSConfigPath = filepath.Join(stateDir, "dns", "smartdns", "config.json")
+		if runtime, err := hrsmartdns.NewRuntime(hrsmartdns.RuntimeConfig{
+			BinaryPath: smartDNSBinaryPath,
+			StateDir:   filepath.Join(stateDir, "dns", "smartdns", "runtime"),
+			ListenAddr: net.JoinHostPort("127.0.0.1", strconv.Itoa(s.smartDNSConfig.ListenPort)),
+		}); err != nil {
+			s.smartDNSErr = err.Error()
+		} else {
+			s.smartDNSRuntime = runtime
+		}
+		if info, err := os.Lstat(s.smartDNSConfigPath); err == nil {
+			if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+				s.smartDNSErr = "saved SmartDNS configuration must be a private regular file"
+			} else if data, readErr := os.ReadFile(s.smartDNSConfigPath); readErr != nil {
+				s.smartDNSErr = "saved SmartDNS configuration could not be read"
+			} else if err := json.Unmarshal(data, &s.smartDNSConfig); err != nil {
+				s.smartDNSErr = "saved SmartDNS configuration is invalid"
+			}
+		} else if !os.IsNotExist(err) {
+			s.smartDNSErr = "saved SmartDNS configuration could not be inspected"
+		}
+		s.setSmartDNSPolicyConfig(s.smartDNSConfig)
+		if s.smartDNSRuntime != nil {
+			if err := s.smartDNSRuntime.Apply(context.Background(), s.smartDNSConfig, s.smartDNSProfileRefs()); err != nil {
+				s.smartDNSErr = err.Error()
+			}
+		}
+		if manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), nil); err != nil {
+			s.blocklistsErr = err.Error()
+		} else {
+			s.blocklists = manager
+		}
+		s.applyDNSBlocklists()
 		if data, err := os.ReadFile(filepath.Join(stateDir, "refresh-settings.json")); err == nil {
 			var saved struct {
 				Enabled         bool  `json:"enabled"`
@@ -172,6 +222,8 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/interfaces", s.interfaces)
 	s.mux.HandleFunc("/v1/routing", s.routingConfig)
 	s.mux.HandleFunc("/v1/geodata/status", s.geoDataStatus)
+	s.mux.HandleFunc("/v1/geodata/preflight", s.geoDataPreflight)
+	s.mux.HandleFunc("/v1/geodata/activate", s.geoDataActivate)
 	s.mux.HandleFunc("/v1/watchlist/status", s.watchlistStatus)
 	s.mux.HandleFunc("/v1/events", s.eventCollection)
 	s.mux.HandleFunc("/v1/events/stream", s.eventStream)
@@ -180,6 +232,13 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
 	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
 	s.mux.HandleFunc("/v1/dns/check", s.dnsCheck)
+	s.mux.HandleFunc("/v1/dns/smartdns", s.smartDNSHandler)
+	s.mux.HandleFunc("/v1/dns/smartdns/", s.smartDNSAction)
+	s.mux.HandleFunc("/v1/dns/blocklists", s.dnsBlocklists)
+	s.mux.HandleFunc("/v1/dns/blocklists/catalog", s.dnsBlocklistCatalog)
+	s.mux.HandleFunc("/v1/dns/blocklists/custom", s.dnsBlocklistCustom)
+	s.mux.HandleFunc("/v1/dns/blocklists/settings", s.dnsBlocklistSettings)
+	s.mux.HandleFunc("/v1/dns/blocklists/", s.dnsBlocklistItem)
 	s.mux.Handle("/", ui.Handler())
 	if s.supervisor != nil && s.supervisor.Status().Configured {
 		s.syncWatchlist()
@@ -204,9 +263,38 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		return fmt.Errorf("API listen address must be a literal loopback IP")
 	}
 	defer s.closeWatchlist()
+	xrayStartedHere := false
+	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		// Serialize the startup guard and Xray start with other API lifecycle
+		// operations; the recovery loop uses this same operation mutex.
+		s.opMu.Lock()
+		if err := s.checkGeoDataStartup(); err != nil {
+			s.opMu.Unlock()
+			s.recordEvent("error", "geodata", "startup_blocked", "Pending or unsafe GeoData state blocks Xray autostart")
+			return fmt.Errorf("Xray autostart blocked: %w", err)
+		}
+		status := s.supervisor.Status()
+		if status.Configured && !status.Running {
+			startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			if err := s.supervisor.Start(startCtx); err != nil {
+				s.recordEvent("error", "runtime", "xray_autostart_failed", "Xray failed to start during API recovery")
+			} else {
+				xrayStartedHere = true
+			}
+			cancel()
+		}
+		s.opMu.Unlock()
+	}
 	dnsStarted := false
 	if s.dns != nil && s.dns.Config().Enabled {
 		if err := s.dns.Start(); err != nil {
+			// Startup must not leave an autostarted Xray child behind when
+			// the Core DNS policy front fails to bind.
+			if xrayStartedHere {
+				stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				_ = s.supervisor.Stop(stopCtx)
+				cancel()
+			}
 			return fmt.Errorf("start saved DNS service: %w", err)
 		}
 		dnsStarted = true
@@ -216,7 +304,21 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		if dnsStarted {
 			_ = s.dns.Stop()
 		}
+		if xrayStartedHere {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			_ = s.supervisor.Stop(stopCtx)
+			cancel()
+		}
 		return err
+	}
+	if s.refreshOpts.AutoStart && s.smartDNSRuntime != nil && s.smartDNSConfig.Enabled {
+		s.smartDNSRuntime.SetDesiredRunning(true)
+		startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		if err := s.startSmartDNSWithPolicyForwarder(startCtx); err != nil {
+			s.smartDNSErr = err.Error()
+			s.recordEvent("error", "dns", "smartdns_autostart_failed", "SmartDNS could not be restored during API startup; recovery will retry")
+		}
+		cancel()
 	}
 	s.recordEvent("info", "api", "started", "HydraRoute Core API started")
 	srv := &http.Server{Addr: address, Handler: s.mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
@@ -226,6 +328,10 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	monitorDone := make(chan struct{})
 	go func() { defer close(monitorDone); s.runHealthMonitor(monitorCtx) }()
 	defer func() { monitorCancel(); <-monitorDone }()
+	recoveryCtx, recoveryCancel := context.WithCancel(ctx)
+	recoveryDone := make(chan struct{})
+	go func() { defer close(recoveryDone); s.runProcessRecovery(recoveryCtx) }()
+	defer func() { recoveryCancel(); <-recoveryDone }()
 	schedulerCtx, schedulerCancel := context.WithCancel(ctx)
 	schedulerDone := make(chan struct{})
 	if s.refreshOpts.RefreshInterval > 0 {
@@ -234,50 +340,199 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		s.refreshState.NextAttempt = &nextAttempt
 		s.refreshMu.Unlock()
 	}
-	go func() { defer close(schedulerDone); s.runRefreshScheduler(schedulerCtx) }()
+	go func() {
+		defer close(schedulerDone)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); s.runRefreshScheduler(schedulerCtx) }()
+		go func() { defer wg.Done(); s.runBlocklistScheduler(schedulerCtx) }()
+		wg.Wait()
+	}()
 	defer func() { schedulerCancel(); <-schedulerDone }()
 	select {
 	case err := <-serveErr:
-		if s.dns != nil {
-			_ = s.dns.Stop()
-		}
+		recoveryCancel()
+		<-recoveryDone
+		monitorCancel()
+		<-monitorDone
 		schedulerCancel()
 		<-schedulerDone
 		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
 		s.opMu.Lock()
+		var smartDNSErr error
+		if s.smartDNSRuntime != nil {
+			smartDNSErr = s.smartDNSRuntime.Stop(stopCtx)
+		}
 		runtimeErr := s.supervisor.Stop(stopCtx)
 		s.opMu.Unlock()
+		var dnsErr error
+		if s.dns != nil {
+			dnsErr = s.dns.Stop()
+		}
+		if smartDNSErr != nil {
+			return fmt.Errorf("API stopped unexpectedly (%v); stop SmartDNS: %w", err, smartDNSErr)
+		}
 		if runtimeErr != nil {
 			return fmt.Errorf("API stopped unexpectedly (%v); stop managed Xray: %w", err, runtimeErr)
+		}
+		if dnsErr != nil {
+			return fmt.Errorf("API stopped unexpectedly (%v); stop Core DNS: %w", err, dnsErr)
 		}
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	case <-ctx.Done():
+		recoveryCancel()
+		<-recoveryDone
 		monitorCancel()
 		<-monitorDone
-		s.closeWatchlist()
-		if s.dns != nil {
-			_ = s.dns.Stop()
-		}
 		schedulerCancel()
 		<-schedulerDone
 		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
+		shutdownErr := srv.Shutdown(stopCtx)
 		s.opMu.Lock()
+		var smartDNSErr error
+		if s.smartDNSRuntime != nil {
+			smartDNSErr = s.smartDNSRuntime.Stop(stopCtx)
+		}
 		runtimeErr := s.supervisor.Stop(stopCtx)
 		s.opMu.Unlock()
-		shutdownErr := srv.Shutdown(stopCtx)
+		var dnsErr error
+		if s.dns != nil {
+			dnsErr = s.dns.Stop()
+		}
+		if smartDNSErr != nil {
+			return fmt.Errorf("stop SmartDNS: %w", smartDNSErr)
+		}
 		if runtimeErr != nil {
 			return fmt.Errorf("stop managed Xray: %w", runtimeErr)
+		}
+		if dnsErr != nil {
+			return fmt.Errorf("stop Core DNS: %w", dnsErr)
 		}
 		if shutdownErr != nil {
 			return fmt.Errorf("shutdown API: %w", shutdownErr)
 		}
 		return nil
 	}
+}
+
+// checkGeoDataStartup is deliberately read-only: automatic rollback requires
+// an explicit validated Xray preflight and coordinated lifecycle transition.
+func (s *Server) checkGeoDataStartup() error {
+	if s.stateDir == "" {
+		return nil
+	}
+	return geodata.CheckAssetStartupReady(filepath.Join(s.stateDir, "geodata"), os.Getenv("XRAY_LOCATION_ASSET"))
+}
+
+const managedRecoveryInitial = 5 * time.Second
+const managedRecoveryMaximum = 5 * time.Minute
+
+func (s *Server) runProcessRecovery(ctx context.Context) {
+	var wg sync.WaitGroup
+	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.runRecoveryLoop(ctx, "runtime", func(callCtx context.Context) error {
+				if err := s.checkGeoDataStartup(); err != nil {
+					return err
+				}
+				s.opMu.Lock()
+				defer s.opMu.Unlock()
+				if err := s.checkGeoDataStartup(); err != nil {
+					return err
+				}
+				return s.supervisor.Recover(callCtx)
+			})
+		}()
+	}
+	if s.refreshOpts.AutoStart && s.smartDNSRuntime != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.runRecoveryLoop(ctx, "dns", func(callCtx context.Context) error {
+				status := s.smartDNSRuntime.Status()
+				if !status.Desired {
+					return nil
+				}
+				if err := s.configureSmartDNSPolicyForwarder(); err != nil {
+					return err
+				}
+				return s.smartDNSRuntime.Recover(callCtx)
+			})
+		}()
+	}
+	wg.Wait()
+}
+
+func (s *Server) runRecoveryLoop(ctx context.Context, component string, recoverFn func(context.Context) error) {
+	delay := managedRecoveryInitial
+	hadFailure := false
+	for {
+		callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		err := recoverFn(callCtx)
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		wait := managedRecoveryInitial
+		if err != nil {
+			hadFailure = true
+			s.recordEvent("warning", component, "automatic_recovery_retry", component+" automatic recovery attempt failed")
+			wait = delay
+			delay *= 2
+			if delay > managedRecoveryMaximum {
+				delay = managedRecoveryMaximum
+			}
+		} else {
+			if hadFailure {
+				s.recordEvent("info", component, "automatic_recovery_succeeded", component+" automatic recovery succeeded")
+				hadFailure = false
+			}
+			delay = managedRecoveryInitial
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Server) configureSmartDNSPolicyForwarder() error {
+	if s.dns == nil || !s.dns.Config().Enabled {
+		return fmt.Errorf("Core DNS policy resolver is disabled")
+	}
+	if running, _ := s.dns.Status()["running"].(bool); !running {
+		return fmt.Errorf("Core DNS policy resolver is not running")
+	}
+	if s.dns.Config().Port == smartDNSListenPort(s.smartDNSConfig) {
+		return fmt.Errorf("SmartDNS and Core DNS must use different loopback ports")
+	}
+	return s.dns.SetSmartDNSForwarder(smartDNSForwardAddress(s.smartDNSConfig))
+}
+
+func (s *Server) startSmartDNSWithPolicyForwarder(ctx context.Context) error {
+	if err := s.configureSmartDNSPolicyForwarder(); err != nil {
+		return err
+	}
+	if err := s.smartDNSRuntime.Start(ctx); err != nil {
+		return err
+	}
+	s.smartDNSErr = ""
+	return nil
 }
 
 func (s *Server) recordEvent(level, component, eventType, message string) {
@@ -597,8 +852,10 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 		switch {
 		case !status.Configured:
 			add("xray", "not_configured", "No validated Xray configuration")
+		case !status.Running && status.Desired:
+			add("xray", "failed", "Xray is expected to run but is stopped; recovery is pending")
 		case !status.Running:
-			add("xray", "warning", "Xray process is stopped")
+			add("xray", "warning", "Xray process is stopped by operator")
 		default:
 			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
 			_, err := xrayapi.GetOutboundStatus(probeCtx, s.observatoryAPIAddress())
@@ -616,6 +873,28 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 		add("dns", "healthy", "Core DNS resolver is running")
 	} else {
 		add("dns", "failed", "Core DNS resolver is enabled but stopped")
+	}
+	if s.smartDNSRuntime == nil {
+		add("smartdns", "not_configured", "SmartDNS runtime is unavailable")
+	} else if !s.smartDNSConfig.Enabled {
+		add("smartdns", "disabled", "SmartDNS is disabled")
+	} else {
+		status := s.smartDNSRuntime.Status()
+		switch {
+		case !status.Running && status.Desired:
+			add("smartdns", "failed", "SmartDNS is expected to run but is stopped; recovery is pending")
+		case !status.Running:
+			add("smartdns", "warning", "SmartDNS is stopped by operator")
+		default:
+			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			err := s.smartDNSRuntime.Ready(probeCtx)
+			cancel()
+			if err != nil {
+				add("smartdns", "failed", "SmartDNS DNS readiness probe failed")
+			} else {
+				add("smartdns", "healthy", "SmartDNS process and DNS readiness probe are responding")
+			}
+		}
 	}
 	assetDir := strings.TrimSpace(os.Getenv("XRAY_LOCATION_ASSET"))
 	geoState := "healthy"
@@ -708,7 +987,7 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 	for _, check := range result.Checks {
 		if old, ok := previousStates[check.Name]; ok && old != check.State {
 			level := "info"
-			if check.State == "degraded" || check.State == "warning" {
+			if check.State == "degraded" || check.State == "warning" || check.State == "checking" {
 				level = "warning"
 			}
 			s.recordEvent(level, "health", "component_state_changed", check.Name+" health state changed: "+old+" -> "+check.State)
@@ -748,14 +1027,24 @@ func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := geoDataStatusResponse{Assets: []geoDataAssetStatus{{Name: "geoip.dat"}, {Name: "geosite.dat"}}}
+	if s.stateDir != "" {
+		result.Update = geodata.InspectStore(filepath.Join(s.stateDir, "geodata"))
+	}
 	assetDir := strings.TrimSpace(os.Getenv("XRAY_LOCATION_ASSET"))
 	if assetDir == "" || !filepath.IsAbs(assetDir) {
 		result.Error = "Xray asset directory is not configured"
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
+	// A managed generation uses an atomic `current` symlink. Accept only
+	// that exact, validated link; arbitrary symlink asset directories remain
+	// forbidden.
+	managedCurrent := s.stateDir != "" && assetDir == filepath.Join(s.stateDir, "geodata", "current") && result.Update.Ready && !result.Update.Pending && result.Update.Error == ""
 	dirInfo, err := os.Lstat(assetDir)
-	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
+	if managedCurrent && err == nil && dirInfo.Mode()&os.ModeSymlink != 0 {
+		dirInfo, err = os.Stat(assetDir)
+	}
+	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || dirInfo.Mode().Perm()&0002 != 0 {
 		result.Error = "Xray asset directory is unavailable or unsafe"
 		writeJSON(w, http.StatusOK, result)
 		return
@@ -765,7 +1054,7 @@ func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
 		asset := &result.Assets[i]
 		path := filepath.Join(assetDir, asset.Name)
 		info, statErr := os.Lstat(path)
-		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > maxGeoDataAssetBytes {
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0002 != 0 || info.Size() <= 0 || info.Size() > maxGeoDataAssetBytes {
 			result.Ready = false
 			continue
 		}
@@ -1879,34 +2168,8 @@ func probeICMPEcho(ctx context.Context, host string) map[string]any {
 
 // profilePingStream mirrors HRweb's proxy.pingServers event contract: ICMP
 // echo (host-to-server, outside Xray) and proxy delay (Xray Observatory) are
-// separate events and separate measurements. Observatory has no force-probe
-// RPC, so the stream waits for the next real configured observation cycle.
-func (s *Server) observatorySubjectCount(ctx context.Context, currentProfileID string, currentNodes []service.PreviewNode) (int, error) {
-	profiles, err := s.profileStore.ListProfiles()
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, profile := range profiles {
-		if !profile.Enabled {
-			continue
-		}
-		if profile.ID == currentProfileID {
-			total += len(currentNodes)
-			continue
-		}
-		preview, previewErr := service.PreviewProfileCached(ctx, profile, s.stateDir)
-		if previewErr != nil {
-			continue
-		}
-		total += len(eligibleObservatoryNodes(preview))
-	}
-	if total < 1 {
-		total = 1
-	}
-	return total, nil
-}
-
+// separate events and separate measurements. Xray probes selected subjects
+// concurrently; this stream waits for the next complete configured cycle.
 func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -2042,22 +2305,16 @@ func (s *Server) profilePingStream(w http.ResponseWriter, r *http.Request) {
 		send(pingStreamEvent{Done: true, Error: "Xray не запущен: прокси-задержка недоступна"})
 		return
 	}
-	// Xray has no force-probe RPC. Its interval is distributed across all
-	// subjects, so a full configured cycle may take up to the panel interval.
+	// Xray probes all selected subjects concurrently. The configured interval
+	// is the pause between complete observation cycles, not a per-node slice.
 	// Keep the stream alive and let the caller cancel it if the wait is unwanted.
 	s.opMu.Lock()
 	cycleSeconds := s.observatoryInterval
 	s.opMu.Unlock()
 	if cycleSeconds < 5 || cycleSeconds > 3600 {
-		cycleSeconds = 30
+		cycleSeconds = 120
 	}
-	subjectCount, countErr := s.observatorySubjectCount(ctx, profileID, eligibleNodes)
-	if countErr != nil {
-		send(pingStreamEvent{Done: true, Error: "Не удалось определить размер пула Observatory"})
-		return
-	}
-	probeIntervalMS := compiler.ObservatoryProbeIntervalMS(cycleSeconds, subjectCount)
-	cycleDuration := time.Duration(probeIntervalMS*subjectCount) * time.Millisecond
+	cycleDuration := time.Duration(cycleSeconds) * time.Second
 	deadline := time.Now().Add(cycleDuration + 10*time.Second)
 	sent := map[string]bool{}
 	poll := time.NewTicker(500 * time.Millisecond)
@@ -2583,6 +2840,85 @@ func (s *Server) profileRefreshDelay() (time.Duration, bool) {
 	return earliest, found
 }
 
+func nextDailyBlocklistUpdate(now time.Time, updateTime string) time.Time {
+	parts := strings.Split(updateTime, ":")
+	if len(parts) != 2 {
+		return now.Add(24 * time.Hour)
+	}
+	hour, errHour := strconv.Atoi(parts[0])
+	minute, errMinute := strconv.Atoi(parts[1])
+	if errHour != nil || errMinute != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return now.Add(24 * time.Hour)
+	}
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, now.Location())
+	if !next.After(now) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
+}
+
+// runBlocklistScheduler mirrors HRNeo's daily DNS blocklist job. Its schedule
+// is independent of subscription refresh and uses the saved local wall-clock
+// time (default 04:30) and optional interface-bound downloader.
+func (s *Server) runBlocklistScheduler(ctx context.Context) {
+	for {
+		if s.blocklists == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.blocklistWake:
+				continue
+			}
+		}
+		settings := s.blocklists.Settings()
+		if !settings.AutoUpdate {
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.blocklistWake:
+				continue
+			}
+		}
+		next := nextDailyBlocklistUpdate(time.Now(), settings.UpdateTime)
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-s.blocklistWake:
+			timer.Stop()
+			continue
+		case <-timer.C:
+		}
+		refreshCtx, cancel := context.WithTimeout(ctx, 60*time.Minute)
+		failures := s.blocklists.RefreshAll(refreshCtx)
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		s.applyDNSBlocklists()
+		if len(failures) > 0 {
+			messages := make([]string, 0, len(failures))
+			for _, err := range failures {
+				messages = append(messages, err.Error())
+			}
+			s.recordEvent("warning", "dns", "blocklist_scheduled_refresh_partial", strings.Join(messages, "; "))
+		} else {
+			s.recordEvent("info", "dns", "blocklist_scheduled_refresh", "Scheduled DNS blocklist refresh completed")
+		}
+	}
+}
+
+func (s *Server) wakeBlocklistScheduler() {
+	if s.blocklistWake == nil {
+		return
+	}
+	select {
+	case s.blocklistWake <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Server) runRefreshScheduler(ctx context.Context) {
 	retryDelay := time.Duration(0)
 	for {
@@ -2694,6 +3030,13 @@ func (s *Server) runtime(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		switch strings.ToLower(body.Action) {
 		case "start":
+			// Manual starts must not bypass the same crash-recovery guard
+			// used by CLI autostart and the background recovery loop.
+			if err := s.checkGeoDataStartup(); err != nil {
+				s.recordEvent("error", "geodata", "runtime_start_blocked", "Xray start blocked by pending GeoData recovery")
+				writeError(w, http.StatusConflict, "GeoData recovery required before Xray start")
+				return
+			}
 			if err := s.supervisor.Start(ctx); err != nil {
 				s.recordEvent("error", "runtime", "start_failed", "Xray failed to start")
 				writeError(w, http.StatusConflict, err.Error())
@@ -2889,6 +3232,14 @@ func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		previous := s.dns.Config()
 		wasRunning, _ := s.dns.Status()["running"].(bool)
+		if !c.Enabled && s.smartDNSRuntime != nil && s.smartDNSRuntime.Status().Running {
+			writeError(w, http.StatusConflict, "stop SmartDNS before disabling the Core DNS policy resolver")
+			return
+		}
+		if c.Enabled && s.smartDNSConfig.Enabled && c.Port == smartDNSListenPort(s.smartDNSConfig) {
+			writeError(w, http.StatusConflict, "SmartDNS and Core DNS must use different loopback ports")
+			return
+		}
 		if wasRunning {
 			if err := s.dns.Stop(); err != nil {
 				writeError(w, 500, "cannot stop DNS service for configuration update: "+err.Error())
@@ -2921,6 +3272,9 @@ func (s *Server) dnsConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			writeError(w, 500, "Core DNS apply failed; previous DNS settings restored: "+err.Error())
 			return
+		}
+		if !c.Enabled {
+			_ = s.dns.SetSmartDNSForwarder("")
 		}
 		s.recordEvent("info", "dns", "configuration_updated", "Core DNS configuration updated")
 		writeJSON(w, 200, map[string]any{"config": s.dns.Config(), "status": s.dns.Status(), "stats": s.dns.Stats()})
@@ -2969,6 +3323,10 @@ func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "stop":
+		if s.smartDNSRuntime != nil && s.smartDNSRuntime.Status().Running {
+			writeError(w, http.StatusConflict, "stop SmartDNS before stopping the Core DNS policy resolver")
+			return
+		}
 		if err = s.applyCoreDNSRuntime(false); err != nil {
 			break
 		}
@@ -2992,6 +3350,8 @@ func (s *Server) dnsService(w http.ResponseWriter, r *http.Request) {
 			if rollbackErr != nil {
 				err = fmt.Errorf("save DNS stop state failed: %v; rollback failed: %w", err, rollbackErr)
 			}
+		} else {
+			_ = s.dns.SetSmartDNSForwarder("")
 		}
 	default:
 		writeError(w, 400, "action must be start or stop")
@@ -3166,11 +3526,8 @@ func (s *Server) applyObservatoryInterval(seconds int) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	subjects := 1
-	if selector, ok := observatory["subjectSelector"].([]any); ok && len(selector) > 0 {
-		subjects = len(selector)
-	}
-	observatory["probeInterval"] = fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(seconds, subjects))
+	observatory["enableConcurrency"] = true
+	observatory["probeInterval"] = fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(seconds))
 	next, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return false, err
@@ -3425,4 +3782,588 @@ func (s *Server) watchlistStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	s.watchlistMu.Unlock()
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) setSmartDNSPolicyConfig(cfg hrsmartdns.Config) {
+	sets := make([]hrsmartdns.DomainSet, len(cfg.DomainSets))
+	for i, set := range cfg.DomainSets {
+		sets[i] = set
+		sets[i].Domains = append([]string(nil), set.Domains...)
+	}
+	s.dnsPolicyMu.Lock()
+	s.smartDNSPolicyOn = cfg.Enabled
+	s.smartDNSDomainSets = sets
+	s.dnsPolicyMu.Unlock()
+}
+
+func (s *Server) applyDNSBlocklists() {
+	if s.dns == nil {
+		return
+	}
+	var blocked, allowed []string
+	if s.blocklists != nil {
+		snapshot := s.blocklists.Snapshot()
+		blocked = append(blocked, snapshot.Blocked...)
+		allowed = append(allowed, snapshot.Allowed...)
+	}
+	// Both managed URL lists and configured block/allow domain sets are
+	// evaluated by the Core DNS front resolver. SmartDNS receives route sets
+	// only, avoiding inherited address-flag precedence differences.
+	s.dnsPolicyMu.RLock()
+	policyEnabled := s.smartDNSPolicyOn
+	sets := make([]hrsmartdns.DomainSet, len(s.smartDNSDomainSets))
+	for i, set := range s.smartDNSDomainSets {
+		sets[i] = set
+		sets[i].Domains = append([]string(nil), set.Domains...)
+	}
+	s.dnsPolicyMu.RUnlock()
+	if policyEnabled {
+		for _, set := range sets {
+			if !set.Enabled {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(set.Kind)) {
+			case "block":
+				blocked = append(blocked, set.Domains...)
+			case "allow":
+				allowed = append(allowed, set.Domains...)
+			}
+		}
+	}
+	s.dns.SetBlocklistDomains(blocked, allowed)
+}
+
+func smartDNSListenPort(cfg hrsmartdns.Config) int {
+	if cfg.ListenPort == 0 {
+		return hrsmartdns.DefaultConfig().ListenPort
+	}
+	return cfg.ListenPort
+}
+
+func smartDNSForwardAddress(cfg hrsmartdns.Config) string {
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(smartDNSListenPort(cfg)))
+}
+
+func (s *Server) smartDNSStatusError() string {
+	return s.smartDNSErr
+}
+
+func (s *Server) smartDNSProfileRefs() []hrsmartdns.ProfileRef {
+	if s.profileStore == nil {
+		return nil
+	}
+	items, err := s.profileStore.List()
+	if err != nil {
+		return nil
+	}
+	out := make([]hrsmartdns.ProfileRef, 0, len(items))
+	for _, item := range items {
+		if !item.Enabled {
+			continue
+		}
+		listen := item.Listen
+		if listen == "" {
+			listen = "127.0.0.1"
+		}
+		out = append(out, hrsmartdns.ProfileRef{ID: item.ID, Enabled: item.Enabled, Listen: listen, Port: int(item.Port)})
+	}
+	return out
+}
+
+func (s *Server) persistSmartDNSConfig(cfg hrsmartdns.Config) error {
+	if s.smartDNSConfigPath == "" {
+		return fmt.Errorf("SmartDNS state path is not configured")
+	}
+	dir := filepath.Dir(s.smartDNSConfigPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0077 != 0 {
+		return fmt.Errorf("SmartDNS configuration directory must be private and must not be a symlink")
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".smartdns-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(name, s.smartDNSConfigPath); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
+
+func (s *Server) smartDNSHandler(w http.ResponseWriter, r *http.Request) {
+	if s.smartDNSRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "SmartDNS runtime is unavailable")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
+		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSStatusError()})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var cfg hrsmartdns.Config
+		if err := decodeStrictJSON(w, r, &cfg, 256<<10); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid SmartDNS configuration")
+			return
+		}
+		defaults := hrsmartdns.DefaultConfig()
+		if cfg.ListenHost == "" {
+			cfg.ListenHost = defaults.ListenHost
+		}
+		if cfg.ListenPort == 0 {
+			cfg.ListenPort = defaults.ListenPort
+		}
+		if s.dns != nil && cfg.ListenPort == s.dns.Config().Port {
+			writeError(w, http.StatusConflict, "SmartDNS and Core DNS must use different loopback ports")
+			return
+		}
+		cfg.CAPath = defaults.CAPath
+		cfg.DataDir = ""
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
+		previous := s.smartDNSConfig
+		wasRunning := s.smartDNSRuntime.Status().Running
+		wasForwarding := s.dns != nil && s.dns.SmartDNSForwarder() != ""
+		if err := s.persistSmartDNSConfig(cfg); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot persist SmartDNS configuration")
+			return
+		}
+		if err := s.smartDNSRuntime.Apply(r.Context(), cfg, s.smartDNSProfileRefs()); err != nil {
+			if restoreErr := s.persistSmartDNSConfig(previous); restoreErr != nil {
+				s.smartDNSErr = "SmartDNS apply failed and saved configuration rollback failed: " + restoreErr.Error()
+			} else {
+				s.smartDNSErr = err.Error()
+			}
+			writeError(w, http.StatusUnprocessableEntity, s.smartDNSErr)
+			return
+		}
+		s.smartDNSConfig = cfg
+		s.setSmartDNSPolicyConfig(cfg)
+		s.smartDNSErr = ""
+		s.applyDNSBlocklists()
+		shouldRun := cfg.Enabled && (wasRunning || wasForwarding || s.refreshOpts.AutoStart)
+		if shouldRun {
+			s.smartDNSRuntime.SetDesiredRunning(true)
+			if err := s.startSmartDNSWithPolicyForwarder(r.Context()); err != nil {
+				s.smartDNSErr = err.Error()
+				writeError(w, http.StatusBadGateway, "SmartDNS configuration was saved but automatic startup failed; recovery will retry")
+				return
+			}
+		} else if s.dns != nil && !cfg.Enabled {
+			_ = s.dns.SetSmartDNSForwarder("")
+		}
+		s.recordEvent("info", "dns", "smartdns_config_prepared", "SmartDNS configuration prepared")
+		writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": ""})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) smartDNSAction(w http.ResponseWriter, r *http.Request) {
+	if s.smartDNSRuntime == nil {
+		writeError(w, http.StatusServiceUnavailable, "SmartDNS runtime is unavailable")
+		return
+	}
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalJSONRequest(r) {
+		writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+		return
+	}
+	action := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/dns/smartdns/"), "/")
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	switch action {
+	case "start":
+		if !s.smartDNSConfig.Enabled {
+			writeError(w, http.StatusConflict, "SmartDNS is disabled")
+			return
+		}
+		if s.dns == nil || !s.dns.Config().Enabled || !s.dns.Status()["running"].(bool) {
+			writeError(w, http.StatusConflict, "start the Core DNS policy resolver before SmartDNS")
+			return
+		}
+		if s.dns.Config().Port == smartDNSListenPort(s.smartDNSConfig) {
+			writeError(w, http.StatusConflict, "SmartDNS and Core DNS must use different loopback ports")
+			return
+		}
+		// Install the exclusive forwarder before starting SmartDNS. Queries
+		// during startup must fail closed rather than leak to public DNS.
+		if err := s.startSmartDNSWithPolicyForwarder(r.Context()); err != nil {
+			s.smartDNSErr = err.Error()
+			s.recordEvent("error", "dns", "smartdns_start_failed", "SmartDNS failed to start; Core DNS remains fail-closed")
+			writeError(w, http.StatusBadGateway, "SmartDNS failed to start; DNS forwarding remains fail-closed")
+			return
+		}
+		s.smartDNSErr = ""
+		s.recordEvent("info", "dns", "smartdns_started", "SmartDNS sidecar started behind Core DNS policy resolver")
+	case "stop":
+		if err := s.smartDNSRuntime.Stop(r.Context()); err != nil {
+			s.smartDNSErr = err.Error()
+			writeError(w, http.StatusBadGateway, "SmartDNS failed to stop")
+			return
+		}
+		if s.dns != nil {
+			_ = s.dns.SetSmartDNSForwarder("")
+		}
+		s.recordEvent("info", "dns", "smartdns_stopped", "SmartDNS sidecar stopped; Core DNS upstream restored")
+	default:
+		writeError(w, http.StatusNotFound, "SmartDNS action not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"config": s.smartDNSConfig, "status": s.smartDNSRuntime.Status(), "error": s.smartDNSErr})
+}
+
+func (s *Server) dnsBlocklistCustom(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		writeError(w, http.StatusServiceUnavailable, "DNS blocklist state is not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		snapshot := s.blocklists.Snapshot()
+		writeJSON(w, http.StatusOK, map[string]string{
+			"block": strings.Join(snapshot.CustomBlock, "\n"),
+			"allow": strings.Join(snapshot.CustomAllow, "\n"),
+		})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var input struct {
+			Block string `json:"block"`
+			Allow string `json:"allow"`
+		}
+		if err := decodeStrictJSON(w, r, &input, 2<<20); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid custom DNS block/allow lists")
+			return
+		}
+		block, err := dnsblocklist.ParseCustomList(strings.NewReader(input.Block))
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid custom block list: "+err.Error())
+			return
+		}
+		allow, err := dnsblocklist.ParseCustomList(strings.NewReader(input.Allow))
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "invalid custom allow list: "+err.Error())
+			return
+		}
+		snapshot, err := s.blocklists.SaveCustomLists(block, allow)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.applyDNSBlocklists()
+		s.recordEvent("info", "dns", "blocklist_custom_saved", "Custom DNS block and allow lists saved")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"block":    strings.Join(snapshot.CustomBlock, "\n"),
+			"allow":    strings.Join(snapshot.CustomAllow, "\n"),
+			"snapshot": snapshot,
+		})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) dnsBlocklistCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !validLocalReadRequest(r) {
+		writeError(w, http.StatusForbidden, "local request required")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"presets": dnsblocklist.Catalog()})
+}
+
+func (s *Server) dnsBlocklistSettings(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		writeError(w, http.StatusServiceUnavailable, "DNS blocklist state is not configured")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		settings := s.blocklists.Settings()
+		next := any(nil)
+		if settings.AutoUpdate {
+			next = nextDailyBlocklistUpdate(time.Now(), settings.UpdateTime)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"settings": settings, "next_update": next})
+	case http.MethodPut:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var settings dnsblocklist.RefreshSettings
+		if err := decodeStrictJSON(w, r, &settings, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid DNS blocklist refresh settings")
+			return
+		}
+		saved, err := s.blocklists.SaveSettings(settings)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.wakeBlocklistScheduler()
+		s.recordEvent("info", "dns", "blocklist_schedule_saved", "DNS blocklist automatic refresh settings saved")
+		next := any(nil)
+		if saved.AutoUpdate {
+			next = nextDailyBlocklistUpdate(time.Now(), saved.UpdateTime)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"settings": saved, "next_update": next})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) dnsBlocklists(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		message := "DNS blocklist state is not configured"
+		if s.blocklistsErr != "" {
+			message = "DNS blocklist state could not be loaded"
+		}
+		writeError(w, http.StatusServiceUnavailable, message)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if !validLocalReadRequest(r) {
+			writeError(w, http.StatusForbidden, "local request required")
+			return
+		}
+		writeJSON(w, http.StatusOK, s.blocklists.Snapshot())
+	case http.MethodPost:
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var source dnsblocklist.Source
+		if err := decodeStrictJSON(w, r, &source, 32<<10); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid DNS blocklist source")
+			return
+		}
+		saved, err := s.blocklists.SaveSource(source)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.applyDNSBlocklists()
+		s.recordEvent("info", "dns", "blocklist_source_saved", "DNS blocklist source saved")
+		writeJSON(w, http.StatusCreated, map[string]any{"source": saved, "snapshot": s.blocklists.Snapshot()})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) dnsBlocklistItem(w http.ResponseWriter, r *http.Request) {
+	if s.blocklists == nil {
+		message := "DNS blocklist state is not configured"
+		if s.blocklistsErr != "" {
+			message = "DNS blocklist state could not be loaded"
+		}
+		writeError(w, http.StatusServiceUnavailable, message)
+		return
+	}
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/dns/blocklists/"), "/")
+	parts := strings.Split(path, "/")
+	if path == "" || len(parts) == 0 || parts[0] == "" {
+		writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+		return
+	}
+	if len(parts) == 1 && parts[0] == "_refresh" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		failures := s.blocklists.RefreshAll(r.Context())
+		s.applyDNSBlocklists()
+		messages := make([]string, 0, len(failures))
+		for _, err := range failures {
+			messages = append(messages, err.Error())
+		}
+		if len(failures) > 0 {
+			s.recordEvent("warning", "dns", "blocklist_refresh_all_partial", "One or more DNS blocklist sources failed to refresh; last known-good data was retained")
+		} else {
+			s.recordEvent("info", "dns", "blocklist_refresh_all", "DNS blocklist refresh completed")
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"snapshot": s.blocklists.Snapshot(), "failures": messages})
+		return
+	}
+	id := parts[0]
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			if !validLocalReadRequest(r) {
+				writeError(w, http.StatusForbidden, "local request required")
+				return
+			}
+			source, err := s.blocklists.Get(id)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+				return
+			}
+			writeJSON(w, http.StatusOK, source)
+		case http.MethodPut:
+			if !validLocalJSONRequest(r) {
+				writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+				return
+			}
+			var source dnsblocklist.Source
+			if err := decodeStrictJSON(w, r, &source, 32<<10); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid DNS blocklist source")
+				return
+			}
+			source.ID = id
+			saved, err := s.blocklists.SaveSource(source)
+			if err != nil {
+				writeError(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
+			s.applyDNSBlocklists()
+			writeJSON(w, http.StatusOK, map[string]any{"source": saved, "snapshot": s.blocklists.Snapshot()})
+		case http.MethodPatch:
+			if !validLocalJSONRequest(r) {
+				writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+				return
+			}
+			var request struct {
+				Enabled *bool `json:"enabled"`
+			}
+			if err := decodeStrictJSON(w, r, &request, 4096); err != nil || request.Enabled == nil {
+				writeError(w, http.StatusBadRequest, "enabled boolean is required")
+				return
+			}
+			source, err := s.blocklists.SetEnabled(id, *request.Enabled)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+				return
+			}
+			s.applyDNSBlocklists()
+			writeJSON(w, http.StatusOK, map[string]any{"source": source, "snapshot": s.blocklists.Snapshot()})
+		case http.MethodDelete:
+			if !validLocalReadRequest(r) {
+				writeError(w, http.StatusForbidden, "local request required")
+				return
+			}
+			if err := s.blocklists.Delete(id); err != nil {
+				writeError(w, http.StatusNotFound, "DNS blocklist source not found")
+				return
+			}
+			s.applyDNSBlocklists()
+			s.recordEvent("warning", "dns", "blocklist_source_deleted", "DNS blocklist source deleted")
+			writeJSON(w, http.StatusOK, s.blocklists.Snapshot())
+		default:
+			methodNotAllowed(w)
+		}
+		return
+	}
+	if len(parts) != 2 {
+		writeError(w, http.StatusNotFound, "DNS blocklist action not found")
+		return
+	}
+	action := parts[1]
+	if action == "refresh" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		source, err := s.blocklists.Refresh(r.Context(), id)
+		s.applyDNSBlocklists()
+		if err != nil {
+			s.recordEvent("warning", "dns", "blocklist_source_refresh_failed", "DNS blocklist source refresh failed; last known-good data was retained")
+			writeJSON(w, http.StatusBadGateway, map[string]any{"source": source, "snapshot": s.blocklists.Snapshot(), "error": err.Error()})
+			return
+		}
+		s.recordEvent("info", "dns", "blocklist_source_refreshed", "DNS blocklist source refreshed")
+		writeJSON(w, http.StatusOK, map[string]any{"source": source, "snapshot": s.blocklists.Snapshot()})
+		return
+	}
+	if action == "remove" || action == "restore" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if !validLocalJSONRequest(r) {
+			writeError(w, http.StatusForbidden, "local same-origin JSON request required")
+			return
+		}
+		var request struct {
+			Domain string `json:"domain"`
+		}
+		if err := decodeStrictJSON(w, r, &request, 4096); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid DNS blocklist domain")
+			return
+		}
+		var err error
+		if action == "remove" {
+			err = s.blocklists.RemoveEntry(id, request.Domain)
+		} else {
+			err = s.blocklists.RestoreEntry(id, request.Domain)
+		}
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.applyDNSBlocklists()
+		s.recordEvent("info", "dns", "blocklist_entry_updated", "DNS blocklist entry updated")
+		writeJSON(w, http.StatusOK, s.blocklists.Snapshot())
+		return
+	}
+	writeError(w, http.StatusNotFound, "DNS blocklist action not found")
 }

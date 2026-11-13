@@ -80,6 +80,12 @@ func (m *Monitor) Configure(settings Settings) error {
 		return err
 	}
 	m.mu.Lock()
+	if m.settings.FailThreshold != settings.FailThreshold || m.settings.RecoverThreshold != settings.RecoverThreshold {
+		// Threshold changes start a fresh observation window; counters
+		// accumulated under the old policy must not trigger transitions.
+		m.failures = make(map[string]int)
+		m.recovery = make(map[string]int)
+	}
 	m.settings = settings
 	m.mu.Unlock()
 	return nil
@@ -104,11 +110,13 @@ func (m *Monitor) Apply(checks []Check, metrics Metrics, at time.Time) Snapshot 
 		case "failed":
 			m.failures[check.Name]++
 			m.recovery[check.Name] = 0
-			if m.failures[check.Name] >= m.settings.FailThreshold {
+			if m.failures[check.Name] >= m.settings.FailThreshold || m.states[check.Name] == "degraded" {
+				// Once degraded, remain degraded until enough consecutive
+				// healthy probes satisfy the recovery threshold.
 				state = "degraded"
-			} else if previous := m.states[check.Name]; previous != "" {
-				state = previous
 			} else {
+				// A failing probe must never be reported as healthy, even
+				// while waiting for the configured failure threshold.
 				state = "checking"
 			}
 		case "healthy":

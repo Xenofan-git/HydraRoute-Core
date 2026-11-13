@@ -1,0 +1,40 @@
+# GeoIP / GeoSite update development — 2026-11-13
+
+Development checkout: /srv/development/isolated-checkouts/hrcore-geo-audit
+Base: PR #7 branch integration/hrneo-dns-blocklist-parser-20261110, c129ae1.
+
+Implemented internal/geodata candidate validation (protobuf structural checks), HTTPS fetch with SHA-256 verification, bounded response, no redirects/proxies and public-IP-only dial, and isolated staged pair with fsync. All Go tests pass on Moscow VPS.
+
+NOT YET IMPLEMENTED: full semantic Xray schema validation; generation-based atomic activation; crash recovery and rollback; management API/UI; production deployment. StagePair intentionally does not change XRAY_LOCATION_ASSET. Existing NanoPi, Keenetic, 3x-ui and CSQTT are untouched. This code must not be advertised as a completed updater.
+
+Next: implement crash-safe generation pointer with migration compatibility for existing non-symlink asset directory, rollback and restart validation, then API/UI and integration tests. Review DNS resolver and HTTPS trust policy before allowing configurable URLs in API.
+
+## Second development pass
+
+Added GenerationStore: a private generation directory containing both validated assets, one atomic `current` symlink rename, explicit callback for candidate runtime validation before publish, and rollback to a validated earlier generation. The module rejects unsafe generation names and symlink roots. Tests cover success, failed validation preserving current, rollback, path traversal, and unsafe links. `go test ./...` passes on Moscow VPS.
+
+IMPORTANT LIMITATIONS: `current` is NOT wired to Xray's actual XRAY_LOCATION_ASSET; no live activation, post-switch Xray health check or crash-state reconciliation yet. A successful symlink rename is not proof that a running Xray instance uses the new data. The `check` callback must be supplied by a trusted Xray validator before production integration. Filesystem sync errors after rename need explicit recovery handling. This remains development-only.
+
+## Third development pass — Xray preflight
+
+Added `XrayCheck` with bounded execution of the configured Xray binary's `run -test -config` command, using a candidate-only XRAY_LOCATION_ASSET environment. Added tests for rejecting Xray preflight failures without changing the current generation, invalid GeoSite, environment isolation and dangling generation links. Full Go test suite passes on Moscow VPS.
+
+Deployment compatibility finding: current systemd unit sets `XRAY_LOCATION_ASSET=/usr/local/libexec/hydraroute`, which is also `WorkingDirectory` and contains the Xray executable. It is protected by `ProtectSystem=strict`; only `/var/lib/hydraroute` is writable. Therefore no updater can safely overwrite the existing asset directory in-place. Integration requires explicit migration of the asset location into a private generation store and coordinated Xray restart/health check with rollback. Never rewrite the live asset files or unit without a tested migration and user-authorized deployment.
+
+Remaining security work: schema-level semantic checks for GeoIP/GeoSite, safe DNS/public IP handling and TLS trust review, generation crash recovery and post-switch rollback, cross-process locking, API authorization, UI and integration tests. No production change or GitHub push yet.
+
+## Fourth development pass — migration bootstrap
+
+Added `GenerationStore.Bootstrap(source, check)` to import the immutable legacy pair into `generation-0`, preserving source assets, refusing repeat initialization, and validating the copied pair with an Xray callback. Unit tests pass. Migration is NOT executed on NanoPi. Deployment integration and systemd changes remain pending; see `research/2026-11-13-GEODATA-MIGRATION-PLAN.md`.
+
+## Fifth development pass — supervisor orchestration
+
+Implemented a development-only `GenerationStore.Activate` operation with an adapter to the existing Xray Supervisor. Preflight occurs before stopping the running process. A failed start or failed supplied health probe triggers an attempt to stop the new process, roll back to the prior generation, restart and recheck the old runtime. Unit tests cover success, failed start, failed health probe, preflight rejection, failed stop, and missing baseline. All project Go tests and module vet pass.
+
+SAFETY GATES STILL OPEN: This method is not exposed via API or called by production; its health probe is caller-supplied and not yet connected to Xray's live API; no persistent crash-recovery transaction journal; no cross-process lock; `Publish` can report an error after a successful pointer rename (e.g. fsync failure), so caller must reconcile current generation rather than assume no switch; no coordination with API opMu/health recovery loop; no migration of XRAY_LOCATION_ASSET or ext assets. Do not deploy until these are resolved and failure-injection tests cover them.
+
+## Sixth development pass — durable rollback journal
+
+Implemented `transaction.json` with atomic replacement and fsync, recording the previous generation and phase (`prepared`, `stopped`, `switched`). `Activate` refuses a new update when a pending transaction exists and attempts rollback before restarting after ambiguous Publish errors. `RecoverPending` validates and restores the old generation, then clears the journal. Tests cover interrupted switch, idempotent recovery, failed preflight preserving journal, and malicious symlink journal. All project tests pass.
+
+LIMITATIONS: `RecoverPending` is not called from the API startup path yet and does not start/stop Xray. This must run before supervisor autostart, with a process-wide/cross-process operation lock. `Activate` currently lacks its own serialization with other API operations; journal cannot guarantee safety against concurrent writers. Health probe still caller-provided. A process crash after a successful Xray start but before journal removal will cause conservative rollback on recovery. No production deployment, no API/UI endpoints yet.
