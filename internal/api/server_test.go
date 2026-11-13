@@ -2188,3 +2188,46 @@ func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
 		t.Fatalf("daily schedule next run=%s", next)
 	}
 }
+
+func TestGeoDataStatusRejectsWorldWritableAssetsAndDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"geoip.dat", "geosite.dat"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("test-asset"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", dir)
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	read := func() geoDataStatusResponse {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d", rr.Code)
+		}
+		var got geoDataStatusResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(); !got.Ready {
+		t.Fatalf("private geodata assets should be ready: %+v", got)
+	}
+	if err := os.Chmod(filepath.Join(dir, "geoip.dat"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got.Ready || got.Assets[0].Available {
+		t.Fatalf("world-writable database must be rejected: %+v", got)
+	}
+	if err := os.Chmod(filepath.Join(dir, "geoip.dat"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	if got := read(); got.Ready || got.Error == "" {
+		t.Fatalf("world-writable asset directory must be rejected: %+v", got)
+	}
+}
