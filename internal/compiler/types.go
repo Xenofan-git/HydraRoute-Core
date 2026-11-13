@@ -5,14 +5,21 @@ import "encoding/json"
 // Profile is an independent proxy interface. Empty Picked means automatic mode:
 // every supported pool member not listed in Excluded is eligible.
 type Profile struct {
-	ID       string   `json:"id"`
-	Enabled  bool     `json:"enabled"`
-	Listen   string   `json:"listen,omitempty"`
-	Port     uint16   `json:"port"`
-	Strategy string   `json:"strategy"`
-	Nodes    []Node   `json:"nodes"`
-	Picked   []string `json:"picked,omitempty"`
-	Excluded []string `json:"excluded,omitempty"`
+	ID                string    `json:"id"`
+	Enabled           bool      `json:"enabled"`
+	Listen            string    `json:"listen,omitempty"`
+	Port              uint16    `json:"port"`
+	Strategy          string    `json:"strategy"`
+	OutboundInterface string    `json:"outbound_interface,omitempty"`
+	MuxEnabled        bool      `json:"mux_enabled,omitempty"`
+	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
+	Nodes             []Node    `json:"nodes"`
+	Picked            []string  `json:"picked,omitempty"`
+	Excluded          []string  `json:"excluded,omitempty"`
+	ManualSelection   bool      `json:"manual_selection,omitempty"`
+	// FallbackKey is resolved internally from this profile runtime state.
+	// It must never be accepted from an external compile request.
+	FallbackKey string `json:"-"`
 }
 
 // Node contains a stable identity and a validated Xray outbound object.
@@ -25,6 +32,12 @@ type Node struct {
 // RoutingConfig optionally adds a dedicated shared SOCKS5 inbound. Its traffic
 // is routed only by Rules and the explicit default action. Profile inbounds
 // remain independently bound to their own balancers.
+type DPIBypass struct {
+	NoiseTraffic         bool `json:"noise_traffic,omitempty"`
+	TLSFragmentation     bool `json:"tls_fragmentation,omitempty"`
+	RandomTLSFingerprint bool `json:"random_tls_fingerprint,omitempty"`
+}
+
 type RoutingConfig struct {
 	Enabled          bool          `json:"enabled"`
 	Listen           string        `json:"listen,omitempty"`
@@ -46,7 +59,25 @@ type RoutingRule struct {
 	ProfileID string   `json:"profile_id,omitempty"`
 }
 
+// DNSConfig connects only the managed HydraRoute Xray process to the local
+// Core DNS service. It never changes the host resolver configuration.
+type L7SniffingConfig struct {
+	Enabled bool `json:"enabled"`
+	HTTP    bool `json:"http"`
+	TLS     bool `json:"tls"`
+	QUIC    bool `json:"quic"`
+}
+
+type DNSConfig struct {
+	Enabled bool   `json:"enabled"`
+	Listen  string `json:"listen"`
+	Port    uint16 `json:"port"`
+}
+
 type CompileRequest struct {
-	Profiles []Profile      `json:"profiles"`
-	Routing  *RoutingConfig `json:"routing,omitempty"`
+	Profiles                        []Profile        `json:"profiles"`
+	Routing                         *RoutingConfig   `json:"routing,omitempty"`
+	DNS                             *DNSConfig       `json:"dns,omitempty"`
+	L7Sniffing                      L7SniffingConfig `json:"l7_sniffing,omitempty"`
+	ObservatoryProbeIntervalSeconds int              `json:"observatory_probe_interval_seconds,omitempty"`
 }

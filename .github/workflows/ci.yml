@@ -31,6 +31,10 @@ jobs:
           files="$(gofmt -l $(find cmd internal -type f -name '*.go' -print))"
           if [[ -n "$files" ]]; then
             printf 'These Go files are not gofmt-clean:\n%s\n' "$files"
+            while IFS= read -r file; do
+              printf '\n--- gofmt diff: %s ---\n' "$file"
+              gofmt -d "$file"
+            done <<< "$files"
             exit 1
           fi
       - name: Check dashboard JavaScript
@@ -49,6 +53,38 @@ jobs:
           unzip -q "$xray_zip" -d "$RUNNER_TEMP/xray"
           go run ./cmd/hrcore -input internal/compiler/testdata/shared-routing.json -output "$RUNNER_TEMP/shared-routing.json"
           (cd "$RUNNER_TEMP/xray" && XRAY_LOCATION_ASSET="$RUNNER_TEMP/xray" ./xray run -test -config "$RUNNER_TEMP/shared-routing.json")
+      - name: Verify GeoData migration with real isolated Xray
+        env:
+          HRCORE_TEST_XRAY: ${{ runner.temp }}/xray/xray
+          HRCORE_TEST_XRAY_ASSETS: ${{ runner.temp }}/xray
+          HRCORE_TEST_GO: go
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -v ./internal/geodata -run '^TestLiveXray(GeoDataActivationAndRollback|ServiceAssetPathMigrationAndRevert)$'
+          bash tests/integration/geodata_hrapi_smoke.sh
+
+      - name: Set up Python for L7 integration tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned QUIC test dependency
+        run: python -m pip install --disable-pip-version-check --no-cache-dir -r tests/integration/requirements-quic.txt
+      - name: Test HTTP Host and TLS SNI routing through Core SOCKS
+        env:
+          XRAY_BINARY: ${{ runner.temp }}/xray/xray
+          XRAY_LOCATION_ASSET: ${{ runner.temp }}/xray
+        run: python tests/integration/l7_proxy_sniffing.py
+      - name: Test QUIC SNI routing through Core SOCKS UDP
+        env:
+          XRAY_BINARY: ${{ runner.temp }}/xray/xray
+          XRAY_LOCATION_ASSET: ${{ runner.temp }}/xray
+        run: python tests/integration/l7_quic_sni.py
+      - name: Exercise Observatory and profile balancer runtime failover
+        env:
+          HRCORE_XRAY_INTEGRATION: "1"
+          XRAY_BINARY: ${{ runner.temp }}/xray/xray
+        run: go test -count=1 -v ./tests/integration
       - name: Run go vet
         run: go vet ./...
       - name: Set up Node.js for browser tests

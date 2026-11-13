@@ -3,13 +3,23 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"hydraroute.local/core/internal/compiler"
+	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
+	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
+	"hydraroute.local/core/internal/service"
+	"hydraroute.local/core/internal/state"
+	"hydraroute.local/core/internal/xrayapi"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +47,39 @@ func localPut(path, body string) *http.Request {
 	r.RemoteAddr = "127.0.0.1:12345"
 	r.Header.Set("Content-Type", "application/json")
 	return r
+}
+
+type synchronizedStreamRecorder struct {
+	mu      sync.Mutex
+	inner   *httptest.ResponseRecorder
+	flushed chan struct{}
+	once    sync.Once
+}
+
+func newSynchronizedStreamRecorder() *synchronizedStreamRecorder {
+	return &synchronizedStreamRecorder{inner: httptest.NewRecorder(), flushed: make(chan struct{})}
+}
+func (r *synchronizedStreamRecorder) Header() http.Header { return r.inner.Header() }
+func (r *synchronizedStreamRecorder) WriteHeader(status int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.inner.WriteHeader(status)
+}
+func (r *synchronizedStreamRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inner.Write(data)
+}
+func (r *synchronizedStreamRecorder) Flush() {
+	r.mu.Lock()
+	r.inner.Flush()
+	r.mu.Unlock()
+	r.once.Do(func() { close(r.flushed) })
+}
+func (r *synchronizedStreamRecorder) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inner.Body.String()
 }
 
 func apiSupervisor(t *testing.T) *hrruntime.Supervisor {
@@ -103,11 +146,78 @@ func TestConfigEndpointCompilesAndPreparesOnly(t *testing.T) {
 	}
 }
 
+func TestGeoDataStatusReportsAssetReadinessAndHashes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "geoip.dat"), []byte("geoip-test-data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "geosite.dat"), []byte("geosite-test-data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", dir)
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got geoDataStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Ready || len(got.Assets) != 2 {
+		t.Fatalf("unexpected geodata readiness: %#v", got)
+	}
+	for _, asset := range got.Assets {
+		if !asset.Available || asset.Size <= 0 || len(asset.SHA256) != 64 {
+			t.Errorf("asset metadata incomplete: %#v", asset)
+		}
+	}
+	if strings.Contains(rr.Body.String(), dir) {
+		t.Fatal("geodata response leaked the asset directory path")
+	}
+}
+
+func TestGeoDataStatusRejectsSymlinkAssetsAndReportsMissingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "geoip-target.dat")
+	if err := os.WriteFile(target, []byte("geoip"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "geoip.dat")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "geosite.dat"), []byte("geosite"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", dir)
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+	var got geoDataStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Ready || got.Assets[0].Available || !got.Assets[1].Available {
+		t.Fatalf("symlinked asset must not be accepted: %#v", got)
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", "")
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+	got = geoDataStatusResponse{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Ready || got.Error == "" {
+		t.Fatalf("missing asset directory must report not-ready: %#v", got)
+	}
+}
+
 func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	stateDir := filepath.Join(t.TempDir(), "state")
 	h := NewWithStateDir(apiSupervisor(t), stateDir)
 	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16120,
-		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
+		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}, DPIBypass: profiles.DPIBypass{NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true}}
 	if err := h.profileStore.Save(profile); err != nil {
 		t.Fatal(err)
 	}
@@ -125,11 +235,17 @@ func TestRoutingEndpointPersistsAndPreparesSharedSOCKS(t *testing.T) {
 	if err := json.Unmarshal(config, &compiled); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(compiled["inbounds"].([]any)); got != 2 {
+	if got := len(compiled["inbounds"].([]any)); got != 3 {
 		t.Fatalf("expected profile and shared inbounds, got %d", got)
 	}
+	proxy := compiled["outbounds"].([]any)[2].(map[string]any)
+	stream := proxy["streamSettings"].(map[string]any)
+	mask := stream["finalmask"].(map[string]any)
+	if len(mask["tcp"].([]any)) != 1 || len(mask["udp"].([]any)) != 1 {
+		t.Fatalf("DPI options were not applied to compiled proxy: %#v", mask)
+	}
 	rules := compiled["routing"].(map[string]any)["rules"].([]any)
-	if got := len(rules); got != 3 {
+	if got := len(rules); got != 4 {
 		t.Fatalf("expected profile, custom and default rules, got %d", got)
 	}
 	rr = httptest.NewRecorder()
@@ -263,6 +379,46 @@ func TestServeContextShutdownStopsManagedRuntime(t *testing.T) {
 	}
 	if supervisor.Status().Running {
 		t.Fatal("managed Xray remains running after API shutdown")
+	}
+}
+
+func TestServeContextShutdownStopsCoreDNS(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	_ = udp.Close()
+	cfg := h.dns.Config()
+	cfg.Enabled = true
+	cfg.Port = port
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.Serve(ctx, "127.0.0.1:0") }()
+	deadline := time.Now().Add(2 * time.Second)
+	for !h.dns.Status()["running"].(bool) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !h.dns.Status()["running"].(bool) {
+		cancel()
+		<-done
+		t.Fatal("Core DNS did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("API did not shut down")
+	}
+	if h.dns.Status()["running"].(bool) {
+		t.Fatal("Core DNS remained running after API shutdown")
 	}
 }
 
@@ -452,7 +608,7 @@ func TestEncryptedProfileCRUDAndRefreshWorkflow(t *testing.T) {
 	}
 
 	// Persist a second, network-independent source for refresh.
-	storeProfile := profiles.Profile{ID: "local", SourceID: "providerB", Enabled: true, Port: 16151, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge"}}
+	storeProfile := profiles.Profile{ID: "local", SourceID: "providerB", Enabled: true, Port: 16151, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge", "vless://00000000-0000-4000-8000-000000000002@edge2.example:443#edge2"}}
 	if err := h.profileStore.Save(storeProfile); err != nil {
 		t.Fatal(err)
 	}
@@ -806,5 +962,1272 @@ func TestMutationEndpointsRejectDifferentLocalhostOriginPort(t *testing.T) {
 	h.mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProfileSettingsArePersistedPerProfileAndExposedWithoutSecrets(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	for i, id := range []string{"alpha", "beta"} {
+		if err := h.profileStore.Save(profiles.Profile{ID: id, SourceID: "providerA", Enabled: true, Port: uint16(16180 + i), Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge", "vless://00000000-0000-4000-8000-000000000002@edge2.example:443#edge2"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	available, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ifaceName := ""
+	for _, candidate := range available {
+		if candidate.Flags&net.FlagLoopback == 0 {
+			ifaceName = candidate.Name
+			break
+		}
+	}
+	if ifaceName == "" {
+		t.Skip("no selectable network interface in test environment")
+	}
+	body := fmt.Sprintf(`{"id":"alpha","strategy":"roundRobin","outbound_interface":%q,"dpi_bypass":{"noise_traffic":true,"tls_fragmentation":false,"random_tls_fingerprint":true}}`, ifaceName)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/profiles", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	a, err := h.profileStore.Get("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := h.profileStore.Get("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Strategy != "roundRobin" || a.OutboundInterface != ifaceName || !a.DPIBypass.NoiseTraffic || !a.DPIBypass.RandomTLSFingerprint {
+		t.Fatalf("alpha settings not saved: %+v", a)
+	}
+	if b.Strategy != "" || b.OutboundInterface != "" || b.DPIBypass != (profiles.DPIBypass{}) {
+		t.Fatalf("settings leaked into beta: %+v", b)
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/profiles"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"outbound_interface":"`+ifaceName+`"`) || !strings.Contains(rr.Body.String(), `"noise_traffic":true`) {
+		t.Fatalf("profile metadata did not expose settings: %s", rr.Body.String())
+	}
+	if _, err := h.refreshProfilesLocked(context.Background()); err != nil {
+		t.Fatalf("profile settings failed to compile through refresh: %v", err)
+	}
+	config, err := h.supervisor.SnapshotConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compiled map[string]any
+	if err := json.Unmarshal(config, &compiled); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range compiled["outbounds"].([]any) {
+		out := raw.(map[string]any)
+		tag, _ := out["tag"].(string)
+		stream, _ := out["streamSettings"].(map[string]any)
+		if strings.HasPrefix(tag, "hr_alpha_") {
+			sock, _ := stream["sockopt"].(map[string]any)
+			fm, _ := stream["finalmask"].(map[string]any)
+			if sock["interface"] != ifaceName || fm["udp"] == nil {
+				t.Fatalf("alpha options missing from compiled Xray outbound: %#v", out)
+			}
+		}
+		if strings.HasPrefix(tag, "hr_beta_") {
+			if _, ok := stream["finalmask"]; ok {
+				t.Fatalf("alpha DPI settings leaked into beta outbound: %#v", out)
+			}
+		}
+	}
+}
+
+func TestInterfaceListIsReadOnlyAndLoopbackIsExcluded(t *testing.T) {
+	h := New(apiSupervisor(t))
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/interfaces"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), `"name":"lo"`) {
+		t.Fatalf("loopback should not be selectable: %s", rr.Body.String())
+	}
+}
+
+func TestRefreshSettingsPersistAndUpdateRuntimeSchedule(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/refresh/status", `{"enabled":true,"interval_seconds":86400}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got RefreshStatus
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/refresh/status"))
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &got) != nil {
+		t.Fatalf("GET status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !got.Enabled || got.IntervalSeconds != 86400 {
+		t.Fatalf("refresh status=%+v", got)
+	}
+	info, err := os.Stat(filepath.Join(stateDir, "refresh-settings.json"))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("settings file mode=%v err=%v", info, err)
+	}
+	restarted := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !restarted.refreshState.Enabled || restarted.refreshState.IntervalSeconds != 86400 || restarted.refreshOpts.RefreshInterval != 24*time.Hour {
+		t.Fatalf("settings were not restored: %+v", restarted.refreshState)
+	}
+}
+
+func TestEligibleObservatoryNodesOnlyIncludesBalancerMembers(t *testing.T) {
+	preview := service.ProfilePreview{Nodes: []service.PreviewNode{
+		{Key: parser.ServerKey{Source: "providerA", Name: "selected"}, Picked: true},
+		{Key: parser.ServerKey{Source: "providerA", Name: "excluded"}, Picked: true, Excluded: true},
+		{Key: parser.ServerKey{Source: "providerA", Name: "filtered"}, Picked: true, Filtered: true},
+		{Key: parser.ServerKey{Source: "providerA", Name: "unpicked"}},
+	}}
+	got := eligibleObservatoryNodes(preview)
+	if len(got) != 1 || got[0].Key.Name != "selected" {
+		t.Fatalf("Observatory members=%#v, want only the selected balancer member", got)
+	}
+}
+
+func TestResolveBalancerCandidateUsesLastKnownEligibleStrategyTag(t *testing.T) {
+	profileID := "candidate"
+	first := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "first"}, Name: "First"}
+	last := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "last"}, Name: "Last"}
+	firstKey, _ := json.Marshal(first.Key)
+	lastKey, _ := json.Marshal(last.Key)
+	firstTag := compiler.OutboundTag(profileID, string(firstKey))
+	lastTag := compiler.OutboundTag(profileID, string(lastKey))
+	key, name := resolveBalancerCandidate(profileID, []service.PreviewNode{first, last}, []string{firstTag, lastTag})
+	if key != string(lastKey) || name != "Last" {
+		t.Fatalf("candidate=(%q,%q), want last strategy target (%q,Last)", key, name, lastKey)
+	}
+	if key, name = resolveBalancerCandidate(profileID, []service.PreviewNode{first}, []string{"unknown-outbound-tag"}); key != "" || name != "" {
+		t.Fatalf("unknown/stale candidate tag must not leak: (%q,%q)", key, name)
+	}
+}
+
+func TestBuildProfileFallbackSnapshotMapsFullPreviewAndCurrentTags(t *testing.T) {
+	profileID := "fallback-snapshot"
+	selected := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "selected"}, Name: "Selected", ReferenceURI: "vless://shared@example.test:443#selected", Picked: true}
+	removedCandidate := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "removed"}, Name: "Removed", ReferenceURI: "vless://shared@example.test:443#removed", Excluded: true}
+	stale := service.PreviewNode{Key: parser.ServerKey{Source: "providerA", Name: "stale"}, Name: "Stale", ReferenceURI: "vless://stale@example.test:443#stale", Filtered: true}
+	keyOf := func(node service.PreviewNode) string {
+		raw, _ := json.Marshal(node.Key)
+		return string(raw)
+	}
+	selectedKey, removedKey, staleKey := keyOf(selected), keyOf(removedCandidate), keyOf(stale)
+	selectedTag := compiler.OutboundTag(profileID, selectedKey)
+	removedTag := compiler.OutboundTag(profileID, removedKey)
+	staleTag := compiler.OutboundTag(profileID, staleKey)
+
+	cached := map[string]xrayapi.OutboundStatus{
+		selectedKey: {Tag: selectedTag, Alive: true, DelayMS: 90, LastTryTime: 10},
+		staleKey:    {Tag: "outbound-from-old-profile-generation", Alive: true, DelayMS: 1, LastTryTime: 12},
+	}
+	live := []xrayapi.OutboundStatus{
+		{Tag: selectedTag, Alive: false, DelayMS: 0, LastTryTime: 20},
+		{Tag: removedTag, Alive: true, DelayMS: 25, LastTryTime: 21},
+		{Tag: staleTag, Alive: true, DelayMS: 5, LastTryTime: 0},
+	}
+	got := buildProfileFallbackSnapshot(profileID, []service.PreviewNode{selected, removedCandidate, stale}, cached, live, []string{selectedTag, removedTag})
+
+	if got.CandidateKey != removedKey || got.ReferenceURI != removedCandidate.ReferenceURI {
+		t.Fatalf("candidate snapshot=(%q,%q), want full-preview candidate (%q,%q)", got.CandidateKey, got.ReferenceURI, removedKey, removedCandidate.ReferenceURI)
+	}
+	if got.ReferenceURIs[staleKey] != stale.ReferenceURI {
+		t.Fatalf("full preview URI map lost filtered node: %#v", got.ReferenceURIs)
+	}
+	if status := got.Statuses[selectedKey]; status.Alive || status.LastTryTime != 20 {
+		t.Fatalf("live status did not replace cached status: %+v", status)
+	}
+	if status := got.Statuses[removedKey]; !status.Alive || status.LastTryTime != 21 {
+		t.Fatalf("removed candidate live status missing: %+v", status)
+	}
+	if _, ok := got.Statuses[staleKey]; ok {
+		t.Fatalf("stale cached tag or zero-timestamp live status was accepted: %+v", got.Statuses[staleKey])
+	}
+
+	unknown := buildProfileFallbackSnapshot(profileID, []service.PreviewNode{selected}, cached, nil, []string{"unknown-outbound-tag"})
+	if unknown.CandidateKey != "" || unknown.ReferenceURI != "" {
+		t.Fatalf("unknown candidate tag leaked into snapshot: %+v", unknown)
+	}
+}
+
+func TestObservatoryCachePersistsAcrossCoreRestart(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	h.probeCache["obs"] = map[string]xrayapi.OutboundStatus{
+		`{"source":"providerA","name":"edge"}`: {Tag: "hr_obs_test", Alive: true, DelayMS: 42, LastTryTime: 1762680000},
+	}
+	if err := h.saveProbeCache(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(stateDir, "observatory", "status.json"))
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("cache file mode=%v err=%v", info, err)
+	}
+	restarted := NewWithStateDir(apiSupervisor(t), stateDir)
+	got := restarted.probeCache["obs"]
+	if len(got) != 1 || got[`{"source":"providerA","name":"edge"}`].DelayMS != 42 {
+		t.Fatalf("probe cache not restored: %#v", got)
+	}
+}
+
+func TestObservatoryStatusIsReadOnlyAndReportsUnavailableWhenRuntimeStopped(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), filepath.Join(t.TempDir(), "state"))
+	p := profiles.Profile{ID: "obs", SourceID: "providerA", Enabled: true, Port: 16200, Links: []string{"vless://00000000-0000-4000-8000-000000000001@edge.example:443#edge"}}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/observatory/status?profile_id=obs"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["available"] != false {
+		t.Fatalf("stopped runtime must not fabricate Observatory status: %#v", got)
+	}
+}
+
+func TestProfileSettingsSaveFiltersAutoUpdateAndSelectionTogether(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	p := profiles.Profile{ID: "settings", SourceID: "providerA", Enabled: true, Port: 16210, SubscriptionURL: "https://provider.example/sub"}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"id":"settings","filter_keep":"LTE\nMoscow","filter_exclude":"trial","auto_update_enabled":true,"auto_update_interval":1440,"pick_mode":"manual","picked":[{"source":"providerA","name":"Node A"}],"excluded":[]}`
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/profiles", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	got, err := h.profileStore.Get("settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FilterKeep != "LTE\nMoscow" || got.FilterExclude != "trial" || !got.AutoUpdateEnabled || got.AutoUpdateInterval != 1440 {
+		t.Fatalf("profile settings=%+v", got)
+	}
+	selection, err := service.LoadSelection(stateDir, "settings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.PickMode != "manual" || len(selection.Picked) != 1 || selection.Picked[0].Name != "Node A" {
+		t.Fatalf("selection=%+v", selection)
+	}
+}
+
+func TestScheduledRefreshUsesEncryptedCachedSubscriptionUntilItsIntervalIsDue(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	p := profiles.Profile{ID: "scheduled", SourceID: "providerA", Enabled: true, Port: 16211, SubscriptionURL: "https://provider.example/sub", CachedSubscription: "vless://00000000-0000-4000-8000-000000000001@edge.example:443#Cached", AutoUpdateEnabled: true, AutoUpdateInterval: 1440, LastSubscriptionUpdate: time.Now().Unix()}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	delay, ok := h.profileRefreshDelay()
+	if !ok || delay <= 0 || delay > 24*time.Hour {
+		t.Fatalf("scheduled delay=%v enabled=%v", delay, ok)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := h.refreshProfilesScheduledLocked(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["nodes"] != 1 {
+		t.Fatalf("scheduled cached compile=%v", result)
+	}
+	cached, err := h.profileStore.Get("scheduled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached.CachedSubscription != p.CachedSubscription || cached.LastSubscriptionUpdate != p.LastSubscriptionUpdate {
+		t.Fatalf("not-due source was fetched/changed: %+v", cached)
+	}
+}
+
+func TestProfilePingStreamKeepsICMPEchoAndProxyPingSeparate(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	p := profiles.Profile{ID: "ping", SourceID: "providerA", Enabled: true, Port: 16212, Links: []string{"vless://00000000-0000-4000-8000-000000000001@127.0.0.1:443#Loopback"}}
+	if err := h.profileStore.Save(p); err != nil {
+		t.Fatal(err)
+	}
+	r := localGet("/v1/profiles/ping?profile_id=ping")
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, r)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("content-type=%q", rr.Header().Get("Content-Type"))
+	}
+	body := rr.Body.String()
+	for _, part := range []string{`"links"`, `"echo":{}`, `"done":true`, `Xray не запущен`} {
+		if !strings.Contains(body, part) {
+			t.Fatalf("SSE response missing %q: %s", part, body)
+		}
+	}
+	if strings.Contains(body, `"echo":{"alive"`) || strings.Contains(body, `"ping":{"delay"`) && strings.Contains(body, `"echo":{"delay"`) {
+		t.Fatalf("ICMP echo and Xray ping were conflated: %s", body)
+	}
+}
+
+func TestObservatorySettingsPersistAndValidate(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/observatory/settings", `{"probe_interval_seconds":137}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(filepath.Join(dir, "observatory", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("settings mode=%o", info.Mode().Perm())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), dir)
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localGet("/v1/observatory/settings"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"probe_interval_seconds":137`) {
+		t.Fatalf("reload status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/observatory/settings", `{"probe_interval_seconds":3601}`))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid interval status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestObservatorySettingsImmediatelyUpdatePreparedXrayConfig(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	node := func(key string) compiler.Node {
+		return compiler.Node{Key: key, Outbound: json.RawMessage(`{"protocol":"freedom"}`)}
+	}
+	config, err := compiler.Compile(compiler.CompileRequest{Profiles: []compiler.Profile{{
+		ID: "obs", Enabled: true, Port: 16242, Nodes: []compiler.Node{node("one"), node("two")},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.supervisor.Prepare(context.Background(), config); err != nil {
+		t.Fatalf("prepare Xray config: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/observatory/settings", `{"probe_interval_seconds":137}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"applies":"prepared Xray configuration updated"`) {
+		t.Fatalf("response did not report immediate prepared-config update: %s", rr.Body.String())
+	}
+	updated, err := h.supervisor.SnapshotConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(updated, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	observatory := decoded["observatory"].(map[string]any)
+	want := fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(137))
+	if observatory["probeInterval"] != want {
+		t.Fatalf("probeInterval=%v want %s", observatory["probeInterval"], want)
+	}
+	if observatory["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", observatory["enableConcurrency"])
+	}
+}
+
+func TestL7SettingsPersistAndApplyOnlyToCoreInbounds(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/l7/settings", `{"enabled":true,"http":false,"tls":true,"quic":true}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(filepath.Join(dir, "l7", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("settings mode=%o", info.Mode().Perm())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), dir)
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localGet("/v1/l7/settings"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"enabled":true`) || !strings.Contains(rr.Body.String(), `"tls":true`) {
+		t.Fatalf("reload status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	request := `{"profiles":[{"id":"l7","enabled":true,"port":16241,"nodes":[{"key":"node","outbound":{"protocol":"freedom"}}]}]}`
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localPost("/v1/config", request))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("config status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	config, err := reloaded.supervisor.SnapshotConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(config, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	inbounds := decoded["inbounds"].([]any)
+	sniffing := inbounds[0].(map[string]any)["sniffing"].(map[string]any)
+	selected := sniffing["destOverride"].([]any)
+	if len(selected) != 2 || selected[0] != "tls" || selected[1] != "quic" || sniffing["routeOnly"] != true {
+		t.Fatalf("persisted L7 selection was not applied: %#v", sniffing)
+	}
+	invalid := `{"enabled":true,"http":false,"tls":false,"quic":false}`
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localPut("/v1/l7/settings", invalid))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("empty enabled L7 selection status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestIsFreshObservatoryProbeUsesStrictTimestampBoundary(t *testing.T) {
+	if isFreshObservatoryProbe(1762680000, 1762680000) {
+		t.Fatal("same-second/old result must not be treated as fresh")
+	}
+	if isFreshObservatoryProbe(1762679999, 1762680000) {
+		t.Fatal("older result must not be treated as fresh")
+	}
+	if !isFreshObservatoryProbe(1762680001, 1762680000) {
+		t.Fatal("newer result should be treated as fresh")
+	}
+}
+
+func TestCachedProbeStatusesRejectsDifferentOutboundGeneration(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	key := `{"source":"providerA","name":"edge"}`
+	h.probeCache["foreign"] = map[string]xrayapi.OutboundStatus{
+		key: {Tag: "old-generation-tag", Alive: true, DelayMS: 12, LastTryTime: 1762680000},
+	}
+	node := service.PreviewNode{}
+	if err := json.Unmarshal([]byte(key), &node.Key); err != nil {
+		t.Fatal(err)
+	}
+	got := h.cachedProbeStatuses("foreign", []service.PreviewNode{node})
+	if len(got) != 0 {
+		t.Fatalf("stale generation status leaked into current profile: %#v", got)
+	}
+	tag := compiler.OutboundTag("foreign", key)
+	h.probeCache["foreign"][key] = xrayapi.OutboundStatus{Tag: tag, Alive: false, LastTryTime: 1762680000}
+	got = h.cachedProbeStatuses("foreign", []service.PreviewNode{node})
+	if status, ok := got[key]; !ok || !status.Stale {
+		t.Fatalf("cached measurement must be explicitly stale: %#v", got)
+	}
+}
+
+func TestSameObservatoryStatusDetectsOnlyActualMeasurementChanges(t *testing.T) {
+	a := xrayapi.OutboundStatus{Tag: "hr_test", Alive: true, DelayMS: 23, LastTryTime: 1762680000, LastSeenTime: 1762680000}
+	if !sameObservatoryStatus(a, a) {
+		t.Fatal("identical status should compare equal")
+	}
+	b := a
+	b.DelayMS++
+	if sameObservatoryStatus(a, b) {
+		t.Fatal("changed delay should compare different")
+	}
+	b = a
+	b.LastSeenTime++
+	if sameObservatoryStatus(a, b) {
+		t.Fatal("changed last-seen time should compare different")
+	}
+}
+
+func TestEligiblePreviewNodeCountMatchesSelectionAndFilters(t *testing.T) {
+	key1 := parser.ServerKey{Source: "providerA", Name: "one"}
+	key2 := parser.ServerKey{Source: "providerA", Name: "two"}
+	key3 := parser.ServerKey{Source: "providerA", Name: "three"}
+	preview := service.ProfilePreview{Nodes: []service.PreviewNode{
+		{Key: key1, Picked: true},
+		{Key: key2, Picked: true, Excluded: true},
+		{Key: key3, Picked: true, Filtered: true},
+	}}
+	if got := eligiblePreviewNodeCount(preview, nil); got != 1 {
+		t.Fatalf("auto pool count=%d, want 1", got)
+	}
+	selection := &state.Profile{PickMode: "manual", Picked: []parser.ServerKey{key1, key2, key3}, Excluded: []parser.ServerKey{key2}}
+	if got := eligiblePreviewNodeCount(preview, selection); got != 1 {
+		t.Fatalf("manual pool count=%d, want 1", got)
+	}
+	selection = &state.Profile{PickMode: "manual", Picked: []parser.ServerKey{key1, key2}, Excluded: []parser.ServerKey{key2}}
+	if got := eligiblePreviewNodeCount(preview, selection); got != 1 {
+		t.Fatalf("manual subset pool count=%d, want 1", got)
+	}
+}
+
+func TestRoutingPublishesCoreOwnedWatchlistSocketAndStatus(t *testing.T) {
+	stateDir := filepath.Join(t.TempDir(), "state")
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	profile := profiles.Profile{ID: "foreign", SourceID: "providerA", Enabled: true, Port: 16220,
+		Links: []string{"vless://00000000-0000-4000-8000-000000000001@foreign.example:443#foreign"}}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"enabled":true,"listen":"127.0.0.1","port":16221,"default_action":"block","rules":[{"id":"ru","name":"RU","enabled":true,"match_type":"domain","values":["domain:ru"],"action":"profile","profile_id":"foreign"},{"id":"telegram","name":"Telegram","enabled":true,"match_type":"domain","values":["domain:telegram.org"],"action":"direct"},{"id":"geoip","name":"GeoIP RU","enabled":true,"match_type":"ip","values":["geoip:ru"],"action":"block"}]}`
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/routing", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("routing PUT status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	path := filepath.Join(stateDir, "watchlist.sock")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("watchlist socket was not created: %v", err)
+	}
+	if info.Mode().Perm() != 0600 || info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("unsafe watchlist socket mode/type: %v", info.Mode())
+	}
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte("MATCH Mail.Google.RU.\nMATCH api.telegram.org\nDUMP\n")); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.(*net.UnixConn).CloseWrite()
+	response, err := io.ReadAll(conn)
+	_ = conn.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(response)
+	if !strings.Contains(got, "OK foreign 0 ru\n") || !strings.Contains(got, "OK DIRECT 1 telegram.org\n") ||
+		!strings.Contains(got, "T 2 BLOCK\n") || !strings.Contains(got, "END 2\n") {
+		t.Fatalf("unexpected watchlist protocol response:\n%s", got)
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/watchlist/status"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"ready":true`) ||
+		!strings.Contains(rr.Body.String(), `"targets":3`) || !strings.Contains(rr.Body.String(), `"keys":2`) {
+		t.Fatalf("watchlist status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	disabled := `{"enabled":false,"listen":"127.0.0.1","port":16221,"default_action":"block","rules":[]}`
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/routing", disabled))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable routing status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("watchlist socket remains after routing disabled: %v", err)
+	}
+}
+
+func TestEventJournalAPIListsClearsAndStreamsStructuredEvents(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	h.recordEvent("info", "runtime", "started", "Xray process started")
+	h.recordEvent("warning", "runtime", "stopped", "Xray process stopped")
+
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/events?limit=10"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"type":"started"`) {
+		t.Fatalf("list status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	streamReq := localGet("/v1/events/stream")
+	streamReq.Header.Set("Last-Event-ID", "1")
+	streamReq = streamReq.WithContext(ctx)
+	streamRR := newSynchronizedStreamRecorder()
+	finished := make(chan struct{})
+	go func() {
+		h.mux.ServeHTTP(streamRR, streamReq)
+		close(finished)
+	}()
+	select {
+	case <-streamRR.flushed:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-finished
+		t.Fatalf("stream did not emit initial event: %s", streamRR.String())
+	}
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("event stream did not stop after request cancellation")
+	}
+	streamBody := streamRR.String()
+	if !strings.Contains(streamBody, `"message":"Xray process stopped"`) || strings.Contains(streamBody, `"message":"Xray process started"`) {
+		t.Fatalf("Last-Event-ID was not respected: %s", streamBody)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/events", nil)
+	deleteReq.Host = "127.0.0.1:17890"
+	deleteReq.RemoteAddr = "127.0.0.1:12345"
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteRR := httptest.NewRecorder()
+	h.mux.ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusOK {
+		t.Fatalf("clear status=%d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/events"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"events":[]`) {
+		t.Fatalf("after clear status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHealthMonitorStatusAndSettingsPersist(t *testing.T) {
+	dir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), dir)
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/health/monitor"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"checked_at"`) || !strings.Contains(rr.Body.String(), `"checks"`) {
+		t.Fatalf("monitor status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	settings := `{"enabled":true,"interval_seconds":45,"timeout_seconds":3,"fail_threshold":3,"recover_threshold":2}`
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/health/settings", settings))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("settings save=%d body=%s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(filepath.Join(dir, "health", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("settings mode=%o", info.Mode().Perm())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), dir)
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localGet("/v1/health/settings"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"interval_seconds":45`) || !strings.Contains(rr.Body.String(), `"fail_threshold":3`) {
+		t.Fatalf("settings reload=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/health/settings", `{"enabled":true,"interval_seconds":5,"timeout_seconds":5,"fail_threshold":2,"recover_threshold":2}`))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid settings status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/health/check", `{}`))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status"`) {
+		t.Fatalf("manual check=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDNSRoutesReturnUnavailableWithoutStateDirectory(t *testing.T) {
+	h := New(apiSupervisor(t))
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodGet, "/v1/dns", ""},
+		{http.MethodPost, "/v1/dns/service", `{"action":"start"}`},
+		{http.MethodPost, "/v1/dns/check", `{"domain":"example.com"}`},
+	} {
+		var req *http.Request
+		if tc.method == http.MethodGet {
+			req = localGet(tc.path)
+		} else {
+			req = localPost(tc.path, tc.body)
+		}
+		rr := httptest.NewRecorder()
+		h.mux.ServeHTTP(rr, req)
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s status=%d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestDNSConfigStartFailureRestoresPreviousConfiguration(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	cfg := h.dns.Config()
+	reservation, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Port = reservation.LocalAddr().(*net.UDPAddr).Port
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Enabled = true
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns", string(body)))
+	_ = reservation.Close()
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected DNS bind failure, status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	got := h.dns.Config()
+	if got.Enabled || h.dns.Status()["running"].(bool) {
+		t.Fatalf("failed DNS transaction left service enabled/running: enabled=%v status=%v", got.Enabled, h.dns.Status())
+	}
+	reloaded := h.dns.Config()
+	if reloaded.Port != cfg.Port {
+		t.Fatalf("rollback lost previous port: got=%d want=%d", reloaded.Port, cfg.Port)
+	}
+}
+
+func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	_ = udp.Close()
+	cfg := h.dns.Config()
+	cfg.Port = port
+	cfg.Enabled = true
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	apiListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer apiListener.Close()
+	if err := h.Serve(context.Background(), apiListener.Addr().String()); err == nil {
+		t.Fatal("expected API listener bind failure")
+	}
+	if h.dns.Status()["running"].(bool) {
+		t.Fatal("DNS service leaked after API listener bind failure")
+	}
+}
+
+// A failed API bind must only clean up Xray when this Serve call started it.
+// A DNS bind failure occurs before the API listener exists. It must not leak
+// the newly started Xray child or stop an Xray process already in service.
+func TestRecoveryLoopRecordsSuccessOnlyAfterFailure(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	recovered := make(chan struct{})
+	done := make(chan struct{})
+	calls := 0
+	go func() {
+		defer close(done)
+		h.runRecoveryLoop(ctx, "dns", func(context.Context) error {
+			calls++
+			if calls == 1 {
+				return fmt.Errorf("temporary DNS failure")
+			}
+			close(recovered)
+			return nil
+		})
+	}()
+	select {
+	case <-recovered:
+	case <-time.After(7 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("automatic recovery did not retry")
+	}
+	cancel()
+	<-done
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/events?limit=20"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("events status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if strings.Count(body, `"type":"automatic_recovery_retry"`) != 1 ||
+		strings.Count(body, `"type":"automatic_recovery_succeeded"`) != 1 {
+		t.Fatalf("expected one failure and one success event: %s", body)
+	}
+}
+
+func TestRecoveryLoopStopsPromptlyOnCancellation(t *testing.T) {
+	h := New(apiSupervisor(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	called := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.runRecoveryLoop(ctx, "runtime", func(context.Context) error {
+			select {
+			case <-called:
+			default:
+				close(called)
+			}
+			return fmt.Errorf("simulated recovery failure")
+		})
+	}()
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("recovery callback was not invoked")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("recovery loop did not stop promptly during backoff")
+	}
+}
+
+func TestServeDNSBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
+	for _, alreadyRunning := range []bool{false, true} {
+		name := "autostarted"
+		if alreadyRunning {
+			name = "preexisting"
+		}
+		t.Run(name, func(t *testing.T) {
+			supervisor := apiSupervisor(t)
+			if err := supervisor.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+				t.Fatal(err)
+			}
+			if alreadyRunning {
+				if err := supervisor.Start(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = supervisor.Stop(context.Background()) }()
+			}
+			h := NewWithOptions(supervisor, t.TempDir(), Options{AutoStart: true})
+			blocker, err := net.ListenPacket("udp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer blocker.Close()
+			cfg := h.dns.Config()
+			cfg.Enabled = true
+			cfg.Port = blocker.LocalAddr().(*net.UDPAddr).Port
+			if err := h.dns.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.Serve(context.Background(), "127.0.0.1:0"); err == nil {
+				t.Fatal("expected Core DNS bind conflict")
+			}
+			if got := supervisor.Status().Running; got != alreadyRunning {
+				t.Fatalf("Xray running=%v after DNS bind failure, want %v", got, alreadyRunning)
+			}
+			if h.dns.Status()["running"].(bool) {
+				t.Fatal("Core DNS remained running after failed startup")
+			}
+		})
+	}
+}
+
+func TestServeBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
+	for _, alreadyRunning := range []bool{false, true} {
+		name := "autostarted"
+		if alreadyRunning {
+			name = "preexisting"
+		}
+		t.Run(name, func(t *testing.T) {
+			supervisor := apiSupervisor(t)
+			if err := supervisor.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+				t.Fatal(err)
+			}
+			if alreadyRunning {
+				if err := supervisor.Start(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = supervisor.Stop(context.Background()) }()
+			}
+			h := NewWithOptions(supervisor, t.TempDir(), Options{AutoStart: true})
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			if err := h.Serve(context.Background(), listener.Addr().String()); err == nil {
+				t.Fatal("expected API bind conflict")
+			}
+			if got := supervisor.Status().Running; got != alreadyRunning {
+				t.Fatalf("Xray running=%v after failed bind, want %v", got, alreadyRunning)
+			}
+		})
+	}
+}
+
+func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
+	for _, address := range []string{"100.64.0.1", "192.0.2.1", "198.18.0.1", "2001:db8::1", "127.0.0.1", "10.0.0.1"} {
+		if _, ok := publicProbeAddress(context.Background(), address); ok {
+			t.Errorf("probe accepted non-public address %s", address)
+		}
+	}
+	if got, ok := publicProbeAddress(context.Background(), "1.1.1.1"); !ok || got != "1.1.1.1" {
+		t.Fatalf("public address rejected: %q %v", got, ok)
+	}
+}
+
+func TestSmartDNSAPIStoresConfigAndRebuildsPreparedGeneration(t *testing.T) {
+	stateDir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	profile := profiles.Profile{
+		ID: "profile1", SourceID: "source1", Enabled: true, Listen: "127.0.0.1", Port: 16001,
+		Links: []string{"vless://example.invalid"},
+	}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
+	dnsConfig := h.dns.Config()
+	dnsConfig.BlockingEnabled = true
+	if err := h.dns.Save(dnsConfig); err != nil {
+		t.Fatal(err)
+	}
+	cfg := hrsmartdns.Config{
+		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 15354, CacheSize: 32,
+		DomainSets: []hrsmartdns.DomainSet{
+			{ID: "block-child", Kind: "block", Domains: []string{"ads.allow-parent.test"}, Enabled: true},
+			{ID: "allow-parent", Kind: "allow", Domains: []string{"allow-parent.test"}, Enabled: true},
+		},
+		Upstreams: []hrsmartdns.Upstream{{
+			ID: "upstream1", ProfileID: "profile1", Protocol: "doh",
+			Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
+		}},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns/smartdns", string(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("prepare SmartDNS config status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if h.smartDNSRuntime == nil || h.smartDNSRuntime.Status().Running {
+		t.Fatal("SmartDNS should be prepared but not auto-started")
+	}
+	if h.smartDNSRuntime.Status().ConfigPath == "" {
+		t.Fatalf("prepared SmartDNS config path missing: %+v", h.smartDNSRuntime.Status())
+	}
+	if !h.dns.IsBlockedHost("ads.allow-parent.test") {
+		t.Fatal("SmartDNS block domain set was not applied to the Core DNS policy front")
+	}
+	if h.dns.IsBlockedHost("allow-parent.test") {
+		t.Fatal("SmartDNS allow domain set was not applied to the Core DNS policy front")
+	}
+	if _, err := os.Stat(h.smartDNSConfigPath); err != nil {
+		t.Fatalf("persisted SmartDNS settings missing: %v", err)
+	}
+	info, err := os.Stat(h.smartDNSConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("SmartDNS settings mode=%o, want 600", info.Mode().Perm())
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/dns/smartdns"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"profile_id":"profile1"`) {
+		t.Fatalf("SmartDNS GET status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !reloaded.smartDNSConfig.Enabled || reloaded.smartDNSErr != "" || reloaded.smartDNSRuntime.Status().Running {
+		t.Fatalf("SmartDNS settings were not safely reconstructed: config=%+v err=%q status=%+v", reloaded.smartDNSConfig, reloaded.smartDNSErr, reloaded.smartDNSRuntime.Status())
+	}
+	if reloaded.smartDNSRuntime.Status().ConfigPath == "" {
+		t.Fatal("reloaded SmartDNS generation was not prepared")
+	}
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localPost("/v1/dns/smartdns/stop", `{}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("SmartDNS stop idempotence status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSmartDNSAPIRejectsProfileReferencesThatCannotBePinned(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	cfg := hrsmartdns.Config{
+		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 15354,
+		Upstreams: []hrsmartdns.Upstream{{
+			ID: "upstream1", ProfileID: "missing", Protocol: "doh",
+			Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
+		}},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns/smartdns", string(body)))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("missing profile reference status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if h.smartDNSConfig.Enabled {
+		t.Fatal("rejected SmartDNS config became active in memory")
+	}
+}
+
+func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
+	stateDir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	fetcher := func(context.Context, string) (dnsblocklist.Result, error) {
+		return dnsblocklist.Result{Blocked: []string{"ads.example.com"}, Allowed: []string{"safe.example.com"}}, nil
+	}
+	manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.blocklists = manager
+	h.applyDNSBlocklists()
+	cfg := h.dns.Config()
+	cfg.BlockingEnabled = true
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists", `{"name":"Ads","url":"https://lists.example/ads.txt","enabled":true}`))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create source status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		Source dnsblocklist.Source `json:"source"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Source.ID == "" {
+		t.Fatalf("source ID missing: %s", rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/refresh", `{}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("refresh source status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatal("refreshed blocklist did not affect Core DNS resolver")
+	}
+	if h.dns.IsBlockedHost("safe.example.com") {
+		t.Fatal("blocklist allow exception did not reach Core DNS resolver")
+	}
+
+	reloaded := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !reloaded.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatal("persisted blocklist was not restored into Core DNS resolver")
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/remove", `{"domain":"ads.example.com"}`))
+	if rr.Code != http.StatusOK || h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatalf("remove entry failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/restore", `{"domain":"ads.example.com"}`))
+	if rr.Code != http.StatusOK || !h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatalf("restore entry failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	patch := localPost("/v1/dns/blocklists/"+created.Source.ID, `{"enabled":false}`)
+	patch.Method = http.MethodPatch
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, patch)
+	if rr.Code != http.StatusOK || h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatalf("disable source failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	del := localGet("/v1/dns/blocklists/" + created.Source.ID)
+	del.Method = http.MethodDelete
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, del)
+	if rr.Code != http.StatusOK || len(h.blocklists.Snapshot().Sources) != 0 {
+		t.Fatalf("delete source failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDNSBlocklistCatalogAPIRequiresLocalReadAndReturnsPresets(t *testing.T) {
+	server := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	response := httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localGet("/v1/dns/blocklists/catalog"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("catalog GET status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Presets []dnsblocklist.Preset `json:"presets"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Presets) != 7 {
+		t.Fatalf("catalog returned %d presets, want 7: %+v", len(payload.Presets), payload.Presets)
+	}
+	remote := httptest.NewRequest(http.MethodGet, "/v1/dns/blocklists/catalog", nil)
+	remote.RemoteAddr = "192.0.2.10:12345"
+	remote.Host = "127.0.0.1:17891"
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, remote)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("remote catalog request status=%d, want forbidden", response.Code)
+	}
+}
+
+func TestDNSBlocklistRefreshEndpointsRequireSameOriginJSON(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := manager.SaveSource(dnsblocklist.Source{Name: "Ads", URL: "https://lists.example/ads.txt", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.blocklists = manager
+
+	for _, path := range []string{
+		"/v1/dns/blocklists/_refresh",
+		"/v1/dns/blocklists/" + source.ID + "/refresh",
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Host = "127.0.0.1:17891"
+		req.Header.Set("Origin", "http://127.0.0.1:3000")
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, req)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("cross-origin refresh %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestDNSBlocklistCustomAPIUpdatesCorePolicyAndPersists(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	dnsConfig := server.dns.Config()
+	dnsConfig.BlockingEnabled = true
+	if err := server.dns.Save(dnsConfig); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", `{"block":"ads.parent.test\nblocked.allow-parent.test","allow":"allow-parent.test\nsafe.parent.test"}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("custom list PUT status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, host := range []string{"ads.parent.test", "blocked.allow-parent.test"} {
+		if !server.dns.IsBlockedHost(host) {
+			t.Fatalf("custom block list did not block %s", host)
+		}
+	}
+	for _, host := range []string{"allow-parent.test", "safe.parent.test"} {
+		if server.dns.IsBlockedHost(host) {
+			t.Fatalf("custom allow list did not allow %s", host)
+		}
+	}
+
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localGet("/v1/dns/blocklists/custom"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("custom list GET status=%d body=%s", response.Code, response.Body.String())
+	}
+	var lists map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &lists); err != nil {
+		t.Fatal(err)
+	}
+	if lists["block"] != "ads.parent.test\nblocked.allow-parent.test" || lists["allow"] != "allow-parent.test\nsafe.parent.test" {
+		t.Fatalf("custom lists did not round-trip: %+v", lists)
+	}
+
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", `{"block":"bad..domain","allow":""}`))
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid custom list status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !server.dns.IsBlockedHost("ads.parent.test") {
+		t.Fatal("invalid custom update replaced the last known-good policy")
+	}
+}
+
+func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	get := httptest.NewRecorder()
+	server.mux.ServeHTTP(get, localGet("/v1/dns/blocklists/settings"))
+	if get.Code != http.StatusOK {
+		t.Fatalf("settings GET status=%d body=%s", get.Code, get.Body.String())
+	}
+	var initial struct {
+		Settings dnsblocklist.RefreshSettings `json:"settings"`
+	}
+	if err := json.Unmarshal(get.Body.Bytes(), &initial); err != nil {
+		t.Fatal(err)
+	}
+	if initial.Settings.AutoUpdate || initial.Settings.UpdateTime != "04:30" {
+		t.Fatalf("HRNeo default daily refresh settings mismatch: %+v", initial.Settings)
+	}
+
+	put := httptest.NewRecorder()
+	server.mux.ServeHTTP(put, localPut("/v1/dns/blocklists/settings", `{"autoUpdate":false,"updateTime":"05:15","iface":"eth1"}`))
+	if put.Code != http.StatusOK {
+		t.Fatalf("settings PUT status=%d body=%s", put.Code, put.Body.String())
+	}
+	if got := server.blocklists.Settings(); got.AutoUpdate || got.UpdateTime != "05:15" || got.Iface != "eth1" {
+		t.Fatalf("settings PUT not persisted: %+v", got)
+	}
+	select {
+	case <-server.blocklistWake:
+	default:
+		t.Fatal("saving schedule did not wake the daily scheduler")
+	}
+
+	loc := time.FixedZone("test", 3*60*60)
+	now := time.Date(2026, 11, 11, 4, 30, 0, 0, loc)
+	next := nextDailyBlocklistUpdate(now, "04:30")
+	if !next.Equal(time.Date(2026, 11, 12, 4, 30, 0, 0, loc)) {
+		t.Fatalf("daily schedule next run=%s", next)
+	}
+}
+
+func TestGeoDataStatusRejectsWorldWritableAssetsAndDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"geoip.dat", "geosite.dat"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("test-asset"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", dir)
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	read := func() geoDataStatusResponse {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d", rr.Code)
+		}
+		var got geoDataStatusResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(); !got.Ready {
+		t.Fatalf("private geodata assets should be ready: %+v", got)
+	}
+	if err := os.Chmod(filepath.Join(dir, "geoip.dat"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got.Ready || got.Assets[0].Available {
+		t.Fatalf("world-writable database must be rejected: %+v", got)
+	}
+	if err := os.Chmod(filepath.Join(dir, "geoip.dat"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	if got := read(); got.Ready || got.Error == "" {
+		t.Fatalf("world-writable asset directory must be rejected: %+v", got)
 	}
 }

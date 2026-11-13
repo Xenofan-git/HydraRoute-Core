@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,13 +16,21 @@ import (
 )
 
 type ProfileInput struct {
-	ID       string   `json:"id"`
-	Enabled  bool     `json:"enabled"`
-	Listen   string   `json:"listen,omitempty"`
-	Port     uint16   `json:"port"`
-	Strategy string   `json:"strategy,omitempty"`
-	Picked   []string `json:"picked,omitempty"`
-	Excluded []string `json:"excluded,omitempty"`
+	ID                 string             `json:"id"`
+	Enabled            bool               `json:"enabled"`
+	Listen             string             `json:"listen,omitempty"`
+	Port               uint16             `json:"port"`
+	Strategy           string             `json:"strategy,omitempty"`
+	OutboundInterface  string             `json:"outbound_interface,omitempty"`
+	MuxEnabled         bool               `json:"mux_enabled,omitempty"`
+	DPIBypass          compiler.DPIBypass `json:"dpi_bypass,omitempty"`
+	FilterKeep         string             `json:"filter_keep,omitempty"`
+	FilterExclude      string             `json:"filter_exclude,omitempty"`
+	AutoUpdateEnabled  bool               `json:"auto_update_enabled,omitempty"`
+	AutoUpdateInterval int                `json:"auto_update_interval,omitempty"`
+	Fallback           ProfileFallback    `json:"-"`
+	Picked             []string           `json:"picked,omitempty"`
+	Excluded           []string           `json:"excluded,omitempty"`
 }
 
 type ProfileRequest struct {
@@ -33,13 +42,16 @@ type ProfileRequest struct {
 }
 
 type SubscriptionRequest struct {
-	Source          string                  `json:"source,omitempty"`
-	Profile         ProfileInput            `json:"profile,omitempty"`
-	Links           []string                `json:"links,omitempty"`
-	Subscription    string                  `json:"subscription,omitempty"`
-	SubscriptionURL string                  `json:"subscription_url,omitempty"`
-	Profiles        []ProfileRequest        `json:"profiles,omitempty"`
-	Routing         *compiler.RoutingConfig `json:"-"`
+	Source                          string                    `json:"source,omitempty"`
+	Profile                         ProfileInput              `json:"profile,omitempty"`
+	Links                           []string                  `json:"links,omitempty"`
+	Subscription                    string                    `json:"subscription,omitempty"`
+	SubscriptionURL                 string                    `json:"subscription_url,omitempty"`
+	Profiles                        []ProfileRequest          `json:"profiles,omitempty"`
+	Routing                         *compiler.RoutingConfig   `json:"-"`
+	DNS                             *compiler.DNSConfig       `json:"-"`
+	L7Sniffing                      compiler.L7SniffingConfig `json:"-"`
+	ObservatoryProbeIntervalSeconds int                       `json:"-"`
 }
 
 type CompileResult struct {
@@ -49,25 +61,87 @@ type CompileResult struct {
 }
 
 type PreviewNode struct {
-	Key      parser.ServerKey `json:"key"`
-	Name     string           `json:"name"`
-	Picked   bool             `json:"picked"`
-	Excluded bool             `json:"excluded"`
+	Key          parser.ServerKey `json:"key"`
+	Name         string           `json:"name"`
+	Protocol     string           `json:"protocol"`
+	Host         string           `json:"host,omitempty"`
+	Picked       bool             `json:"picked"`
+	Excluded     bool             `json:"excluded"`
+	Filtered     bool             `json:"filtered"`
+	ReferenceURI string           `json:"-"`
 }
 
 type ProfilePreview struct {
-	ProfileID       string             `json:"profile_id"`
-	SourceID        string             `json:"source_id"`
-	PickMode        string             `json:"pick_mode"`
-	Nodes           []PreviewNode      `json:"nodes"`
-	MissingPicked   []parser.ServerKey `json:"missing_picked,omitempty"`
-	MissingExcluded []parser.ServerKey `json:"missing_excluded,omitempty"`
+	ProfileID           string             `json:"profile_id"`
+	SourceID            string             `json:"source_id"`
+	PickMode            string             `json:"pick_mode"`
+	AutoUpdateEnabled   bool               `json:"auto_update_enabled"`
+	AutoUpdateInterval  int                `json:"auto_update_interval"`
+	AutoUpdateAvailable bool               `json:"auto_update_available"`
+	FilterKeep          string             `json:"filter_keep"`
+	FilterExclude       string             `json:"filter_exclude"`
+	FilterAvailable     bool               `json:"filter_available"`
+	MuxCompatible       bool               `json:"mux_compatible"`
+	Nodes               []PreviewNode      `json:"nodes"`
+	MissingPicked       []parser.ServerKey `json:"missing_picked,omitempty"`
+	MissingExcluded     []parser.ServerKey `json:"missing_excluded,omitempty"`
+}
+
+// filterWords mirrors HRweb 1.68.0: LF/CRLF-delimited, trimmed, case-insensitive
+// substring terms; blank lines and # comments are ignored.
+func filterWords(raw string) []string {
+	var out []string
+	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
+		word := strings.TrimSpace(line)
+		if word == "" || strings.HasPrefix(word, "#") {
+			continue
+		}
+		out = append(out, strings.ToLower(word))
+	}
+	return out
+}
+
+func serverFiltered(name string, keep, exclude string, direct bool) bool {
+	if direct {
+		return false
+	}
+	lower := strings.ToLower(name)
+	keeps, excludes := filterWords(keep), filterWords(exclude)
+	if len(keeps) > 0 {
+		matched := false
+		for _, word := range keeps {
+			if strings.Contains(lower, word) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return true
+		}
+	}
+	for _, word := range excludes {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
 }
 
 // PreviewProfile fetches/parses one encrypted profile source and returns only
 // credential-free server identities plus reconciled selection metadata. Raw
 // outbounds, links, subscription URLs and credentials never leave this layer.
 func PreviewProfile(ctx context.Context, profile profiles.Profile, stateDir string) (ProfilePreview, error) {
+	return previewProfile(ctx, profile, stateDir, true)
+}
+
+// PreviewProfileCached builds a preview only from locally stored profile data.
+// It is intended for polling/status paths, which must never refetch a remote
+// subscription as a side effect of reading Observatory measurements.
+func PreviewProfileCached(ctx context.Context, profile profiles.Profile, stateDir string) (ProfilePreview, error) {
+	return previewProfile(ctx, profile, stateDir, false)
+}
+
+func previewProfile(ctx context.Context, profile profiles.Profile, stateDir string, allowFetch bool) (ProfilePreview, error) {
 	if err := profiles.Validate(profile); err != nil {
 		return ProfilePreview{}, fmt.Errorf("invalid stored profile")
 	}
@@ -75,8 +149,13 @@ func PreviewProfile(ctx context.Context, profile profiles.Profile, stateDir stri
 	var err error
 	switch {
 	case profile.SubscriptionURL != "":
-		var body string
-		body, err = parser.FetchSubscription(ctx, profile.SubscriptionURL)
+		body := profile.CachedSubscription
+		if body == "" {
+			if !allowFetch {
+				return ProfilePreview{}, fmt.Errorf("subscription cache is empty; refresh the subscription first")
+			}
+			body, err = parser.FetchSubscription(ctx, profile.SubscriptionURL)
+		}
 		if err == nil {
 			servers, err = parser.ParseSubscription(profile.SourceID, body)
 		}
@@ -112,11 +191,42 @@ func PreviewProfile(ctx context.Context, profile profiles.Profile, stateDir stri
 	for _, key := range reconciled.Excluded {
 		excluded[key] = true
 	}
-	out := ProfilePreview{ProfileID: profile.ID, SourceID: profile.SourceID, PickMode: selection.PickMode, Nodes: make([]PreviewNode, 0, len(servers)), MissingPicked: reconciled.MissingPicked, MissingExcluded: reconciled.MissingExcluded}
+	muxCompatible := true
+	muxNodeCount := 0
+	out := ProfilePreview{ProfileID: profile.ID, SourceID: profile.SourceID, PickMode: selection.PickMode, AutoUpdateEnabled: profile.AutoUpdateEnabled, AutoUpdateInterval: profile.AutoUpdateInterval, AutoUpdateAvailable: profile.SubscriptionURL != "", FilterKeep: profile.FilterKeep, FilterExclude: profile.FilterExclude, FilterAvailable: profile.SubscriptionURL != "" || profile.Subscription != "", Nodes: make([]PreviewNode, 0, len(servers)), MissingPicked: reconciled.MissingPicked, MissingExcluded: reconciled.MissingExcluded}
 	for _, server := range servers {
 		key := server.CompilerKey()
-		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Picked: picked[key], Excluded: excluded[key]})
+		selected := picked[key] || (selection.PickMode == "auto" && !excluded[key])
+		if selected && !excluded[key] && !serverFiltered(server.Name, profile.FilterKeep, profile.FilterExclude, len(profile.Links) > 0 && profile.Subscription == "" && profile.SubscriptionURL == "" || server.Key.Source == "direct") {
+			muxNodeCount++
+			if !compiler.SupportsMuxOutbound(server.Outbound) {
+				muxCompatible = false
+			}
+		}
+		directSource := len(profile.Links) > 0 && profile.Subscription == "" && profile.SubscriptionURL == ""
+		filtered := serverFiltered(server.Name, profile.FilterKeep, profile.FilterExclude, directSource || server.Key.Source == "direct")
+		var outbound struct {
+			Protocol string `json:"protocol"`
+			Settings struct {
+				VNext []struct {
+					Address string `json:"address"`
+				} `json:"vnext"`
+				Servers []struct {
+					Address string `json:"address"`
+				} `json:"servers"`
+			} `json:"settings"`
+		}
+		_ = json.Unmarshal(server.Outbound, &outbound)
+		host := ""
+		if len(outbound.Settings.VNext) > 0 {
+			host = outbound.Settings.VNext[0].Address
+		}
+		if host == "" && len(outbound.Settings.Servers) > 0 {
+			host = outbound.Settings.Servers[0].Address
+		}
+		out.Nodes = append(out.Nodes, PreviewNode{Key: server.Key, Name: server.Name, Protocol: outbound.Protocol, Host: host, Picked: picked[key] || (selection.PickMode == "auto" && !excluded[key]), Excluded: excluded[key], Filtered: filtered, ReferenceURI: server.ReferenceURI})
 	}
+	out.MuxCompatible = muxNodeCount > 0 && muxCompatible
 	return out, nil
 }
 
@@ -160,7 +270,7 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 			fail("invalid profile/source identity")
 			continue
 		}
-		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
+		profile := compiler.Profile{ID: id, Enabled: input.Profile.Enabled, Listen: input.Profile.Listen, Port: input.Profile.Port, Strategy: input.Profile.Strategy, OutboundInterface: input.Profile.OutboundInterface, MuxEnabled: input.Profile.MuxEnabled, DPIBypass: input.Profile.DPIBypass, Picked: input.Profile.Picked, Excluded: input.Profile.Excluded}
 		if !profile.Enabled {
 			compiledProfiles = append(compiledProfiles, profile)
 			continue
@@ -220,26 +330,31 @@ func CompileSubscriptions(ctx context.Context, req SubscriptionRequest, stateDir
 					continue
 				}
 				selection, reconcileErr := state.Reconcile(*saved, servers)
-				if reconcileErr != nil {
+				if reconcileErr != nil && !(errors.Is(reconcileErr, state.ErrNoAvailablePickedNodes) && saved.PickMode == "manual" && len(saved.Picked) == 0) {
 					fail("saved selection reconciliation failed")
 					continue
 				}
 				profile.Picked, profile.Excluded = selection.Picked, selection.Excluded
+				profile.ManualSelection = saved.PickMode == "manual"
 			} else if !os.IsNotExist(loadErr) {
 				fail("cannot load saved selection state")
 				continue
 			}
 		}
+		profile.FallbackKey = chooseFallbackKey(servers, input.Profile, profile, len(input.Links) > 0)
 		for _, server := range servers {
+			if serverFiltered(server.Name, input.Profile.FilterKeep, input.Profile.FilterExclude, len(input.Links) > 0 || server.Key.Source == "direct") {
+				continue
+			}
 			profile.Nodes = append(profile.Nodes, compiler.Node{Key: server.CompilerKey(), Outbound: server.CompilerOutbound()})
 		}
-		nodeCount += len(servers)
+		nodeCount += len(profile.Nodes)
 		compiledProfiles = append(compiledProfiles, profile)
 	}
 	if len(failures) > 0 {
 		return CompileResult{}, &RefreshError{Failures: failures}
 	}
-	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles, Routing: req.Routing})
+	compiled, err := compiler.Compile(compiler.CompileRequest{Profiles: compiledProfiles, Routing: req.Routing, DNS: req.DNS, L7Sniffing: req.L7Sniffing, ObservatoryProbeIntervalSeconds: req.ObservatoryProbeIntervalSeconds})
 	if err != nil {
 		return CompileResult{}, err
 	}

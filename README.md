@@ -16,12 +16,19 @@ The project keeps subscription profiles isolated: each enabled profile receives 
 - **Xray configuration compiler** — generates profile-specific SOCKS5 inbounds, outbounds, balancers, routing rules, and observability settings.
 - **Load balancing** — supports random, round-robin, and least-ping strategies.
 - **Encrypted profile storage** — subscription source data is encrypted at rest using AES-256-GCM.
+- **HRNeo-style subscription manager** — per-profile server selection, select-all/clear-all, offline exclusion, keyword keep/exclude filters, automatic refresh interval, and Save/Cancel.
+- **Live server measurements** — separate ICMP echo and per-outbound Xray Observatory delay/status, streamed to the dashboard; stale or unavailable measurements are never presented as fresh.
+- **Per-profile refresh scheduling** — each URL subscription has its own auto-update toggle and interval; cached subscription bodies are encrypted with the profile and reused between due refreshes.
 - **Selection persistence** — stores manual/automatic node selection and exclusions without persisting raw subscription credentials in selection state.
 - **Embedded web dashboard** — responsive Midnight + Violet interface with dark/light themes, profile cards, shared SOCKS5 routing editor, and runtime controls.
 - **Shared SOCKS5 routing** — optional dedicated inbound with ordered domain/IP rules, profile/DIRECT/BLOCK actions, and an explicit default route.
-- **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, and selection operations.
+- **Local REST API** — loopback-only API for health, runtime status, profile management, routing configuration, refresh, selection operations, GeoIP/GeoSite readiness, and Watchlist status.
+- **HRNeo-compatible Watchlist** — Core-owned Unix socket with MATCH/DUMP line protocol, rank-based suffix matching, bounded DUMP streaming, and a read-only status endpoint. GeoSite Domain/Full keys are expanded from the installed data file; non-enumerable patterns are reported as partial coverage.
+- **Core DNS policy resolver** — disabled by default, loopback-only UDP/TCP listener, Do53/DoT/HTTPS-only DoH upstreams, DHCP DNS discovery, host overrides, explicit rules, HRDNS longest-suffix block/allow lists for A/AAAA/SVCB/HTTPS records, source refresh scheduling, statistics, and managed Xray DNS integration. When SmartDNS is active it is the exclusive upstream; failures do not fall back to public DNS. Managed sources include the seven built-in HRNeo presets (HaGeZi Light/Multi/Pro, OISD small/big, AdGuard DNS Filter, StevenBlack) as well as custom HTTP(S) URLs. Separate persistent custom block and allow text lists are editable in the DNS dashboard and are merged into the same Core policy snapshot.
+- **SmartDNS Release48.4 sidecar** — optional loopback-only DNS data plane with per-profile SOCKS-pinned upstream groups. The Core DNS resolver remains in front to enforce blocklist policy before profile-specific upstream selection.
+- **Health Monitor and event journal** — periodic/manual read-only checks, fail/recovery hysteresis, resource metrics, bounded private event history, and live SSE updates in the dashboard.
 - **Runtime supervision** — validates candidate configurations with Xray before activation and preserves the last known-good configuration on refresh failures.
-- **Scheduled refresh** — optional refresh scheduler with capped exponential retry; disabled unless configured.
+- **Scheduled refresh** — independent per-profile schedules with capped exponential retry; disabled unless configured.
 - **ARM64 and AMD64 builds** — cross-compilation for Linux ARM64/AArch64 and AMD64.
 
 ## Architecture
@@ -134,13 +141,22 @@ HydraRoute Core is designed to coexist with other proxy clients. Integrating its
 
 ## Management API
 
-The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory. Each profile card has a **Серверы** action: it opens a per-profile picker with automatic/manual pool modes, individual Picked/Excluded flags, and explicit handling of server identities that disappeared from the latest subscription.
+The embedded dashboard uses the loopback-only API. The shared routing configuration is persisted in a private `routing.json` file under the configured state directory. Each profile card has a **Серверы** action: it opens the HRNeo-style subscription manager. Selection is stored separately from keep/exclude filters, so changing filters does not destroy manual picks. Direct/manual links bypass subscription filters. URL subscription bodies are cached inside the encrypted profile store; per-profile auto-refresh fetches only due sources and uses cached bodies for the rest. The original two measurement columns are kept distinct: ICMP echo is a host-level reachability test, while proxy delay and `offline` state come from the running Xray Observatory.
 
+- GET /v1/geodata/status — inspect the fixed GeoIP/GeoSite assets, sizes and SHA-256.
+- GET /v1/watchlist/status — inspect the local MATCH/DUMP socket and partial-coverage counters.
+- The Core Watchlist socket is created only after a shared routing configuration has been successfully prepared. Its path is /var/lib/hydraroute/state/watchlist.sock (mode 0600); it never reuses HRNeo's /var/run/hrneo.sock.
+- MATCH <name> removes one trailing dot, lowercases, checks exact and parent suffixes, and chooses the lowest numeric rank. DUMP streams T, K, and END records. Targets map to Core profile IDs, DIRECT, or BLOCK; IP-only targets may appear in T, but IP/CIDR entries are not domain K records.
+- GeoSite Domain/Full records are expanded; GeoSite Plain/Regex and Xray keyword/regexp patterns are not enumerable concrete keys and are reported as partial coverage by /v1/watchlist/status.
 - `GET /v1/profiles` — list profile metadata.
 - `POST /v1/profiles` and `DELETE /v1/profiles` — create and delete profiles.
 - `POST /v1/profiles/refresh` — compile stored subscriptions and prepare the Xray configuration.
-- `POST /v1/profiles/preview` — fetch and parse one stored profile for the dashboard server picker; returns credential-free server identities and saved selection flags only.
-- `GET /v1/selections?profile_id=<id>` and `PUT /v1/selections` — read and persist per-profile automatic/manual server selection and exclusions. Missing server identities are retained for review; manual selection fails closed if no selected node remains.
+- `POST /v1/profiles/preview` — prepare the credential-free server list, per-profile filters, selection state, and auto-refresh settings for the subscription manager.
+- `PUT /v1/profiles` — update profile settings, filters, auto-refresh schedule, and manual Picked/Excluded selection together; the runtime configuration is validated before activation.
+- `POST /v1/profiles/refresh` — refresh all subscriptions, or only the selected profile when `profile_id` is supplied.
+- `GET /v1/observatory/status?profile_id=<id>` — read real Xray Observatory results for the selected profile.
+- `GET /v1/profiles/ping?profile_id=<id>` — Server-Sent Events stream matching HRweb's `proxy.pingServers` interaction: `links`, separate per-node `echo` (ICMP) and `ping` (Xray proxy delay/alive) events, then `done`. The Xray Observatory API exposes status retrieval but no force-probe RPC, so this stream waits for the next real observation cycle; it does not fabricate results or restart Xray.
+- `GET /v1/selections?profile_id=<id>` and `PUT /v1/selections` — retained for backwards compatibility. The dashboard now saves profile filters and selection together through `PUT /v1/profiles`. Missing server identities are retained for review; an empty manual pool is supported and omits that profile's balancer.
 - `GET /v1/routing` and `PUT /v1/routing` — read, validate, persist, and apply shared SOCKS5 routing rules.
 - `GET /v1/runtime` and `POST /v1/runtime` — inspect and control the managed Xray process.
 - `GET /v1/refresh/status` — inspect scheduled refresh status.
@@ -164,4 +180,34 @@ No license has been added yet. Until a license is published, the source is not g
 
 ### Dashboard browser tests
 
-The CI test job runs Playwright against the embedded dashboard assets with a local API fixture. It exercises manual server selection, mutually exclusive Picked/Excluded state, retention and explicit removal of missing server identities, empty manual-pool rejection, and CR/LF/comma parsing in the routing editor. The browser is Chromium headless; the test fixture does not start Xray or modify host networking.
+The CI test job runs Playwright against the embedded dashboard assets with a local API fixture. It exercises the subscription manager, streamed echo/proxy ping events, offline exclusion, keyword filtering without losing manual picks, per-profile auto-refresh settings, and empty manual-pool handling. The browser is Chromium headless; the test fixture does not start Xray or modify host networking.
+
+## Optional Core DNS resolver
+
+The resolver is an opt-in Core component. It is disabled by default and binds only to `127.0.0.1` (UDP and TCP, default port `5353`). Supported upstreams are classic DNS (Do53), DNS-over-TLS (DoT), and DNS-over-HTTPS (DoH; HTTPS is mandatory and redirects cannot downgrade to HTTP). The resolver supports ordered upstream fallback, hosts overrides, custom domain block/allow rules, and optional query statistics. Truncated Do53 UDP replies are retried over TCP; blocked AAAA requests do not fall through to upstreams.
+
+- `GET /v1/dns`, `PUT /v1/dns` — read or transactionally update resolver configuration.
+- `POST /v1/dns/service` with `start` or `stop` — manage the resolver and update only the Core-owned Xray configuration.
+- `POST /v1/dns/check` — resolve a test domain through the configured Core upstreams.
+
+Automatic provider discovery reads the active default-route interface and DHCP-provided DNS options. It does not use `resolv.conf` as a provider source. Core DNS does not change `/etc/resolv.conf`, NetworkManager settings, system DNS, host routes, firewall rules, or LAN interception.
+
+DNS now has two deliberately separate layers:
+
+- **Core DNS policy resolver** (loopback UDP/TCP, default `127.0.0.1:5353`) owns hosts, explicit rules, blocklist/allowlist evaluation and statistics. Blocklists are fetched and parsed by the persistent source manager, retain last-known-good data after failed refreshes, and support manual refresh plus a global daily local-time schedule (default `04:30`, configurable interface binding). Block/allow decisions use HRDNS longest-suffix semantics: the most-specific matching suffix wins; allow wins only at the same exact suffix. Managed blocklists apply to A, AAAA, SVCB and HTTPS queries; blocked queries receive the HRDNS-style NOERROR/SOA negative answer (30-second TTL and pinned default SOA tuple), while other record types continue upstream resolution.
+- **SmartDNS Release48.4 sidecar** (loopback, default `127.0.0.1:5354`) owns profile-specific upstream selection. Each enabled profile receives its own SOCKS-pinned upstream group. When SmartDNS is started through the API, Core DNS becomes its exclusive policy front: blocked queries are answered before forwarding, and all other queries go only to SmartDNS. A SmartDNS failure returns SERVFAIL; it never falls back to public/DHCP DNS and bypasses the profile path. SmartDNS cannot be started unless the Core DNS policy resolver is running, and the policy resolver cannot be stopped while SmartDNS is running.
+
+Both services remain disabled unless explicitly enabled. The Core DNS resolver does not edit system DNS, install routes, or modify firewall rules. Managed URL blocklists and configured block/allow domain sets are evaluated by the Core DNS policy front using HRDNS longest-suffix precedence. The SmartDNS compiler emits only profile-routing domain sets; it does not emit native SmartDNS address rules for block/allow sets, avoiding inherited-address-flag conflicts such as a child block beneath a parent allow. The Core policy front is refreshed when either managed lists or SmartDNS configuration changes. CI validates the policy precedence tests and the pinned SmartDNS runtime under AMD64 and ARM64/QEMU; deployment and runtime acceptance on NanoPi remain pending. This is not yet a claim of complete HRNeo DNS parity.
+
+## Operations: Health Monitor and event journal
+
+HydraRoute Core exposes a read-only local Health Monitor and a structured event journal:
+
+- `GET /v1/health/monitor` — latest component health and local system metrics.
+- `POST /v1/health/check` — run an immediate health check.
+- `GET /v1/health/settings`, `PUT /v1/health/settings` — configure interval, timeout, failure and recovery thresholds.
+- `GET /v1/events?limit=100&after_id=0` — read the bounded event history.
+- `GET /v1/events/stream?after_id=0` — receive structured events over Server-Sent Events.
+- `DELETE /v1/events` — clear the local event history.
+
+The journal retains at most 500 records and is stored in the private Core state directory. Event messages deliberately exclude subscription URLs, credentials, raw request bodies and generated configuration contents. Health checks inspect only Core-owned services, GeoIP/GeoSite readiness, Watchlist state, and read-only local disk/memory metrics. They do not change host routes, firewall rules, interfaces, or system DNS.

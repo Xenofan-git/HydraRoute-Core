@@ -1,0 +1,173 @@
+name: SmartDNS sidecar build and isolation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'internal/dnsservice/smartdns/**'
+      - 'third_party/smartdns/**'
+      - 'tests/integration/smartdns_profile_pinned_socks.py'
+      - '.github/workflows/smartdns.yml'
+  pull_request:
+    paths:
+      - 'internal/dnsservice/smartdns/**'
+      - 'third_party/smartdns/**'
+      - 'tests/integration/smartdns_profile_pinned_socks.py'
+      - '.github/workflows/smartdns.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build SmartDNS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            cc: gcc
+            ar: ar
+            machine: Advanced Micro Devices X86-64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            cc: gcc
+            ar: ar
+            machine: AArch64
+    steps:
+      - name: Checkout HydraRoute Core
+        uses: actions/checkout@v4
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils git libssl-dev file
+
+      - name: Fetch pinned SmartDNS source and apply Core isolation patch
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/pymumu/smartdns.git "$RUNNER_TEMP/smartdns"
+          git -C "$RUNNER_TEMP/smartdns" fetch --depth=1 origin 21c940edc65520849ba03544c5cf8d9cf326e680
+          git -C "$RUNNER_TEMP/smartdns" checkout --detach 21c940edc65520849ba03544c5cf8d9cf326e680
+          test "$(git -C "$RUNNER_TEMP/smartdns" rev-parse HEAD)" = "21c940edc65520849ba03544c5cf8d9cf326e680"
+          git -C "$RUNNER_TEMP/smartdns" apply --check "$GITHUB_WORKSPACE/third_party/smartdns/patches/0001-disable-netlink-without-mac.patch"
+          git -C "$RUNNER_TEMP/smartdns" apply "$GITHUB_WORKSPACE/third_party/smartdns/patches/0001-disable-netlink-without-mac.patch"
+
+      - name: Build pinned SmartDNS without UI or zlib
+        env:
+          SMARTDNS_CC: ${{ matrix.cc }}
+          SMARTDNS_AR: ${{ matrix.ar }}
+          SMARTDNS_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/build-bin"
+          printf '#!/bin/sh\necho 2\n' > "$RUNNER_TEMP/build-bin/nproc"
+          chmod +x "$RUNNER_TEMP/build-bin/nproc"
+          cd "$RUNNER_TEMP/smartdns"
+          EXTRA_LDFLAGS=""
+          PATH="$RUNNER_TEMP/build-bin:$PATH" make -C src -j2 \
+            CC="$SMARTDNS_CC" AR="$SMARTDNS_AR" \
+            WITH_ZLIB=0 VER=48.4 EXTRA_LDFLAGS="$EXTRA_LDFLAGS"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH"
+          install -m 0755 src/smartdns "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH/smartdns"
+          file "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH/smartdns"
+          readelf -h "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH/smartdns" | grep 'Machine:'
+          readelf -h "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH/smartdns" | grep -F "$([ "$SMARTDNS_ARCH" = arm64 ] && echo AArch64 || echo 'Advanced Micro Devices X86-64')"
+          sha256sum "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH/smartdns" | tee "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH/SHA256SUMS"
+          printf 'source_commit=21c940edc65520849ba03544c5cf8d9cf326e680\npatch=0001-disable-netlink-without-mac.patch\narch=%s\nwith_zlib=0\nwith_ui=0\n' "$SMARTDNS_ARCH" > "$GITHUB_WORKSPACE/artifacts/smartdns-$SMARTDNS_ARCH/BUILD-MANIFEST.txt"
+
+      - name: Upload SmartDNS build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartdns-${{ matrix.arch }}-release48.4
+          path: artifacts/smartdns-${{ matrix.arch }}/*
+          if-no-files-found: error
+          retention-days: 14
+
+  sandbox:
+    name: Verify AMD64 profile-pinned SOCKS, TLS and fail-closed isolation
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout HydraRoute Core
+        uses: actions/checkout@v4
+
+      - name: Download AMD64 SmartDNS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: smartdns-amd64-release48.4
+          path: ${{ runner.temp }}/smartdns
+
+      - name: Install runtime test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssl strace
+          chmod +x "$RUNNER_TEMP/smartdns/smartdns"
+
+      - name: Set up Go for managed runtime integration
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify managed SmartDNS start, readiness and stop
+        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns/smartdns
+        run: go test -count=1 -v -run TestRuntimeWithSmartDNSBinary ./internal/dnsservice/smartdns
+
+      - name: Verify TLS, profile-pinned SOCKS and fail-closed isolation
+        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns/smartdns
+        run: python3 tests/integration/smartdns_profile_pinned_socks.py
+
+  sandbox-arm64:
+    name: Verify ARM64 profile-pinned SOCKS, TLS and fail-closed isolation under QEMU
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout HydraRoute Core
+        uses: actions/checkout@v4
+
+      - name: Download ARM64 SmartDNS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: smartdns-arm64-release48.4
+          path: ${{ runner.temp }}/smartdns-arm64
+
+      - name: Install native ARM64 runtime test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssl strace
+          chmod +x "$RUNNER_TEMP/smartdns-arm64/smartdns"
+          file "$RUNNER_TEMP/smartdns-arm64/smartdns"
+          readelf -h "$RUNNER_TEMP/smartdns-arm64/smartdns" | grep -F AArch64
+
+      - name: Set up Go for managed runtime integration
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify managed SmartDNS start, readiness and stop
+        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns
+        run: go test -count=1 -v -run TestRuntimeWithSmartDNSBinary ./internal/dnsservice/smartdns
+
+      - name: Verify native ARM64 SmartDNS isolation
+        env:
+          SMARTDNS_BINARY: ${{ runner.temp }}/smartdns-arm64/smartdns
+          SMARTDNS_DNS_TIMEOUT: "8"
+          SMARTDNS_STARTUP_TIMEOUT: "30"
+          SMARTDNS_NO_STRACE: "0"
+        run: python3 tests/integration/smartdns_profile_pinned_socks.py
+
+      - name: Upload ARM64 runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smartdns-arm64-qemu-diagnostics
+          path: |
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.log
+            /tmp/hrcore-smartdns-sandbox-*/smartdns-internal.log
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.strace
+            /tmp/hrcore-smartdns-sandbox-*/smartdns.conf
+          if-no-files-found: warn
+          retention-days: 7

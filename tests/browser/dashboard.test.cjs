@@ -1,1 +1,394 @@
-Y29uc3QgYXNzZXJ0ID0gcmVxdWlyZSgnbm9kZTphc3NlcnQvc3RyaWN0Jyk7CmNvbnN0IGZzID0gcmVxdWlyZSgnbm9kZTpmcycpOwpjb25zdCBodHRwID0gcmVxdWlyZSgnbm9kZTpodHRwJyk7CmNvbnN0IHBhdGggPSByZXF1aXJlKCdub2RlOnBhdGgnKTsKY29uc3QgeyBhZnRlciwgYmVmb3JlLCB0ZXN0IH0gPSByZXF1aXJlKCdub2RlOnRlc3QnKTsKY29uc3QgeyBjaHJvbWl1bSB9ID0gcmVxdWlyZSgncGxheXdyaWdodCcpOwoKY29uc3Qgcm9vdCA9IHBhdGgucmVzb2x2ZShfX2Rpcm5hbWUsICcuLi8uLicpOwpjb25zdCBzdGF0aWNEaXIgPSBwYXRoLmpvaW4ocm9vdCwgJ2ludGVybmFsL3VpL3N0YXRpYycpOwpsZXQgc2VydmVyOwpsZXQgYnJvd3NlcjsKbGV0IGJhc2VVUkw7CmxldCBzYXZlZFNlbGVjdGlvbjsKbGV0IHNhdmVkUm91dGluZzsKCmNvbnN0IHByb2ZpbGVzID0gW3sKICBpZDogJ2ZvcmVpZ24nLCBzb3VyY2VfaWQ6ICdwcm92aWRlckEnLCBlbmFibGVkOiB0cnVlLAogIGxpc3RlbjogJzEyNy4wLjAuMScsIHBvcnQ6IDE2MDkwLCBzdHJhdGVneTogJ2xlYXN0UGluZycsCn1dOwpjb25zdCByb3V0aW5nID0gewogIGVuYWJsZWQ6IGZhbHNlLCBsaXN0ZW46ICcxMjcuMC4wLjEnLCBwb3J0OiAxNjA4MCwKICBkZWZhdWx0X2FjdGlvbjogJ2Jsb2NrJywgZGVmYXVsdF9wcm9maWxlX2lkOiAnJywKICBydWxlczogW3sKICAgIGlkOiAncnVsZS0xJywgbmFtZTogJ1NhbXBsZScsIGVuYWJsZWQ6IHRydWUsIG1hdGNoX3R5cGU6ICdkb21haW4nLAogICAgdmFsdWVzOiBbJ2RvbWFpbjpvbGQuZXhhbXBsZSddLCBhY3Rpb246ICdkaXJlY3QnLCBwcm9maWxlX2lkOiAnJywKICB9LCB7CiAgICBpZDogJ3J1bGUtMicsIG5hbWU6ICdTZWNvbmQnLCBlbmFibGVkOiB0cnVlLCBtYXRjaF90eXBlOiAnZG9tYWluJywKICAgIHZhbHVlczogWydkb21haW46c2Vjb25kLmV4YW1wbGUnXSwgYWN0aW9uOiAnYmxvY2snLCBwcm9maWxlX2lkOiAnJywKICB9XSwKfTsKY29uc3QgcHJldmlldyA9IHsKICBwcm9maWxlX2lkOiAnZm9yZWlnbicsIHNvdXJjZV9pZDogJ3Byb3ZpZGVyQScsIHBpY2tfbW9kZTogJ2F1dG8nLAogIG5vZGVzOiBbCiAgICB7IG5hbWU6ICdBbHBoYScsIGtleTogeyBzb3VyY2U6ICdwcm92aWRlckEnLCBuYW1lOiAnQWxwaGEnLCBudGg6IDAgfSwgcGlja2VkOiBmYWxzZSwgZXhjbHVkZWQ6IGZhbHNlIH0sCiAgICB7IG5hbWU6ICdCZXRhJywga2V5OiB7IHNvdXJjZTogJ3Byb3ZpZGVyQScsIG5hbWU6ICdCZXRhJywgbnRoOiAwIH0sIHBpY2tlZDogZmFsc2UsIGV4Y2x1ZGVkOiBmYWxzZSB9LAogIF0sCiAgbWlzc2luZ19waWNrZWQ6IFt7IHNvdXJjZTogJ3Byb3ZpZGVyQScsIG5hbWU6ICdHb25lJywgbnRoOiAwIH1dLAogIG1pc3NpbmdfZXhjbHVkZWQ6IFtdLAp9OwoKZnVuY3Rpb24ganNvbihyZXMsIHN0YXR1cywgdmFsdWUpIHsKICByZXMud3JpdGVIZWFkKHN0YXR1cywgewogICAgJ0NvbnRlbnQtVHlwZSc6ICdhcHBsaWNhdGlvbi9qc29uOyBjaGFyc2V0PXV0Zi04JywKICAgICdDYWNoZS1Db250cm9sJzogJ25vLXN0b3JlJywKICB9KTsKICByZXMuZW5kKEpTT04uc3RyaW5naWZ5KHZhbHVlKSk7Cn0KCmZ1bmN0aW9uIHJlYWRCb2R5KHJlcSkgewogIHJldHVybiBuZXcgUHJvbWlzZSgocmVzb2x2ZSwgcmVqZWN0KSA9PiB7CiAgICBsZXQgYm9keSA9ICcnOwogICAgcmVxLnNldEVuY29kaW5nKCd1dGY4Jyk7CiAgICByZXEub24oJ2RhdGEnLCBjaHVuayA9PiB7IGJvZHkgKz0gY2h1bms7IH0pOwogICAgcmVxLm9uKCdlbmQnLCAoKSA9PiB7CiAgICAgIHRyeSB7IHJlc29sdmUoYm9keSA/IEpTT04ucGFyc2UoYm9keSkgOiB7fSk7IH0KICAgICAgY2F0Y2ggKGVycm9yKSB7IHJlamVjdChlcnJvcik7IH0KICAgIH0pOwogICAgcmVxLm9uKCdlcnJvcicsIHJlamVjdCk7CiAgfSk7Cn0KCmJlZm9yZShhc3luYyAoKSA9PiB7CiAgc2VydmVyID0gaHR0cC5jcmVhdGVTZXJ2ZXIoYXN5bmMgKHJlcSwgcmVzKSA9PiB7CiAgICBjb25zdCB1cmwgPSBuZXcgVVJMKHJlcS51cmwsICdodHRwOi8vMTI3LjAuMC4xJyk7CiAgICB0cnkgewogICAgICBpZiAodXJsLnBhdGhuYW1lID09PSAnL2hlYWx0aHonKSByZXR1cm4ganNvbihyZXMsIDIwMCwgeyBzdGF0dXM6ICdvaycgfSk7CiAgICAgIGlmICh1cmwucGF0aG5hbWUgPT09ICcvdjEvcnVudGltZScpIHJldHVybiBqc29uKHJlcywgMjAwLCB7IHJ1bm5pbmc6IGZhbHNlLCBjb25maWd1cmVkOiBmYWxzZSB9KTsKICAgICAgaWYgKHVybC5wYXRobmFtZSA9PT0gJy92MS9wcm9maWxlcycgJiYgcmVxLm1ldGhvZCA9PT0gJ0dFVCcpIHJldHVybiBqc29uKHJlcywgMjAwLCB7IHByb2ZpbGVzIH0pOwogICAgICBpZiAodXJsLnBhdGhuYW1lID09PSAnL3YxL3JvdXRpbmcnICYmIHJlcS5tZXRob2QgPT09ICdHRVQnKSByZXR1cm4ganNvbihyZXMsIDIwMCwgeyByb3V0aW5nLCBjb25maWd1cmVkOiBmYWxzZSB9KTsKICAgICAgaWYgKHVybC5wYXRobmFtZSA9PT0gJy92MS9yZWZyZXNoL3N0YXR1cycpIHJldHVybiBqc29uKHJlcywgMjAwLCB7IGVuYWJsZWQ6IGZhbHNlLCBydW5uaW5nOiBmYWxzZSwgY29uc2VjdXRpdmVfZmFpbHVyZXM6IDAgfSk7CiAgICAgIGlmICh1cmwucGF0aG5hbWUgPT09ICcvdjEvcHJvZmlsZXMvcHJldmlldycgJiYgcmVxLm1ldGhvZCA9PT0gJ1BPU1QnKSByZXR1cm4ganNvbihyZXMsIDIwMCwgcHJldmlldyk7CiAgICAgIGlmICh1cmwucGF0aG5hbWUgPT09ICcvdjEvc2VsZWN0aW9ucycgJiYgcmVxLm1ldGhvZCA9PT0gJ1BVVCcpIHsKICAgICAgICBzYXZlZFNlbGVjdGlvbiA9IGF3YWl0IHJlYWRCb2R5KHJlcSk7CiAgICAgICAgcmV0dXJuIGpzb24ocmVzLCAyMDAsIHsgc3RhdHVzOiAnc2F2ZWQnLCBwcm9maWxlX2lkOiBzYXZlZFNlbGVjdGlvbi5pZCB9KTsKICAgICAgfQogICAgICBpZiAodXJsLnBhdGhuYW1lID09PSAnL3YxL3JvdXRpbmcnICYmIHJlcS5tZXRob2QgPT09ICdQVVQnKSB7CiAgICAgICAgc2F2ZWRSb3V0aW5nID0gYXdhaXQgcmVhZEJvZHkocmVxKTsKICAgICAgICBPYmplY3QuYXNzaWduKHJvdXRpbmcsIHNhdmVkUm91dGluZyk7CiAgICAgICAgcmV0dXJuIGpzb24ocmVzLCAyMDAsIHsgc3RhdHVzOiAnc2F2ZWQnIH0pOwogICAgICB9CiAgICAgIGlmIChyZXEubWV0aG9kICE9PSAnR0VUJykgcmV0dXJuIGpzb24ocmVzLCA0MDUsIHsgZXJyb3I6ICdtZXRob2Qgbm90IGFsbG93ZWQnIH0pOwogICAgICBjb25zdCBhc3NldCA9IHVybC5wYXRobmFtZSA9PT0gJy8nID8gJ2luZGV4Lmh0bWwnIDogdXJsLnBhdGhuYW1lLnNsaWNlKDEpOwogICAgICBpZiAoIVsnaW5kZXguaHRtbCcsICdhcHAuanMnLCAnYXBwLmNzcyddLmluY2x1ZGVzKGFzc2V0KSkgcmV0dXJuIGpzb24ocmVzLCA0MDQsIHsgZXJyb3I6ICdub3QgZm91bmQnIH0pOwogICAgICBjb25zdCBib2R5ID0gZnMucmVhZEZpbGVTeW5jKHBhdGguam9pbihzdGF0aWNEaXIsIGFzc2V0KSk7CiAgICAgIGNvbnN0IHR5cGUgPSBhc3NldC5lbmRzV2l0aCgnLmpzJykgPyAndGV4dC9qYXZhc2NyaXB0OyBjaGFyc2V0PXV0Zi04JwogICAgICAgIDogYXNzZXQuZW5kc1dpdGgoJy5jc3MnKSA/ICd0ZXh0L2NzczsgY2hhcnNldD11dGYtOCcgOiAndGV4dC9odG1sOyBjaGFyc2V0PXV0Zi04JzsKICAgICAgcmVzLndyaXRlSGVhZCgyMDAsIHsKICAgICAgICAnQ29udGVudC1UeXBlJzogdHlwZSwKICAgICAgICAnQ2FjaGUtQ29udHJvbCc6ICduby1zdG9yZScsCiAgICAgICAgJ1gtQ29udGVudC1UeXBlLU9wdGlvbnMnOiAnbm9zbmlmZicsCiAgICAgICAgJ1gtRnJhbWUtT3B0aW9ucyc6ICdERU5ZJywKICAgICAgICAnUmVmZXJyZXItUG9saWN5JzogJ25vLXJlZmVycmVyJywKICAgICAgICAnQ29udGVudC1TZWN1cml0eS1Qb2xpY3knOiAiZGVmYXVsdC1zcmMgJ3NlbGYnOyBzY3JpcHQtc3JjICdzZWxmJzsgc3R5bGUtc3JjICdzZWxmJyAndW5zYWZlLWlubGluZSc7IGltZy1zcmMgJ3NlbGYnIGRhdGE6OyBjb25uZWN0LXNyYyAnc2VsZic7IG9iamVjdC1zcmMgJ25vbmUnOyBiYXNlLXVyaSAnbm9uZSc7IGZyYW1lLWFuY2VzdG9ycyAnbm9uZSciLAogICAgICB9KTsKICAgICAgcmVzLmVuZChib2R5KTsKICAgIH0gY2F0Y2ggKGVycm9yKSB7CiAgICAgIGpzb24ocmVzLCA1MDAsIHsgZXJyb3I6IGVycm9yLm1lc3NhZ2UgfSk7CiAgICB9CiAgfSk7CiAgYXdhaXQgbmV3IFByb21pc2UocmVzb2x2ZSA9PiBzZXJ2ZXIubGlzdGVuKDAsICcxMjcuMC4wLjEnLCByZXNvbHZlKSk7CiAgYmFzZVVSTCA9IGBodHRwOi8vMTI3LjAuMC4xOiR7c2VydmVyLmFkZHJlc3MoKS5wb3J0fWA7CiAgYnJvd3NlciA9IGF3YWl0IGNocm9taXVtLmxhdW5jaCh7IGhlYWRsZXNzOiB0cnVlIH0pOwp9KTsKCmFmdGVyKGFzeW5jICgpID0+IHsKICBpZiAoYnJvd3NlcikgYXdhaXQgYnJvd3Nlci5jbG9zZSgpOwogIGlmIChzZXJ2ZXIpIGF3YWl0IG5ldyBQcm9taXNlKHJlc29sdmUgPT4gc2VydmVyLmNsb3NlKHJlc29sdmUpKTsKfSk7CgoKdGVzdCgnUnVzc2lhbiBtZW51IG9wZW5zIG9uIFJ1bGVzIGFuZCBydWxlcyBjYW4gYmUgcmVvcmRlcmVkIGJ5IGRyYWdnaW5nJywgYXN5bmMgKCkgPT4gewogIGNvbnN0IHBhZ2UgPSBhd2FpdCBicm93c2VyLm5ld1BhZ2UoKTsKICB0cnkgewogICAgYXdhaXQgcGFnZS5nb3RvKGJhc2VVUkwpOwogICAgYXdhaXQgcGFnZS5nZXRCeVRleHQoJ0FQSSDQv9C+0LTQutC70Y7Rh9GR0L0nKS53YWl0Rm9yKCk7CiAgICBhc3NlcnQuZXF1YWwoYXdhaXQgcGFnZS5sb2NhdG9yKCcubmF2LWl0ZW0nKS5hbGxUZXh0Q29udGVudHMoKSwgWyfilqbQn9GA0LDQstC40LvQsCcsJ+KZp9Ch0LXRgtGMJywn4peORE5TJywn4pi3SHlkcmEnLCfik5jQmNC90YTQvicsJ+KamdCd0LDRgdGC0YDQvtC50LrQuCcsJ+KHpdCS0YvRhdC+0LQnXSk7CiAgICBhc3NlcnQuZXF1YWwoYXdhaXQgcGFnZS5sb2NhdG9yKCcjcGFnZVRpdGxlJykudGV4dENvbnRlbnQoKSwgJ9Cf0YDQsNCy0LjQu9CwJyk7CiAgICBhc3NlcnQuZXF1YWwoYXdhaXQgcGFnZS5sb2NhdG9yKCcucnVsZS1jYXJkW2RhdGEtcnVsZV0nKS5jb3VudCgpLCAxKTsKICAgIGFzc2VydC5lcXVhbChhd2FpdCBwYWdlLmxvY2F0b3IoJy5ydWxlLWRyYWctaGFuZGxlJykuY291bnQoKSwgMSk7CiAgfSBmaW5hbGx5IHsgYXdhaXQgcGFnZS5jbG9zZSgpOyB9Cn0pOwoKdGVzdCgnc2VydmVyIHBpY2tlciBzdXBwb3J0cyBtYW51YWwgc2VsZWN0aW9uLCBleGNsdXNpb25zIGFuZCBmb3Jnb3R0ZW4gbWlzc2luZyBub2RlcycsIGFzeW5jICgpID0+IHsKICBzYXZlZFNlbGVjdGlvbiA9IHVuZGVmaW5lZDsKICBjb25zdCBwYWdlID0gYXdhaXQgYnJvd3Nlci5uZXdQYWdlKCk7CiAgdHJ5IHsKICAgIGF3YWl0IHBhZ2UuZ290byhiYXNlVVJMKTsKICAgIGF3YWl0IHBhZ2UuZ2V0QnlUZXh0KCdBUEkg0L/QvtC00LrQu9GO0YfRkdC9Jykud2FpdEZvcigpOwogICAgYXdhaXQgcGFnZS5sb2NhdG9yKCcubmF2LWl0ZW1bZGF0YS1wYWdlPSJoeWRyYSJdJykuY2xpY2soKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignW2RhdGEtcHJldmlldy1zZXJ2ZXJzPSJmb3JlaWduIl0nKS5jbGljaygpOwogICAgYXdhaXQgcGFnZS5nZXRCeVJvbGUoJ2hlYWRpbmcnLCB7IG5hbWU6ICfQn9GA0L7RhNC40LvRjCBmb3JlaWduJyB9KS53YWl0Rm9yKCk7CiAgICBhc3NlcnQuZXF1YWwoYXdhaXQgcGFnZS5sb2NhdG9yKCcuc2VydmVyLWNhcmQnKS5jb3VudCgpLCAyKTsKICAgIGFzc2VydC5lcXVhbChhd2FpdCBwYWdlLmxvY2F0b3IoJ1tkYXRhLWRyb3AtbWlzc2luZz0icGlja2VkOjAiXScpLmNvdW50KCksIDEpOwoKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignI3BpY2tNb2RlJykuc2VsZWN0T3B0aW9uKCdtYW51YWwnKTsKICAgIGFzc2VydC5lcXVhbChhd2FpdCBwYWdlLmxvY2F0b3IoJy5waWNrLW5vZGU6Y2hlY2tlZCcpLmNvdW50KCksIDIpOwogICAgYXdhaXQgcGFnZS5sb2NhdG9yKCcuZXhjbHVkZS1ub2RlJykubnRoKDApLmNoZWNrKCk7CiAgICBhc3NlcnQuZXF1YWwoYXdhaXQgcGFnZS5sb2NhdG9yKCcucGljay1ub2RlJykubnRoKDApLmlzQ2hlY2tlZCgpLCBmYWxzZSk7CiAgICBhc3NlcnQuZXF1YWwoYXdhaXQgcGFnZS5sb2NhdG9yKCcucGljay1ub2RlJykubnRoKDEpLmlzQ2hlY2tlZCgpLCB0cnVlKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignW2RhdGEtZHJvcC1taXNzaW5nPSJwaWNrZWQ6MCJdJykuY2xpY2soKTsKICAgIGFzc2VydC5lcXVhbChhd2FpdCBwYWdlLmxvY2F0b3IoJ1tkYXRhLWRyb3AtbWlzc2luZ10nKS5jb3VudCgpLCAwKTsKCiAgICBhd2FpdCBwYWdlLmxvY2F0b3IoJyNzYXZlU2VsZWN0aW9uJykuY2xpY2soKTsKICAgIGF3YWl0IHBhZ2UuZ2V0QnlUZXh0KC/QktGL0LHQvtGAINGB0LXRgNCy0LXRgNC+0LIg0YHQvtGF0YDQsNC90ZHQvS8pLndhaXRGb3IoKTsKICAgIGFzc2VydC5lcXVhbChzYXZlZFNlbGVjdGlvbi5waWNrX21vZGUsICdtYW51YWwnKTsKICAgIGFzc2VydC5kZWVwRXF1YWwoc2F2ZWRTZWxlY3Rpb24ucGlja2VkLCBbeyBzb3VyY2U6ICdwcm92aWRlckEnLCBuYW1lOiAnQmV0YScsIG50aDogMCB9XSk7CiAgICBhc3NlcnQuZGVlcEVxdWFsKHNhdmVkU2VsZWN0aW9uLmV4Y2x1ZGVkLCBbeyBzb3VyY2U6ICdwcm92aWRlckEnLCBuYW1lOiAnQWxwaGEnLCBudGg6IDAgfV0pOwogIH0gZmluYWxseSB7CiAgICBhd2FpdCBwYWdlLmNsb3NlKCk7CiAgfQp9KTsKCnRlc3QoJ21hbnVhbCBtb2RlIHJlZnVzZXMgYW4gZW1wdHkgcG9vbCcsIGFzeW5jICgpID0+IHsKICBjb25zdCBwYWdlID0gYXdhaXQgYnJvd3Nlci5uZXdQYWdlKCk7CiAgdHJ5IHsKICAgIGF3YWl0IHBhZ2UuZ290byhiYXNlVVJMKTsKICAgIGF3YWl0IHBhZ2UuZ2V0QnlUZXh0KCdBUEkg0L/QvtC00LrQu9GO0YfRkdC9Jykud2FpdEZvcigpOwogICAgYXdhaXQgcGFnZS5sb2NhdG9yKCcubmF2LWl0ZW1bZGF0YS1wYWdlPSJoeWRyYSJdJykuY2xpY2soKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignW2RhdGEtcHJldmlldy1zZXJ2ZXJzPSJmb3JlaWduIl0nKS5jbGljaygpOwogICAgYXdhaXQgcGFnZS5sb2NhdG9yKCcjcGlja01vZGUnKS5zZWxlY3RPcHRpb24oJ21hbnVhbCcpOwogICAgYXdhaXQgcGFnZS5sb2NhdG9yKCdbZGF0YS1kcm9wLW1pc3Npbmc9InBpY2tlZDowIl0nKS5jbGljaygpOwogICAgYXdhaXQgcGFnZS5sb2NhdG9yKCcucGljay1ub2RlJykubnRoKDApLnVuY2hlY2soKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignLnBpY2stbm9kZScpLm50aCgxKS51bmNoZWNrKCk7CiAgICBzYXZlZFNlbGVjdGlvbiA9IHVuZGVmaW5lZDsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignI3NhdmVTZWxlY3Rpb24nKS5jbGljaygpOwogICAgYXdhaXQgcGFnZS5nZXRCeVRleHQoJ9CU0LvRjyDRgNGD0YfQvdC+0LPQviDRgNC10LbQuNC80LAg0LLRi9Cx0LXRgNC40YLQtSDRhdC+0YLRjyDQsdGLINC+0LTQuNC9INGB0LXRgNCy0LXRgCcpLndhaXRGb3IoKTsKICAgIGFzc2VydC5lcXVhbChzYXZlZFNlbGVjdGlvbiwgdW5kZWZpbmVkKTsKICB9IGZpbmFsbHkgewogICAgYXdhaXQgcGFnZS5jbG9zZSgpOwogIH0KfSk7Cgp0ZXN0KCdIUk5lbyBuYXZpZ2F0aW9uIG9yZGVyIGFuZCBkcmFnZ2FibGUgcm91dGluZyBydWxlcyBhcmUgcHJlc2VydmVkJywgYXN5bmMgKCkgPT4gewogIHNhdmVkUm91dGluZyA9IHVuZGVmaW5lZDsKICBjb25zdCBwYWdlID0gYXdhaXQgYnJvd3Nlci5uZXdQYWdlKCk7CiAgdHJ5IHsKICAgIGF3YWl0IHBhZ2UuZ290byhiYXNlVVJMKTsKICAgIGF3YWl0IHBhZ2UuZ2V0QnlUZXh0KCdBUEkg0L/QvtC00LrQu9GO0YfRkdC9Jykud2FpdEZvcigpOwogICAgY29uc3QgbmF2ID0gYXdhaXQgcGFnZS5sb2NhdG9yKCcubmF2LWxpc3QgLm5hdi1pdGVtJykuYWxsVGV4dENvbnRlbnRzKCk7CiAgICBhc3NlcnQuZGVlcEVxdWFsKG5hdi5tYXAoeCA9PiB4LnRyaW0oKSksIFsn0J/RgNCw0LLQuNC70LAnLCAn0KHQtdGC0YwnLCAnRE5TJywgJ0h5ZHJhJywgJ9CY0L3RhNC+JywgJ9Cd0LDRgdGC0YDQvtC50LrQuCcsICfQktGL0YXQvtC0J10pOwogICAgYXNzZXJ0LmVxdWFsKGF3YWl0IHBhZ2UubG9jYXRvcignLm5hdi1pdGVtW2RhdGEtcGFnZT0icnVsZXMiXScpLmdldEF0dHJpYnV0ZSgnY2xhc3MnKS50aGVuKHYgPT4gdi5pbmNsdWRlcygnYWN0aXZlJykpLCB0cnVlKTsKICAgIGFzc2VydC5lcXVhbChhd2FpdCBwYWdlLmxvY2F0b3IoJy5ydWxlLWNhcmQnKS5jb3VudCgpLCAyKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignW2RhdGEtZHJhZy1ydWxlPSIwIl0nKS5kcmFnVG8ocGFnZS5sb2NhdG9yKCcucnVsZS1jYXJkJykubnRoKDEpKTsKICAgIGFzc2VydC5lcXVhbCgoYXdhaXQgcGFnZS5sb2NhdG9yKCcucnVsZS1jYXJkJykuZmlyc3QoKS5sb2NhdG9yKCcucnVsZS1uYW1lLXRleHQnKS50ZXh0Q29udGVudCgpKS50cmltKCksICdTZWNvbmQnKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignI3NhdmVSb3V0aW5nJykuY2xpY2soKTsKICAgIGF3YWl0IHBhZ2UuZ2V0QnlUZXh0KCfQndCw0YHRgtGA0L7QudC60Lgg0LzQsNGA0YjRgNGD0YLQuNC30LDRhtC40Lgg0YHQvtGF0YDQsNC90LXQvdGLINC4INC/0YDQuNC80LXQvdC10L3RiycpLndhaXRGb3IoKTsKICAgIGFzc2VydC5kZWVwRXF1YWwoc2F2ZWRSb3V0aW5nLnJ1bGVzLm1hcChydWxlID0+IHJ1bGUubmFtZSksIFsnU2Vjb25kJywgJ1NhbXBsZSddKTsKICB9IGZpbmFsbHkgewogICAgYXdhaXQgcGFnZS5jbG9zZSgpOwogIH0KfSk7Cgp0ZXN0KCdyb3V0aW5nIGVkaXRvciBzcGxpdHMgQ1JMRiwgTEYgYW5kIGNvbW1hLXNlcGFyYXRlZCB2YWx1ZXMgYmVmb3JlIHNhdmluZycsIGFzeW5jICgpID0+IHsKICBzYXZlZFJvdXRpbmcgPSB1bmRlZmluZWQ7CiAgY29uc3QgcGFnZSA9IGF3YWl0IGJyb3dzZXIubmV3UGFnZSgpOwogIHRyeSB7CiAgICBhd2FpdCBwYWdlLmdvdG8oYmFzZVVSTCk7CiAgICBhd2FpdCBwYWdlLmdldEJ5VGV4dCgnQVBJINC/0L7QtNC60LvRjtGH0ZHQvScpLndhaXRGb3IoKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignLm5hdi1pdGVtW2RhdGEtcGFnZT0icnVsZXMiXScpLmNsaWNrKCk7CiAgICBhd2FpdCBwYWdlLmxvY2F0b3IoJ1tkYXRhLWVkaXQtcnVsZT0iMCJdJykuY2xpY2soKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignLnJ1bGUtdmFsdWVzJykuZmlsbCgnZG9tYWluOm9uZS5leGFtcGxlXHJcbmRvbWFpbjp0d28uZXhhbXBsZSxkb21haW46dGhyZWUuZXhhbXBsZScpOwogICAgYXdhaXQgcGFnZS5sb2NhdG9yKCcjcnVsZUVkaXRvckZvcm0gYnV0dG9uW3R5cGU9InN1Ym1pdCJdJykuY2xpY2soKTsKICAgIGF3YWl0IHBhZ2UubG9jYXRvcignI3NhdmVSb3V0aW5nJykuY2xpY2soKTsKICAgIGF3YWl0IHBhZ2UuZ2V0QnlUZXh0KCfQndCw0YHRgtGA0L7QudC60Lgg0LzQsNGA0YjRgNGD0YLQuNC30LDRhtC40Lgg0YHQvtGF0YDQsNC90LXQvdGLINC4INC/0YDQuNC80LXQvdC10L3RiycpLndhaXRGb3IoKTsKICAgIGFzc2VydC5kZWVwRXF1YWwoc2F2ZWRSb3V0aW5nLnJ1bGVzWzBdLnZhbHVlcywgWwogICAgICAnZG9tYWluOm9uZS5leGFtcGxlJywgJ2RvbWFpbjp0d28uZXhhbXBsZScsICdkb21haW46dGhyZWUuZXhhbXBsZScsCiAgICBdKTsKICB9IGZpbmFsbHkgewogICAgYXdhaXQgcGFnZS5jbG9zZSgpOwogIH0KfSk7
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const http = require('node:http');
+const path = require('node:path');
+const { after, before, test } = require('node:test');
+const { chromium } = require('playwright');
+
+const root = path.resolve(__dirname, '../..');
+const staticDir = path.join(root, 'internal/ui/static');
+let server;
+let browser;
+let baseURL;
+let savedSelection;
+let savedRouting;
+let savedRefresh;
+let savedObservatorySettings = { probe_interval_seconds: 120 };
+let savedL7Settings = { enabled: false, http: true, tls: true, quic: true };
+let savedHealthSettings = { enabled: true, interval_seconds: 30, timeout_seconds: 4, fail_threshold: 2, recover_threshold: 2 };
+let healthSnapshot = { status: 'healthy', checked_at: new Date().toISOString(), checks: [{ name: 'api', state: 'healthy', message: 'Local API is responding' }], metrics: {} };
+let eventItems = [{ id: 1, time: new Date().toISOString(), level: 'info', component: 'api', type: 'started', message: 'HydraRoute Core API started' }];
+
+const profiles = [{
+  id: 'foreign', source_id: 'providerA', enabled: true,
+  listen: '127.0.0.1', port: 16090, strategy: 'leastPing', dpi_bypass: {}, outbound_interface: '',
+}, {
+  id: 'torrent', source_id: 'providerB', enabled: true,
+  listen: '127.0.0.1', port: 16091, strategy: 'random', dpi_bypass: {}, outbound_interface: '',
+}];
+const routing = {
+  enabled: false, listen: '127.0.0.1', port: 16080,
+  default_action: 'block', default_profile_id: '',
+  rules: [{
+    id: 'rule-1', name: 'Sample', enabled: true, match_type: 'domain',
+    values: ['domain:old.example'], action: 'direct', profile_id: '',
+  }, {
+    id: 'rule-2', name: 'Second', enabled: true, match_type: 'domain',
+    values: ['domain:second.example'], action: 'block', profile_id: '',
+  }],
+};
+const preview = {
+  profile_id: 'foreign', source_id: 'providerA', pick_mode: 'auto', auto_update_available: true, auto_update_enabled: false, auto_update_interval: 1440, filter_available: true, filter_keep: '', filter_exclude: '',
+  nodes: [
+    { name: 'Alpha', key: { source: 'providerA', name: 'Alpha', nth: 0 }, picked: true, excluded: false },
+    { name: 'Beta', key: { source: 'providerA', name: 'Beta', nth: 0 }, picked: true, excluded: false },
+  ],
+  missing_picked: [{ source: 'providerA', name: 'Gone', nth: 0 }],
+  missing_excluded: [],
+};
+
+function json(res, status, value) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify(value));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); }
+      catch (error) { reject(error); }
+    });
+    req.on('error', reject);
+  });
+}
+
+before(async () => {
+  server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    try {
+      if (url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
+      if (url.pathname === '/v1/runtime') return json(res, 200, { running: false, configured: false });
+      if (url.pathname === '/v1/health/monitor' && req.method === 'GET') return json(res, 200, healthSnapshot);
+      if (url.pathname === '/v1/health/check' && req.method === 'POST') return json(res, 200, healthSnapshot);
+      if (url.pathname === '/v1/health/settings' && req.method === 'GET') return json(res, 200, savedHealthSettings);
+      if (url.pathname === '/v1/health/settings' && req.method === 'PUT') { savedHealthSettings = await readBody(req); return json(res, 200, savedHealthSettings); }
+      if (url.pathname === '/v1/events' && req.method === 'GET') return json(res, 200, { events: eventItems.slice(-Number(url.searchParams.get('limit') || 50)) });
+      if (url.pathname === '/v1/events' && req.method === 'DELETE') { eventItems = []; return json(res, 200, { status: 'cleared' }); }
+      if (url.pathname === '/v1/events/stream' && req.method === 'GET') { res.writeHead(204); res.end(); return; }
+      if (url.pathname === '/v1/profiles' && req.method === 'GET') return json(res, 200, { profiles });
+      if (url.pathname === '/v1/profiles' && req.method === 'PUT') {
+        const update = await readBody(req);
+        const profile = profiles.find(item => item.id === update.id);
+        if (!profile) return json(res, 404, { error: 'profile not found' });
+        Object.assign(profile, update);
+        savedSelection = update;
+        return json(res, 200, { status: 'updated', profile_id: profile.id });
+      }
+      if (url.pathname === '/v1/interfaces' && req.method === 'GET') return json(res, 200, {
+        default_interface: 'eth0', interfaces: [
+          { name: 'wg0', category: 'VPN', up: true },
+          { name: 'eth0', category: 'Интернет', up: true },
+          { name: 'br0', category: 'Остальное', up: false },
+        ],
+      });
+      if (url.pathname === '/v1/routing' && req.method === 'GET') return json(res, 200, { routing, configured: false });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'GET') return json(res, 200, savedRefresh || { enabled: false, interval_seconds: 86400, running: false, consecutive_failures: 0 });
+      if (url.pathname === '/v1/refresh/status' && req.method === 'PUT') { savedRefresh = await readBody(req); return json(res, 200, { status: 'saved' }); }
+      if (url.pathname === '/v1/profiles/preview' && req.method === 'POST') return json(res, 200, preview);
+      if (url.pathname === '/v1/observatory/status' && req.method === 'GET') return json(res, 200, { available: false, statuses: {} });
+      if (url.pathname === '/v1/observatory/settings' && req.method === 'GET') return json(res, 200, savedObservatorySettings);
+      if (url.pathname === '/v1/observatory/settings' && req.method === 'PUT') { savedObservatorySettings = await readBody(req); return json(res, 200, { ...savedObservatorySettings, applies: 'prepared Xray configuration updated' }); }
+      if (url.pathname === '/v1/geodata/status' && req.method === 'GET') return json(res, 200, { ready: true, assets: [{ name: 'geoip.dat', available: true, size: 3312784, sha256: 'a'.repeat(64) }, { name: 'geosite.dat', available: true, size: 7554929, sha256: 'b'.repeat(64) }] });
+      if (url.pathname === '/v1/watchlist/status' && req.method === 'GET') return json(res, 200, { ready: true, path: '/var/lib/hydraroute/state/watchlist.sock', targets: 3, keys: 178, partial: true, excluded_patterns: 12 });
+      if (url.pathname === '/v1/l7/settings' && req.method === 'GET') return json(res, 200, savedL7Settings);
+      if (url.pathname === '/v1/l7/settings' && req.method === 'PUT') { savedL7Settings = await readBody(req); return json(res, 200, savedL7Settings); }
+      if (url.pathname === '/v1/profiles/ping' && req.method === 'GET') {
+        const keys = preview.nodes.map(n => JSON.stringify(n.key));
+        const at = Math.floor(Date.now() / 1000) + 1;
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.write('data: ' + JSON.stringify({ links: keys }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[0], echo: { delay: 3 } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[1], echo: { delay: 5 } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[0], ping: { alive: false, delay: 0, at } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ link: keys[1], ping: { alive: true, delay: 42, at } }) + '\n\n');
+        res.end('data: ' + JSON.stringify({ done: true }) + '\n\n');
+        return;
+      }
+      if (url.pathname === '/v1/routing' && req.method === 'PUT') {
+        savedRouting = await readBody(req);
+        Object.assign(routing, savedRouting);
+        return json(res, 200, { status: 'saved' });
+      }
+      if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' });
+      const asset = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+      if (!['index.html', 'app.js', 'app.css'].includes(asset)) return json(res, 404, { error: 'not found' });
+      const body = fs.readFileSync(path.join(staticDir, asset));
+      const type = asset.endsWith('.js') ? 'text/javascript; charset=utf-8'
+        : asset.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8';
+      res.writeHead(200, {
+        'Content-Type': type,
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'no-referrer',
+        'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      });
+      res.end(body);
+    } catch (error) {
+      json(res, 500, { error: error.message });
+    }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  baseURL = `http://127.0.0.1:${server.address().port}`;
+  browser = await chromium.launch({ headless: true });
+});
+
+after(async () => {
+  if (browser) await browser.close();
+  if (server) await new Promise(resolve => server.close(resolve));
+});
+
+
+test('rules page displays local Watchlist readiness and partial coverage', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.getByRole('heading', { name: 'Watchlist MATCH / DUMP' }).waitFor();
+    await page.getByText('Активен', { exact: true }).waitFor();
+    await page.getByText(/Частичный список: 12/).waitFor();
+  } finally {
+    await page.close();
+  }
+});
+
+test('rules page displays GeoIP and GeoSite asset readiness', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.getByRole('heading', { name: 'Геоданные Xray' }).waitFor();
+    await page.getByText('GeoIP', { exact: true }).waitFor();
+    await page.getByText('GeoSite', { exact: true }).waitFor();
+    await page.getByText('Доступны', { exact: true }).waitFor();
+  } finally {
+    await page.close();
+  }
+});
+
+test('Russian menu opens on Rules and rules can be reordered by dragging', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    assert.deepEqual((await page.locator('.nav-item').allTextContents()).map(x => x.replace(/^[^\p{L}]+/u, '').trim()), ['Правила','Сеть','DNS','Hydra','Инфо','Настройки','Выход']);
+    assert.equal(await page.locator('#pageTitle').textContent(), 'Правила');
+    assert.equal(await page.locator('.rule-card[data-rule]').count(), 2);
+    assert.equal(await page.locator('.rule-drag-handle').count(), 2);
+  } finally { await page.close(); }
+});
+
+test('subscription modal supports select-all, manual node selection, filters and save', async () => {
+  savedSelection = undefined;
+  savedRefresh = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="hydra"]').click();
+    await page.locator('[data-preview-servers="foreign"]').click();
+    await page.getByRole('heading', { name: 'Серверы: foreign' }).waitFor();
+    assert.equal(await page.locator('.subscription-node-row').count(), 2);
+    assert.equal(await page.locator('.pick-node:checked').count(), 2);
+    await page.locator('#probeSubscription').click();
+    await page.getByText('42 ms').waitFor();
+    assert.match(await page.locator('.node-ping').nth(0).textContent(), /3 ms/);
+    assert.match(await page.locator('.node-delay').nth(1).textContent(), /42 ms/);
+    await page.locator('#excludeOffline').check();
+    assert.equal(await page.locator('.pick-node').nth(0).isChecked(), false);
+    assert.equal(await page.locator('.pick-node').nth(1).isChecked(), true);
+    await page.locator('#subscriptionSearch').fill('Alpha');
+    assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
+    await page.locator('#subscriptionSearch').fill('');
+    await page.locator('[data-sub-tab="filters"]').click();
+    await page.locator('#filterInclude').fill('Beta');
+    await page.locator('#applySubscriptionFilters').click();
+    assert.equal(await page.locator('.subscription-node-row:visible').count(), 1);
+    await page.locator('[data-drop-missing="picked:0"]').click();
+    await page.locator('[data-sub-tab="update"]').click();
+    await page.locator('#autoUpdateSubscription').check();
+    await page.locator('#refreshHours').fill('24');
+    await page.locator('#saveSubscription').click();
+    await page.getByText('Настройки подписки сохранены и конфигурация применена').waitFor();
+    assert.equal(savedSelection.pick_mode, 'manual');
+    assert.deepEqual(savedSelection.picked, [{ source: 'providerA', name: 'Beta', nth: 0 }]);
+    assert.deepEqual(savedSelection.excluded, [{ source: 'providerA', name: 'Alpha', nth: 0 }]);
+    assert.equal(savedSelection.auto_update_enabled, true);
+    assert.equal(savedSelection.auto_update_interval, 1440);
+    assert.equal(savedSelection.filter_keep, 'Beta');
+  } finally { await page.close(); }
+});
+
+test('subscription modal permits deliberately empty server pool', async () => {
+  savedSelection = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="hydra"]').click();
+    await page.locator('[data-preview-servers="foreign"]').click();
+    await page.locator('#pickAllNodes').uncheck();
+    assert.equal(await page.locator('.pick-node:checked').count(), 0);
+    await page.locator('#saveSubscription').click();
+    await page.getByText('Настройки подписки сохранены').waitFor();
+    assert.deepEqual(savedSelection.picked, []);
+    assert.equal(savedSelection.pick_mode, 'manual');
+  } finally { await page.close(); }
+});
+
+test('HRNeo navigation order and draggable routing rules are preserved', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    const nav = await page.locator('.nav-list .nav-item').allTextContents();
+    assert.deepEqual(nav.map(x => x.replace(/^[^\p{L}]+/u, '').trim()), ['Правила', 'Сеть', 'DNS', 'Hydra', 'Инфо', 'Настройки', 'Выход']);
+    assert.equal(await page.locator('.nav-item[data-page="rules"]').getAttribute('class').then(v => v.includes('active')), true);
+    assert.equal(await page.locator('.rule-card').count(), 2);
+    await page.evaluate(() => {
+      const source = document.querySelector('[data-drag-rule="0"]');
+      const target = document.querySelector('.rule-card[data-rule="1"]');
+      const dataTransfer = new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
+    });
+    assert.equal((await page.locator('.rule-card').first().locator('.rule-name-text').textContent()).trim(), 'Second');
+    await page.locator('#saveRouting').click();
+    await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
+    assert.deepEqual(savedRouting.rules.map(rule => rule.name), ['Second', 'Sample']);
+  } finally {
+    await page.close();
+  }
+});
+
+test('routing editor splits CRLF, LF and comma-separated values before saving', async () => {
+  savedRouting = undefined;
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="rules"]').click();
+    await page.locator('[data-edit-rule="0"]').dispatchEvent('click');
+    await page.locator('.rule-values').fill('domain:one.example\r\ndomain:two.example,domain:three.example');
+    await page.locator('#ruleEditorForm button[type="submit"]').click();
+    await page.locator('#saveRouting').click();
+    await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
+    assert.deepEqual(savedRouting.rules[0].values, [
+      'domain:one.example', 'domain:two.example', 'domain:three.example',
+    ]);
+  } finally {
+    await page.close();
+  }
+});
+
+test('L7 sniffing settings save the selected proxy-ingress protocols', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('[data-page="settings"]').click();
+    await page.getByRole('heading', { name: 'L7-анализ' }).waitFor();
+    await page.locator('#l7Enabled').check();
+    await page.locator('#l7HTTP').uncheck();
+    await page.locator('#l7TLS').check();
+    await page.locator('#l7QUIC').check();
+    await page.locator('#saveL7Settings').click();
+    await page.getByText('Настройки L7 сохранены').waitFor();
+    assert.deepEqual(savedL7Settings, { enabled: true, http: false, tls: true, quic: true });
+  } finally {
+    await page.close();
+  }
+});
+
+test('Observatory interval loads and persists through its settings API', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('[data-page="settings"]').click();
+    const interval = page.locator('#observatoryProbeInterval');
+    await interval.waitFor();
+    assert.equal(await interval.inputValue(), '120');
+    await interval.fill('120');
+    await page.locator('#saveObservatorySettings').click();
+    await page.getByText('Интервал применён к конфигурации Xray').waitFor();
+    assert.equal(savedObservatorySettings.probe_interval_seconds, 120);
+  } finally {
+    await page.close();
+  }
+});
+
+test('connection settings persist independently per profile: DPI, balancing and outgoing interface', async () => {
+  profiles.forEach(p => { p.strategy = p.id === 'torrent' ? 'random' : 'leastPing'; p.dpi_bypass = {}; p.outbound_interface = ''; });
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('.nav-item[data-page="network"]').click();
+    const card = page.locator('.connection-card').filter({ hasText: 'foreign' });
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-dpi]').click();
+    await page.getByText('Шумовой трафик').waitFor();
+    await page.locator('.connection-option-panel [name="noise_traffic"]').check();
+    await page.locator('.connection-option-panel [name="random_tls_fingerprint"]').check();
+    await page.locator('[data-option-save]').click();
+    await page.getByText('Настройки подключения сохранены').waitFor();
+    assert.deepEqual(profiles[0].dpi_bypass, { noise_traffic: true, tls_fragmentation: false, random_tls_fingerprint: true });
+    assert.deepEqual(profiles[1].dpi_bypass, {});
+
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-balance]').click();
+    await page.locator('.connection-option-panel [value="roundRobin"]').check();
+    await page.getByText('Настройки подключения сохранены').waitFor();
+    assert.equal(profiles[0].strategy, 'roundRobin');
+    assert.equal(profiles[1].strategy, 'random');
+
+    await card.locator('[data-connection-menu]').click();
+    await card.locator('[data-menu-interface]').click();
+    await page.getByText('wg0').waitFor();
+    await page.locator('[data-interface-value="wg0"]').click();
+    await page.getByText('Настройки подключения сохранены').waitFor();
+    assert.equal(profiles[0].outbound_interface, 'wg0');
+    assert.equal(profiles[1].outbound_interface, '');
+  } finally { await page.close(); }
+});
+
+test('Health Monitor settings persist and event journal is visible', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(baseURL);
+    await page.getByText('API подключён').waitFor();
+    await page.locator('[data-page="settings"]').click();
+    await page.getByRole('heading', { name: 'Health Monitor' }).first().waitFor();
+    await page.locator('#healthInterval').fill('45');
+    await page.locator('#healthTimeout').fill('3');
+    await page.locator('#healthFailThreshold').fill('3');
+    await page.locator('#healthRecoverThreshold').fill('2');
+    await page.locator('#saveHealthSettings').click();
+    await page.getByText('Настройки Health Monitor сохранены').waitFor();
+    assert.deepEqual(savedHealthSettings, { enabled: true, interval_seconds: 45, timeout_seconds: 3, fail_threshold: 3, recover_threshold: 2 });
+    await page.getByRole('heading', { name: 'Журнал событий' }).waitFor();
+    await page.getByText('HydraRoute Core API started').waitFor();
+  } finally {
+    await page.close();
+  }
+});

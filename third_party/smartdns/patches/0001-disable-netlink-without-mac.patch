@@ -1,0 +1,26 @@
+--- a/src/dns_server/neighbor.c
++++ b/src/dns_server/neighbor.c
+@@ -284,15 +284,20 @@
+ 	atomic_set(&server.neighbor_cache.cache_num, 0);
+ 	pthread_mutex_init(&server.neighbor_cache.lock, NULL);
+ 
+-	if (dns_conf.client_rule.mac_num > 0) {
+-		server.update_neighbor_cache = 1;
++	/* HydraRoute Core does not use MAC-based client rules. Avoid opening
++	 * NETLINK_ROUTE sockets or reading the host neighbor table unless that
++	 * feature is explicitly enabled by a future reviewed adapter. */
++	if (dns_conf.client_rule.mac_num <= 0) {
++		server.update_neighbor_cache = 0;
++		return 0;
+ 	}
+ 
++	server.update_neighbor_cache = 1;
+ 	if (_dns_server_neighbor_monitor_init() != 0) {
+ 		tlog(TLOG_WARN, "neighbor table monitor init failed, fallback to polling mode.");
+ 	}
+ 
+-	/* seed the cache with the current kernel neighbor table */
++	/* seed the cache only when MAC-based client rules are enabled */
+ 	netlink_get_neighbors(AF_UNSPEC, NULL, 0, _dns_server_neighbor_cache_dump_callback, NULL);
+ 
+ 	return 0;

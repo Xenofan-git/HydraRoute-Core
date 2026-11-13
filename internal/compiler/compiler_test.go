@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -32,22 +33,37 @@ func TestCompileSeparatesProfilesAndPools(t *testing.T) {
 	}
 	cfg := decode(t, got)
 	ins := cfg["inbounds"].([]any)
-	if len(ins) != 2 {
-		t.Fatalf("want 2 inbounds, got %d", len(ins))
+	if len(ins) != 3 {
+		t.Fatalf("want 2 profile inbounds plus private API inbound, got %d", len(ins))
 	}
 	routing := cfg["routing"].(map[string]any)
 	rules := routing["rules"].([]any)
 	bals := routing["balancers"].([]any)
-	if len(rules) != 2 || len(bals) != 2 {
+	if len(rules) != 3 || len(bals) != 2 {
 		t.Fatalf("want two independent rules/balancers, got %d/%d", len(rules), len(bals))
 	}
 	outbounds := cfg["outbounds"].([]any)
-	if len(outbounds) != 5 {
-		t.Fatalf("want direct+block+3 eligible nodes, got %d", len(outbounds))
+	if len(outbounds) != 6 {
+		t.Fatalf("want direct+block+3 eligible pool nodes plus private API outbound, got %d", len(outbounds))
+	}
+	api := cfg["api"].(map[string]any)
+	services := api["services"].([]any)
+	if api["tag"] != "hr_api" || len(services) != 2 || services[0] != "ObservatoryService" || services[1] != "RoutingService" {
+		t.Fatalf("private Observatory and Routing APIs not enabled: %#v", api)
 	}
 	obs := cfg["observatory"].(map[string]any)
 	if len(obs["subjectSelector"].([]any)) != 3 {
-		t.Fatal("observatory selector must include exactly eligible nodes")
+		t.Fatal("Observatory must probe exactly the eligible nodes in profile balancers")
+	}
+	balSelector := bals[0].(map[string]any)["selector"].([]any)
+	if len(balSelector) != 1 {
+		t.Fatalf("balancer must still contain only eligible nodes: %#v", balSelector)
+	}
+	if got := bals[0].(map[string]any)["fallbackTag"]; got != OutboundTag("alpha", "a1") {
+		t.Fatalf("fallback must be the first eligible outbound in the same profile, got %v", got)
+	}
+	if got := bals[1].(map[string]any)["fallbackTag"]; got != OutboundTag("beta", "b1") {
+		t.Fatalf("second profile fallback leaked or was not profile-local: %v", got)
 	}
 	for _, raw := range ins {
 		in := raw.(map[string]any)
@@ -67,8 +83,12 @@ func TestEmptyPickedMeansAutomaticPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["outbounds"].([]any)) != 4 {
-		t.Fatalf("automatic pool should contain 2 nodes plus direct/block")
+	if len(cfg["outbounds"].([]any)) != 5 {
+		t.Fatalf("only the 2 eligible pool nodes may be compiled as outbounds")
+	}
+	obs := cfg["observatory"].(map[string]any)
+	if len(obs["subjectSelector"].([]any)) != 2 {
+		t.Fatalf("Observatory subjects must match the automatic pool: %#v", obs)
 	}
 }
 
@@ -82,8 +102,12 @@ func TestPickedSubsetIsIndependentFromExcluded(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["outbounds"].([]any)) != 3 {
-		t.Fatalf("picked subset should contain one node plus direct/block")
+	if len(cfg["outbounds"].([]any)) != 4 {
+		t.Fatalf("only the picked node may be compiled as an outbound")
+	}
+	obs := cfg["observatory"].(map[string]any)
+	if len(obs["subjectSelector"].([]any)) != 1 {
+		t.Fatalf("Observatory subjects must match the manual pool: %#v", obs)
 	}
 }
 
@@ -143,32 +167,119 @@ func TestCompileSharedSOCKSOrderedRulesAndExplicitDefault(t *testing.T) {
 	}
 	cfg := decode(t, got)
 	inbounds := cfg["inbounds"].([]any)
-	if len(inbounds) != 3 {
-		t.Fatalf("want 2 profile inbounds plus shared inbound, got %d", len(inbounds))
+	if len(inbounds) != 4 {
+		t.Fatalf("want 2 profile inbounds, shared inbound and private API inbound, got %d", len(inbounds))
 	}
 	routing := cfg["routing"].(map[string]any)
 	if routing["domainStrategy"] != "IPIfNonMatch" {
 		t.Fatalf("IP rules must enable IPIfNonMatch, got %v", routing["domainStrategy"])
 	}
 	rules := routing["rules"].([]any)
-	if len(rules) != 6 {
-		t.Fatalf("want 2 profile rules, 3 user rules and explicit fallback, got %d", len(rules))
+	if len(rules) != 7 {
+		t.Fatalf("want API rule, 2 profile rules, 3 user rules and explicit fallback, got %d", len(rules))
 	}
-	first := rules[2].(map[string]any)
+	first := rules[3].(map[string]any)
 	if first["inboundTag"].([]any)[0] != "hr_shared_in" || first["balancerTag"] != "hr_bal_youtube" {
 		t.Fatalf("first shared rule not bound to YouTube balancer: %#v", first)
 	}
-	second := rules[3].(map[string]any)
+	second := rules[4].(map[string]any)
 	if second["outboundTag"] != "direct" {
 		t.Fatalf("direct action not compiled correctly: %#v", second)
 	}
-	third := rules[4].(map[string]any)
+	third := rules[5].(map[string]any)
 	if third["outboundTag"] != "block" {
 		t.Fatalf("block action not compiled correctly: %#v", third)
 	}
-	fallback := rules[5].(map[string]any)
+	fallback := rules[6].(map[string]any)
 	if fallback["inboundTag"].([]any)[0] != "hr_shared_in" || fallback["balancerTag"] != "hr_bal_foreign" {
 		t.Fatalf("explicit default profile fallback missing: %#v", fallback)
+	}
+}
+
+func TestValidateMatchValueAllowsGeoTagsAndSafeExternalFiles(t *testing.T) {
+	valid := []struct{ kind, value string }{
+		{"domain", "geosite:youtube"},
+		{"domain", "geosite:geolocation-!cn"},
+		{"domain", "ext:geosite.dat:youtube"},
+		{"domain", "ext:custom-list_v2.dat:category-ads-all"},
+		{"ip", "geoip:ru"},
+		{"ip", "geoip:private"},
+		{"ip", "geoip:!cn"},
+	}
+	for _, tc := range valid {
+		if err := validateMatchValue(tc.kind, tc.value); err != nil {
+			t.Errorf("validateMatchValue(%q, %q): %v", tc.kind, tc.value, err)
+		}
+	}
+}
+
+func TestValidateMatchValueRejectsExternalGeodataPathTraversal(t *testing.T) {
+	invalid := []string{
+		"ext:../geosite.dat:youtube",
+		"ext:../../etc/passwd:youtube",
+		"ext:/tmp/geosite.dat:youtube",
+		"ext:..\\geosite.dat:youtube",
+		"ext:geosite.dat/../../secret:youtube",
+		"ext:geosite.txt:youtube",
+		"ext:geosite.dat:../youtube",
+		"ext:geosite.dat:",
+		"ext::youtube",
+	}
+	for _, value := range invalid {
+		if err := validateMatchValue("domain", value); err == nil {
+			t.Errorf("validateMatchValue accepted unsafe external reference %q", value)
+		}
+	}
+}
+
+func TestL7SniffingIsLimitedToCoreSOCKSInbounds(t *testing.T) {
+	got, err := Compile(CompileRequest{
+		Profiles:   []Profile{{ID: "l7", Enabled: true, Port: 23410, Nodes: []Node{node("node", "vless")}}},
+		Routing:    &RoutingConfig{Enabled: true, Port: 23411, DefaultAction: "block"},
+		L7Sniffing: L7SniffingConfig{Enabled: true, HTTP: true, TLS: true, QUIC: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	inbounds := cfg["inbounds"].([]any)
+	if len(inbounds) != 3 {
+		t.Fatalf("expected profile, shared and private API inbounds, got %d", len(inbounds))
+	}
+	for _, index := range []int{0, 1} {
+		in := inbounds[index].(map[string]any)
+		sniffing, ok := in["sniffing"].(map[string]any)
+		if !ok || sniffing["enabled"] != true || sniffing["routeOnly"] != true || sniffing["metadataOnly"] != false {
+			t.Fatalf("Core SOCKS inbound %d missing route-only sniffing: %#v", index, in)
+		}
+		if got := sniffing["destOverride"].([]any); len(got) != 3 || got[0] != "http" || got[1] != "tls" || got[2] != "quic" {
+			t.Fatalf("unexpected L7 protocol selection: %#v", got)
+		}
+	}
+	if _, exists := inbounds[2].(map[string]any)["sniffing"]; exists {
+		t.Fatal("private Xray API inbound must not have user traffic sniffing enabled")
+	}
+}
+
+func TestL7SniffingCanSelectProtocolsAndRejectEmptySelection(t *testing.T) {
+	base := CompileRequest{
+		Profiles:   []Profile{{ID: "l7", Enabled: true, Port: 23412, Nodes: []Node{node("node", "vless")}}},
+		L7Sniffing: L7SniffingConfig{Enabled: true, TLS: true},
+	}
+	got, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := decode(t, got)["inbounds"].([]any)[0].(map[string]any)
+	sniffing := in["sniffing"].(map[string]any)
+	selected := sniffing["destOverride"].([]any)
+	if len(selected) != 1 || selected[0] != "tls" {
+		t.Fatalf("disabled protocol sniffers leaked into config: %#v", selected)
+	}
+	base.L7Sniffing.HTTP = false
+	base.L7Sniffing.TLS = false
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "no protocol is selected") {
+		t.Fatalf("expected empty enabled L7 selection to be rejected, got %v", err)
 	}
 }
 
@@ -212,10 +323,269 @@ func TestDisabledSharedRoutingPreservesDormantRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := decode(t, got)
-	if len(cfg["inbounds"].([]any)) != 1 {
+	if len(cfg["inbounds"].([]any)) != 2 {
 		t.Fatalf("disabled shared routing must not emit an inbound")
 	}
-	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 1 {
+	if len(cfg["routing"].(map[string]any)["rules"].([]any)) != 2 {
 		t.Fatalf("disabled shared routing must not emit dormant rules")
+	}
+}
+
+func TestCoreDNSIsInjectedOnlyWhenExplicitlyEnabled(t *testing.T) {
+	base := CompileRequest{Profiles: []Profile{{ID: "dns", Enabled: true, Port: 23400, Nodes: []Node{node("n1", "vless")}}}}
+	without, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decode(t, without)["dns"]; ok {
+		t.Fatal("DNS must be absent when Core DNS is disabled")
+	}
+	base.DNS = &DNSConfig{Enabled: true, Listen: "127.0.0.1", Port: 5353}
+	with, err := Compile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dnsCfg, ok := decode(t, with)["dns"].(map[string]any)
+	if !ok {
+		t.Fatal("enabled Core DNS config missing")
+	}
+	servers := dnsCfg["servers"].([]any)
+	server := servers[0].(map[string]any)
+	if server["address"] != "127.0.0.1" || server["port"] != float64(5353) {
+		t.Fatalf("unexpected Core DNS server: %#v", server)
+	}
+}
+
+func TestCoreDNSRejectsNonLoopbackAndInvalidPort(t *testing.T) {
+	base := CompileRequest{Profiles: []Profile{{ID: "dns", Enabled: true, Port: 23401, Nodes: []Node{node("n1", "vless")}}}, DNS: &DNSConfig{Enabled: true, Listen: "0.0.0.0", Port: 5353}}
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "not loopback") {
+		t.Fatalf("expected loopback rejection, got %v", err)
+	}
+	base.DNS.Listen = "127.0.0.1"
+	base.DNS.Port = 53
+	if _, err := Compile(base); err == nil || !strings.Contains(err.Error(), "outside allowed range") {
+		t.Fatalf("expected invalid port rejection, got %v", err)
+	}
+}
+
+func TestCompileAppliesIndependentDPIBypassOptionsToProxyOutbounds(t *testing.T) {
+	profiles := []Profile{{ID: "dpi", Enabled: true, Port: 23040, Nodes: []Node{
+		{Key: "tls", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"tls","tlsSettings":{"serverName":"tls.example","fingerprint":"chrome"}}}`)},
+		{Key: "reality", Outbound: json.RawMessage(`{"protocol":"vless","settings":{},"streamSettings":{"security":"reality","realitySettings":{"serverName":"reality.example","fingerprint":"chrome"}}}`)},
+	}}}
+	profiles[0].DPIBypass = DPIBypass{NoiseTraffic: true, TLSFragmentation: true, RandomTLSFingerprint: true}
+	got, err := Compile(CompileRequest{Profiles: profiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	outbounds := cfg["outbounds"].([]any)
+	for _, raw := range outbounds[2:4] {
+		out := raw.(map[string]any)
+		stream := out["streamSettings"].(map[string]any)
+		fm := stream["finalmask"].(map[string]any)
+		if len(fm["tcp"].([]any)) != 1 || len(fm["udp"].([]any)) != 1 {
+			t.Fatalf("DPI masks missing: %#v", fm)
+		}
+		if tls, ok := stream["tlsSettings"].(map[string]any); ok && tls["fingerprint"] != "random" {
+			t.Fatalf("TLS fingerprint not randomized: %#v", tls)
+		}
+		if reality, ok := stream["realitySettings"].(map[string]any); ok && reality["fingerprint"] != "random" {
+			t.Fatalf("REALITY fingerprint not randomized: %#v", reality)
+		}
+	}
+}
+
+func TestCompileAppliesDPIAndOutboundInterfacePerProfileOnly(t *testing.T) {
+	profiles := []Profile{
+		{ID: "alpha", Enabled: true, Port: 23042, OutboundInterface: "eth0", DPIBypass: DPIBypass{TLSFragmentation: true}, Nodes: []Node{node("a", "vless")}},
+		{ID: "beta", Enabled: true, Port: 23043, Nodes: []Node{node("b", "trojan")}},
+	}
+	got, err := Compile(CompileRequest{Profiles: profiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	outs := cfg["outbounds"].([]any)
+	a := outs[2].(map[string]any)
+	b := outs[3].(map[string]any)
+	astream := a["streamSettings"].(map[string]any)
+	asock := astream["sockopt"].(map[string]any)
+	if asock["interface"] != "eth0" {
+		t.Fatalf("outbound interface missing: %#v", asock)
+	}
+	if _, ok := astream["finalmask"]; !ok {
+		t.Fatal("per-profile TLS fragmentation missing")
+	}
+	if _, ok := b["streamSettings"]; ok {
+		t.Fatalf("profile alpha settings leaked into beta: %#v", b)
+	}
+}
+
+func TestCompileLeavesDPIOptionsOffByDefault(t *testing.T) {
+	got, err := Compile(CompileRequest{Profiles: []Profile{{ID: "plain", Enabled: true, Port: 23041, Nodes: []Node{node("plain", "vless")}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	out := cfg["outbounds"].([]any)[2].(map[string]any)
+	if _, ok := out["streamSettings"]; ok {
+		t.Fatalf("DPI options changed default outbound: %#v", out)
+	}
+}
+
+func TestManualEmptyPoolOmitsProfileWithoutCreatingEmptyBalancer(t *testing.T) {
+	config, err := Compile(CompileRequest{Profiles: []Profile{{ID: "empty", Enabled: true, Port: 16200, Strategy: "leastPing", ManualSelection: true, Nodes: []Node{{Key: "node-a", Outbound: json.RawMessage(`{"protocol":"freedom"}`)}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(config, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
+		t.Fatalf("empty manual pool must not create an empty balancer: %s", config)
+	}
+	if len(cfg["inbounds"].([]any)) != 0 || cfg["api"] != nil || cfg["observatory"] != nil {
+		t.Fatalf("empty manual pool must not create Observatory or inbounds: %s", config)
+	}
+}
+
+func TestManagedObservatoryAPIReservesLoopbackPort(t *testing.T) {
+	_, err := Compile(CompileRequest{Profiles: []Profile{{ID: "conflict", Enabled: true, Port: 16285, Strategy: "leastPing", Nodes: []Node{{Key: "node", Outbound: json.RawMessage(`{"protocol":"freedom"}`)}}}}})
+	if err == nil || !strings.Contains(err.Error(), "reserved Xray API port") {
+		t.Fatalf("expected reserved Observatory API port error, got %v", err)
+	}
+}
+
+func TestAllNodesExcludedAreNotCompiledOrProbed(t *testing.T) {
+	got, err := Compile(CompileRequest{Profiles: []Profile{{
+		ID: "offline", Enabled: true, Port: 23008,
+		Nodes:    []Node{node("n1", "vless"), node("n2", "vmess")},
+		Excluded: []string{"n1", "n2"}, ManualSelection: true,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := decode(t, got)
+	if cfg["observatory"] != nil || cfg["api"] != nil {
+		t.Fatalf("excluded nodes must not create Observatory subjects: %#v", cfg)
+	}
+	if len(cfg["outbounds"].([]any)) != 2 || len(cfg["inbounds"].([]any)) != 0 {
+		t.Fatalf("excluded nodes must not create Xray outbounds or inbounds: %#v", cfg)
+	}
+	if len(cfg["routing"].(map[string]any)["balancers"].([]any)) != 0 {
+		t.Fatal("empty excluded pool must not create a balancer")
+	}
+}
+
+func TestCompileUsesConfiguredObservatoryIntervalAndOriginalProbeURL(t *testing.T) {
+	got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: 137, Profiles: []Profile{{ID: "obs", Enabled: true, Port: 23090, Nodes: []Node{node("n1", "vless")}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := decode(t, got)["observatory"].(map[string]any)
+	if obs["probeInterval"] != "137000ms" {
+		t.Fatalf("probeInterval=%v", obs["probeInterval"])
+	}
+	if obs["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", obs["enableConcurrency"])
+	}
+	if obs["probeUrl"] != "https://www.google.com/generate_204" {
+		t.Fatalf("probeUrl=%v", obs["probeUrl"])
+	}
+}
+
+func TestCompileObservatoryIntervalFallsBackOutsideSupportedRange(t *testing.T) {
+	for _, value := range []int{0, 4, 3601} {
+		got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: value, Profiles: []Profile{{ID: "obs", Enabled: true, Port: 23091, Nodes: []Node{node("n1", "vless")}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs := decode(t, got)["observatory"].(map[string]any)
+		if obs["probeInterval"] != "120000ms" {
+			t.Fatalf("value %d: probeInterval=%v", value, obs["probeInterval"])
+		}
+		if obs["enableConcurrency"] != true {
+			t.Fatalf("value %d: enableConcurrency=%v", value, obs["enableConcurrency"])
+		}
+	}
+}
+
+func TestObservatoryIntervalIsNotDividedAcrossSubjects(t *testing.T) {
+	nodes := make([]Node, 104)
+	for i := range nodes {
+		nodes[i] = node(fmt.Sprintf("node-%03d", i), "vless")
+	}
+	got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: 1200, Profiles: []Profile{{ID: "many", Enabled: true, Port: 23092, Nodes: nodes}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := decode(t, got)["observatory"].(map[string]any)
+	if obs["probeInterval"] != "1200000ms" {
+		t.Fatalf("probeInterval=%v, want 1200000ms", obs["probeInterval"])
+	}
+	if obs["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", obs["enableConcurrency"])
+	}
+}
+
+func TestObservatoryIntervalPreservesShortCycleWithLargePool(t *testing.T) {
+	nodes := make([]Node, 51)
+	for i := range nodes {
+		nodes[i] = node(fmt.Sprintf("node-%05d", i), "vless")
+	}
+	got, err := Compile(CompileRequest{ObservatoryProbeIntervalSeconds: 5, Profiles: []Profile{{ID: "floor", Enabled: true, Port: 23093, Nodes: nodes}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := decode(t, got)["observatory"].(map[string]any)
+	if obs["probeInterval"] != "5000ms" {
+		t.Fatalf("probeInterval=%v, want 5000ms", obs["probeInterval"])
+	}
+	if obs["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", obs["enableConcurrency"])
+	}
+}
+
+func TestObservatoryProbeIntervalUsesWholeCycle(t *testing.T) {
+	tests := []struct{ seconds, want int }{
+		{30, 30000},
+		{5, 5000},
+		{120, 120000},
+		{3600, 3600000},
+		{0, 120000},
+		{1, 120000},
+		{3601, 120000},
+	}
+	for _, tt := range tests {
+		if got := ObservatoryProbeIntervalMS(tt.seconds); got != tt.want {
+			t.Errorf("ObservatoryProbeIntervalMS(%d)=%d want %d", tt.seconds, got, tt.want)
+		}
+	}
+}
+
+func TestCompileUsesExplicitProfileLocalFallback(t *testing.T) {
+	got, err := Compile(CompileRequest{Profiles: []Profile{
+		{ID: "alpha", Enabled: true, Port: 23101, FallbackKey: "a2", Nodes: []Node{node("a1", "vless"), node("a2", "vmess")}},
+		{ID: "beta", Enabled: true, Port: 23102, FallbackKey: "b1", Nodes: []Node{node("b1", "trojan"), node("b2", "vless")}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing := decode(t, got)["routing"].(map[string]any)
+	balancers := routing["balancers"].([]any)
+	if got := balancers[0].(map[string]any)["fallbackTag"]; got != OutboundTag("alpha", "a2") {
+		t.Fatalf("alpha fallback mismatch: %v", got)
+	}
+	if got := balancers[1].(map[string]any)["fallbackTag"]; got != OutboundTag("beta", "b1") {
+		t.Fatalf("beta fallback mismatch: %v", got)
+	}
+}
+
+func TestCompileRejectsFallbackOutsideEligiblePool(t *testing.T) {
+	_, err := Compile(CompileRequest{Profiles: []Profile{{ID: "alpha", Enabled: true, Port: 23103, FallbackKey: "a2", Nodes: []Node{node("a1", "vless"), node("a2", "vmess")}, Excluded: []string{"a2"}}}})
+	if err == nil || !strings.Contains(err.Error(), "fallback node is not an eligible balancer member") {
+		t.Fatalf("expected profile-local fallback validation error, got %v", err)
 	}
 }
