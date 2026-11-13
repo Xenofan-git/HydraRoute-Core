@@ -65,3 +65,17 @@ trusted local assets; separate Bootstrap tests cover validated initialization.
 The test host mounts `/run` with `noexec`, so the compiled test hrapi binary
 is placed in a private `/var/tmp` directory. The restored config must be
 `0600` because the supervisor intentionally rejects permissive files.
+
+## GitHub Actions integration
+
+The main `.github/workflows/ci.yml` test job now reuses the existing
+checksum-verified Xray 26.10.31 archive to run the opt-in real-Xray GeoData
+activation/rollback and asset migration tests, followed by the full `hrapi`
+autostart smoke test. All tests use private temporary paths and loopback
+listeners. The transient systemd test is intentionally **not** run on shared
+GitHub-hosted runners because it requires privileged access to systemd; it
+remains a separately executed development-VPS smoke test.
+
+This CI change has been validated locally on the Moscow development VPS. It
+must not be reported as green GitHub Actions until the branch is pushed and
+GitHub completes the workflow.
