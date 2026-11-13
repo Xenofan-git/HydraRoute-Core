@@ -293,3 +293,10 @@ button,input,select,textarea{font-size:inherit}
 .subscription-flag-fallback{position:relative;display:inline-block;font-size:14px;line-height:12px;min-width:17px}
 /* Center the close glyph precisely inside its square control. */
 .subscription-close{display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex:0 0 34px}
+
+/* Reference-style trash glyph and right-aligned speed test. */
+.connection-trash-icon{display:block;width:19px;height:19px;margin:auto}
+.connection-card-foot{justify-content:space-between}
+.connection-card-foot [data-profile-test]{margin-left:auto;margin-right:0}
+.connection-card-foot .connection-test-result:empty{display:none}
+.connection-card-foot .connection-test-result:not(:empty){max-width:100%;overflow:hidden;text-overflow:ellipsis}
