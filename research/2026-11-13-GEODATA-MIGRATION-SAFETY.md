@@ -31,3 +31,20 @@ that the managed generation remains ready, and that the final legacy process
 is running. This is **not** a real systemd unit override test; systemd and
 production services remain unchanged. The explicit systemd override and
 service supervision path still require a separate isolated deployment test.
+
+## Transient systemd service smoke test
+
+`tests/integration/geodata_systemd_smoke.sh` uses `systemd-run` to create a uniquely
+named temporary service on the development VPS. It verifies Xray 26.10.31 under
+systemd, with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`,
+`PrivateTmp`, and `PrivateDevices`, using no inbound listeners. It tests
+legacy -> managed -> legacy environment transitions, then a deliberately
+corrupted managed database (service fails) and a successful legacy restart.
+Original GeoIP/GeoSite files are compared byte-for-byte. The test cleans up
+its temporary unit and `/run` directory. It does **not** install, reload, or
+modify `hydraroute-core.service`, nor test the full hrapi application service.
+
+The first attempt placed the config under `/tmp`; `PrivateTmp=yes` correctly
+made that path invisible to the service. The test now uses a private `/run`
+folder so the isolation property stays enabled. Production rollout is still
+blocked pending a reviewed operator runbook and a full hrapi service test.
