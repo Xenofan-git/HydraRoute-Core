@@ -306,3 +306,6 @@ button,input,select,textarea{font-size:inherit}
 /* Fine-tune connection action glyph proportions. */
 .connection-speed-wifi{width:13px;height:13px}
 .connection-card-actions [data-connection-menu]{font-size:21px}
+
+/* Match the Network heading weight in monitor status values. */
+.network-monitor-stats .stat-value{font-weight:600;letter-spacing:-.025em}
