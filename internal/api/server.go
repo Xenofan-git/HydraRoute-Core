@@ -340,9 +340,8 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	case err := <-serveErr:
 		recoveryCancel()
 		<-recoveryDone
-		if s.dns != nil {
-			_ = s.dns.Stop()
-		}
+		monitorCancel()
+		<-monitorDone
 		schedulerCancel()
 		<-schedulerDone
 		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -354,11 +353,18 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		runtimeErr := s.supervisor.Stop(stopCtx)
 		s.opMu.Unlock()
+		var dnsErr error
+		if s.dns != nil {
+			dnsErr = s.dns.Stop()
+		}
 		if smartDNSErr != nil {
 			return fmt.Errorf("API stopped unexpectedly (%v); stop SmartDNS: %w", err, smartDNSErr)
 		}
 		if runtimeErr != nil {
 			return fmt.Errorf("API stopped unexpectedly (%v); stop managed Xray: %w", err, runtimeErr)
+		}
+		if dnsErr != nil {
+			return fmt.Errorf("API stopped unexpectedly (%v); stop Core DNS: %w", err, dnsErr)
 		}
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -369,14 +375,11 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		<-recoveryDone
 		monitorCancel()
 		<-monitorDone
-		s.closeWatchlist()
-		if s.dns != nil {
-			_ = s.dns.Stop()
-		}
 		schedulerCancel()
 		<-schedulerDone
 		stopCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
+		shutdownErr := srv.Shutdown(stopCtx)
 		s.opMu.Lock()
 		var smartDNSErr error
 		if s.smartDNSRuntime != nil {
@@ -384,12 +387,18 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 		}
 		runtimeErr := s.supervisor.Stop(stopCtx)
 		s.opMu.Unlock()
-		shutdownErr := srv.Shutdown(stopCtx)
+		var dnsErr error
+		if s.dns != nil {
+			dnsErr = s.dns.Stop()
+		}
 		if smartDNSErr != nil {
 			return fmt.Errorf("stop SmartDNS: %w", smartDNSErr)
 		}
 		if runtimeErr != nil {
 			return fmt.Errorf("stop managed Xray: %w", runtimeErr)
+		}
+		if dnsErr != nil {
+			return fmt.Errorf("stop Core DNS: %w", dnsErr)
 		}
 		if shutdownErr != nil {
 			return fmt.Errorf("shutdown API: %w", shutdownErr)
