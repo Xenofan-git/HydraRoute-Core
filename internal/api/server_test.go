@@ -1669,6 +1669,40 @@ func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
 	}
 }
 
+// A failed API bind must only clean up Xray when this Serve call started it.
+func TestServeBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
+	for _, alreadyRunning := range []bool{false, true} {
+		name := "autostarted"
+		if alreadyRunning {
+			name = "preexisting"
+		}
+		t.Run(name, func(t *testing.T) {
+			supervisor := apiSupervisor(t)
+			if err := supervisor.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+				t.Fatal(err)
+			}
+			if alreadyRunning {
+				if err := supervisor.Start(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = supervisor.Stop(context.Background()) }()
+			}
+			h := NewWithOptions(supervisor, t.TempDir(), Options{AutoStart: true})
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			if err := h.Serve(context.Background(), listener.Addr().String()); err == nil {
+				t.Fatal("expected API bind conflict")
+			}
+			if got := supervisor.Status().Running; got != alreadyRunning {
+				t.Fatalf("Xray running=%v after failed bind, want %v", got, alreadyRunning)
+			}
+		})
+	}
+}
+
 func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
 	for _, address := range []string{"100.64.0.1", "192.0.2.1", "198.18.0.1", "2001:db8::1", "127.0.0.1", "10.0.0.1"} {
 		if _, ok := publicProbeAddress(context.Background(), address); ok {
