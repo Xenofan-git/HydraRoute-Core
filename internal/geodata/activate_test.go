@@ -132,3 +132,72 @@ func TestActivateRequiresBootstrappedStore(t *testing.T) {
 		t.Fatal("stopped runtime without baseline")
 	}
 }
+
+// A failed control-API probe after switching generations must restore the
+// original files and leave no recovery journal when the old runtime recovers.
+func TestActivateFailedHealthProbeRestoresPreviousAssetsAndJournal(t *testing.T) {
+	root := t.TempDir()
+	store := &GenerationStore{Root: root}
+	entry := append(field(1, []byte("RU")), field(2, field(1, []byte{127}))...)
+	original := field(1, entry)
+	next := append([]byte(nil), original...)
+	next = append(next, field(1, entry)...)
+	check := func(string) error { return nil }
+	baseline, err := store.Publish(original, original, check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &fakeRuntime{running: true, configured: true}
+	probes := 0
+	probe := func(context.Context) error {
+		probes++
+		if probes == 1 {
+			return errors.New("control API unreachable")
+		}
+		return nil
+	}
+	if _, err := store.Activate(context.Background(), next, next, check, runtime, probe); err == nil {
+		t.Fatal("unhealthy candidate was accepted")
+	}
+	if probes != 2 || runtime.starts != 2 || runtime.stops != 2 || !runtime.running {
+		t.Fatalf("runtime recovery incomplete: probes=%d runtime=%+v", probes, runtime)
+	}
+	current, err := store.Current()
+	if err != nil || current != baseline {
+		t.Fatalf("wrong generation after rollback: %s %v", current, err)
+	}
+	pending, err := store.pendingTransaction()
+	if err != nil || pending != nil {
+		t.Fatalf("journal not cleared after recovery: %+v %v", pending, err)
+	}
+	if err := CheckStartupReady(root); err != nil {
+		t.Fatalf("recovered store blocks restart: %v", err)
+	}
+}
+
+func TestActivateFailedRecoveryRetainsJournalForStartup(t *testing.T) {
+	root := t.TempDir()
+	store := &GenerationStore{Root: root}
+	entry := append(field(1, []byte("RU")), field(2, field(1, []byte{127}))...)
+	data := field(1, entry)
+	check := func(string) error { return nil }
+	baseline, err := store.Publish(data, data, check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &fakeRuntime{running: true, configured: true, failStartAt: 2}
+	if _, err := store.Activate(context.Background(), data, data, check, runtime, func(context.Context) error { return errors.New("control API unreachable") }); err == nil {
+		t.Fatal("accepted failed recovery")
+	}
+	current, err := store.Current()
+	if err != nil || current != baseline {
+		t.Fatalf("baseline not selected: %s %v", current, err)
+	}
+	pending, err := store.pendingTransaction()
+	if err != nil || pending == nil {
+		t.Fatalf("recovery journal lost: %+v %v", pending, err)
+	}
+	if err := CheckStartupReady(root); err == nil {
+		t.Fatal("unsafe restart allowed with pending recovery")
+	}
+}
