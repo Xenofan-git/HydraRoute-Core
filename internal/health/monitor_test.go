@@ -136,3 +136,29 @@ func TestHealthMonitorThresholdOneDegradesAndRecoversImmediately(t *testing.T) {
 		t.Fatalf("recovery with threshold one=%+v", healthy)
 	}
 }
+
+func TestChangingHealthThresholdsResetsPendingObservations(t *testing.T) {
+	m := New(DefaultSettings())
+	now := time.Now()
+	check := func(state string) string {
+		t.Helper()
+		return m.Apply([]Check{{Name: "dns", State: state}}, Metrics{}, now).Checks[0].State
+	}
+	if got := check("failed"); got != "checking" {
+		t.Fatalf("initial failure=%s", got)
+	}
+	settings := m.Settings()
+	settings.FailThreshold = 3
+	if err := m.Configure(settings); err != nil {
+		t.Fatal(err)
+	}
+	if got := check("failed"); got != "checking" {
+		t.Fatalf("old failure count survived threshold change: %s", got)
+	}
+	if got := check("failed"); got != "checking" {
+		t.Fatalf("second failure=%s", got)
+	}
+	if got := check("failed"); got != "degraded" {
+		t.Fatalf("third failure=%s", got)
+	}
+}
