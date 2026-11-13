@@ -300,3 +300,6 @@ button,input,select,textarea{font-size:inherit}
 .connection-card-foot [data-profile-test]{margin-left:auto;margin-right:0}
 .connection-card-foot .connection-test-result:empty{display:none}
 .connection-card-foot .connection-test-result:not(:empty){max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+.connection-card-foot [data-profile-test]{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.connection-speed-wifi{width:16px;height:16px;flex:none;display:block}
