@@ -289,3 +289,5 @@ button,input,select,textarea{font-size:inherit}
 .connection-settings-menu{padding:5px 0}
 .connection-menu-item{min-height:43px;padding:6px 15px;gap:11px}
 @media(max-width:650px){.connection-menu-item{min-height:43px;padding:6px 12px}}
+
+.subscription-flag-fallback{position:relative;display:inline-block;font-size:14px;line-height:12px;min-width:17px}

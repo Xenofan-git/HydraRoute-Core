@@ -104,6 +104,8 @@ func filterWords(raw string) []string {
 // Flag emoji filter terms also match the country code or country name in a node label.
 // Ordinary text terms retain the original substring matching semantics.
 func filterTermMatches(name, term string) bool {
+	// Match flags embedded in Hysteria2 or other protocol server names.
+	if strings.Contains(name, term) { return true }
 	if strings.Contains(name, term) {
 		return true
 	}
