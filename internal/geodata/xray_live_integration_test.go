@@ -3,6 +3,8 @@ package geodata
 import (
 	"context"
 	"errors"
+	"hydraroute.local/core/internal/xrayapi"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,6 +133,42 @@ func TestLiveXrayGeoDataActivationAndRollback(t *testing.T) {
 	}
 	if err := CheckStartupReady(store.Root); err != nil {
 		t.Fatalf("rollback left journal: %v", err)
+	}
+	// Exercise the actual gRPC client against an unreachable control endpoint
+	// while the real Xray process remains alive. A failed control API must not
+	// be mistaken for a healthy activation.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unavailable := listener.Addr().String()
+	_ = listener.Close()
+	attempts = 0
+	_, err = store.Activate(context.Background(), ip, site, check, runtime, func(ctx context.Context) error {
+		attempts++
+		if attempts > 1 {
+			return healthy(ctx)
+		} // previous generation recovery
+		probeCtx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+		defer cancel()
+		_, probeErr := xrayapi.GetOutboundStatus(probeCtx, unavailable)
+		if probeErr == nil {
+			return errors.New("unreachable control API unexpectedly healthy")
+		}
+		return probeErr
+	})
+	if err == nil || attempts != 2 {
+		t.Fatalf("control API failure not rolled back: attempts=%d err=%v", attempts, err)
+	}
+	current, err = store.Current()
+	if err != nil || current != next {
+		t.Fatalf("control API rollback current=%s expected=%s err=%v", current, next, err)
+	}
+	if !runtime.IsRunning() {
+		t.Fatal("Xray stopped after real gRPC control failure")
+	}
+	if err := CheckStartupReady(store.Root); err != nil {
+		t.Fatalf("control API rollback left journal: %v", err)
 	}
 	t.Logf("real Xray activation and health-failure rollback passed; initial=%s updated=%s", baseline, next)
 }
