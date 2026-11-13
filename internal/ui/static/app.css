@@ -309,3 +309,6 @@ button,input,select,textarea{font-size:inherit}
 
 /* Match the Network heading weight in monitor status values. */
 .network-monitor-stats .stat-value{font-weight:600;letter-spacing:-.025em}
+
+/* Balance scales pictogram in connection settings menu. */
+.connection-balance-icon{display:block;width:19px;height:19px;margin:auto}
