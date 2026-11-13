@@ -236,3 +236,8 @@ button,input,select,textarea{font-size:inherit}
 .subscription-table td.node-ping,.subscription-table thead th:nth-last-child(2){padding-right:29px}
 .subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:76px}
 @media(max-width:700px){.subscription-col-delay{width:113px}.subscription-table td.node-ping,.subscription-table thead th:nth-last-child(2){padding-right:14px}.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:39px}}
+
+/* HRNeo-style action glyphs and light auto-update label. */
+#refreshSubscription,#probeSubscription{color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.subscription-action-icon{width:17px;height:17px;flex:none;display:inline-block;stroke:#fff}
+.subscription-settings .subscription-check{font-weight:400!important;font-family:Arial,"Segoe UI",sans-serif;letter-spacing:0}
