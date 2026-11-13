@@ -245,3 +245,8 @@ button,input,select,textarea{font-size:inherit}
 /* Subscription refresh feedback: compact bottom-right status, also on mobile. */
 .toast{z-index:10000;max-width:min(360px,calc(100vw - 32px));bottom:18px;right:18px;overflow-wrap:anywhere}
 #refreshSubscription[aria-busy="true"]{opacity:.65;cursor:wait}
+/* Keep the select-all caption readable in the compact server table header. */
+.subscription-table thead th:first-child{position:relative;overflow:visible}
+.subscription-table thead th:first-child .subscription-check{position:relative;z-index:1;font-weight:400;font-size:12px;gap:7px;white-space:nowrap}
+.subscription-table thead th:nth-child(2){padding-left:72px;text-align:left}
+@media(max-width:700px){.subscription-table thead th:first-child .subscription-check{font-size:11px;gap:5px}.subscription-table thead th:nth-child(2){padding-left:67px}}
