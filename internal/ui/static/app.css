@@ -241,3 +241,7 @@ button,input,select,textarea{font-size:inherit}
 #refreshSubscription,#probeSubscription{color:#fff;display:inline-flex;align-items:center;justify-content:center;gap:7px}
 .subscription-action-icon{width:17px;height:17px;flex:none;display:inline-block;stroke:#fff}
 .subscription-settings .subscription-check{font-weight:400!important;font-family:Arial,"Segoe UI",sans-serif;letter-spacing:0}
+
+/* Subscription refresh feedback: compact bottom-right status, also on mobile. */
+.toast{z-index:10000;max-width:min(360px,calc(100vw - 32px));bottom:18px;right:18px;overflow-wrap:anywhere}
+#refreshSubscription[aria-busy="true"]{opacity:.65;cursor:wait}
