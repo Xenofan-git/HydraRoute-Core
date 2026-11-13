@@ -318,3 +318,5 @@ button,input,select,textarea{font-size:inherit}
 .connection-card-foot{flex-wrap:wrap;align-items:center;row-gap:7px}
 .connection-card-foot .connection-endpoint{flex:1 1 155px;width:auto;min-width:145px;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:normal}
 .connection-card-foot [data-profile-test]{margin-left:auto}
+/* Match space below the wrapped balancer mode to the top inset of the profile toggle. */
+.connection-card{padding-bottom:23px}
