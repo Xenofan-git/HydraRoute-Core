@@ -175,3 +175,8 @@ button,input,select,textarea{font-size:inherit}
 .subscription-table .node-delay .bad{color:#fff}
 .subscription-table .offline-filter{color:#fff!important}
 @media(max-width:700px){.subscription-table td.subscription-server-name{padding-left:10px}.subscription-server-flag{min-width:19px;font-size:14px}.subscription-server-name small{padding-left:26px}}
+
+/* HRNeo subscription settings: white labels, green status lamps. */
+.subscription-tabs button,.subscription-tabs button.active{color:#fff}
+.subscription-status-light{display:inline-block;width:9px;height:9px;margin-right:5px;border-radius:50%;background:#21c978;box-shadow:0 0 7px rgba(33,201,120,.5);vertical-align:middle}
+.subscription-settings .subscription-check,.subscription-interval,.subscription-interval>span{color:#fff}
