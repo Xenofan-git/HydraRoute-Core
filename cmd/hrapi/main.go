@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"hydraroute.local/core/internal/api"
+	"hydraroute.local/core/internal/geodata"
 	hrruntime "hydraroute.local/core/internal/runtime"
 )
 
@@ -37,6 +39,11 @@ func main() {
 		err := supervisor.Restore(restoreCtx)
 		cancel()
 		fatal(err)
+	}
+	// The CLI starts Xray before api.Server.Serve; guard this path too.
+	// A pending update must never be bypassed by the earlier CLI autostart.
+	if *autoStart {
+		fatal(geodata.CheckStartupReady(filepath.Join(*stateDir, "geodata")))
 	}
 	if *autoStart && supervisor.Status().Configured {
 		startCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
