@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hydraroute.local/core/internal/geodata"
+	"hydraroute.local/core/internal/xrayapi"
 )
 
 // geoDataActivate is intentionally opt-in: it only operates on an already
@@ -79,7 +80,13 @@ func (s *Server) geoDataActivate(w http.ResponseWriter, r *http.Request) {
 					stableSince = time.Now()
 				}
 				if time.Since(stableSince) >= 2*time.Second {
-					return nil
+					// Check the same control API used by Health Monitor.
+					probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+					_, err := xrayapi.GetOutboundStatus(probeCtx, s.observatoryAPIAddress())
+					cancel()
+					if err == nil {
+						return nil
+					}
 				}
 			} else {
 				stableSince = time.Time{}
