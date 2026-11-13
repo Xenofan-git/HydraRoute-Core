@@ -273,3 +273,5 @@ button,input,select,textarea{font-size:inherit}
 .subscription-server-flag{position:relative;user-select:text;cursor:copy}
 .subscription-server-flag .subscription-flag-emoji{position:absolute;inset:0;white-space:nowrap;color:transparent;font-size:12px;user-select:text}
 .subscription-server-flag img{position:relative;pointer-events:none}
+
+.observatory-note .subscription-server-flag{display:inline-flex;vertical-align:middle;margin:0 4px 0 6px}
