@@ -291,3 +291,5 @@ button,input,select,textarea{font-size:inherit}
 @media(max-width:650px){.connection-menu-item{min-height:43px;padding:6px 12px}}
 
 .subscription-flag-fallback{position:relative;display:inline-block;font-size:14px;line-height:12px;min-width:17px}
+/* Center the close glyph precisely inside its square control. */
+.subscription-close{display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex:0 0 34px}
