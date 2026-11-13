@@ -20,3 +20,14 @@ The packaged service continues to use `XRAY_LOCATION_ASSET=/usr/local/libexec/hy
 - `TestLiveXrayGeoDataActivationAndRollback` (opt-in real AMD64 Xray; separate process and temporary files)
 
 Remaining: end-to-end service override test in an isolated environment, then a reviewed operator runbook. No live rollout has occurred.
+
+## Isolated service-environment transition test
+
+`TestLiveXrayServiceAssetPathMigrationAndRevert` exercises the actual Xray
+binary with a temporary legacy directory, a bootstrapped managed store, and
+three successive Xray subprocess launches: legacy, managed `current`, and
+legacy again. It verifies that both original databases remain byte-identical,
+that the managed generation remains ready, and that the final legacy process
+is running. This is **not** a real systemd unit override test; systemd and
+production services remain unchanged. The explicit systemd override and
+service supervision path still require a separate isolated deployment test.
