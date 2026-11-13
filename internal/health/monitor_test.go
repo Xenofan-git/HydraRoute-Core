@@ -24,8 +24,8 @@ func TestFailAndRecoveryThresholds(t *testing.T) {
 		t.Fatalf("initial state=%s", got)
 	}
 	checks[0].State = "failed"
-	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "healthy" {
-		t.Fatalf("first failure should be damped, got %s", got)
+	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "checking" {
+		t.Fatalf("first failure must not report healthy, got %s", got)
 	}
 	if got := m.Apply(checks, Metrics{}, now).Checks[0].State; got != "degraded" {
 		t.Fatalf("second failure should degrade, got %s", got)
@@ -46,5 +46,19 @@ func TestSnapshotCopiesChecks(t *testing.T) {
 	copy.Checks[0].Name = "mutated"
 	if m.Snapshot().Checks[0].Name != "api" {
 		t.Fatal("snapshot exposed mutable internal slice")
+	}
+}
+
+func TestFailureAfterHealthyNeverReportsHealthy(t *testing.T) {
+	m := New(DefaultSettings())
+	now := time.Now()
+	m.Apply([]Check{{Name: "smartdns", State: "healthy"}}, Metrics{}, now)
+	first := m.Apply([]Check{{Name: "smartdns", State: "failed"}}, Metrics{}, now)
+	if first.Status != "warning" || first.Checks[0].State != "checking" {
+		t.Fatalf("first failed probe falsely healthy: %+v", first)
+	}
+	second := m.Apply([]Check{{Name: "smartdns", State: "failed"}}, Metrics{}, now)
+	if second.Status != "degraded" || second.Checks[0].State != "degraded" {
+		t.Fatalf("second failed probe should degrade: %+v", second)
 	}
 }
