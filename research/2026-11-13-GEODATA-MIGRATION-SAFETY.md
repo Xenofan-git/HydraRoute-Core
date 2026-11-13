@@ -48,3 +48,20 @@ The first attempt placed the config under `/tmp`; `PrivateTmp=yes` correctly
 made that path invisible to the service. The test now uses a private `/run`
 folder so the isolation property stays enabled. Production rollout is still
 blocked pending a reviewed operator runbook and a full hrapi service test.
+
+## Full hrapi + Xray isolated autostart smoke test
+
+`tests/integration/geodata_hrapi_smoke.sh` builds the current `cmd/hrapi`,
+starts it with `-restore-config=true -autostart` and real Xray 26.10.31,
+then polls `/v1/runtime` for running/configured status. It performs three
+separate launches: legacy asset directory, managed `geodata/current`, and
+legacy directory again. The managed run also checks `/v1/geodata/status`
+reports `update.ready=true`; original databases are byte-compared after the
+revert. All paths, processes and API ports are isolated and removed at exit.
+This is an application integration test, not an installed systemd service or
+production rollout. The managed baseline in this smoke test is seeded from
+trusted local assets; separate Bootstrap tests cover validated initialization.
+
+The test host mounts `/run` with `noexec`, so the compiled test hrapi binary
+is placed in a private `/var/tmp` directory. The restored config must be
+`0600` because the supervisor intentionally rejects permissive files.
