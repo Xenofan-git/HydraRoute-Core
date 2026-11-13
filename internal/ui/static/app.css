@@ -166,3 +166,12 @@ button,input,select,textarea{font-size:inherit}
 @media(max-width:1270px){.connection-cards{grid-template-columns:repeat(2,minmax(0,350px))}}
 @media(max-width:850px){.connection-cards{grid-template-columns:minmax(0,350px)}}
 @media(max-width:650px){.connection-cards{grid-template-columns:minmax(0,1fr);max-width:none}.connection-card{min-height:0;padding:14px}}
+
+/* Original Neo server selector: names offset to the right, flags, neutral offline. */
+.subscription-table th:nth-child(3),.subscription-table td.subscription-server-name{padding-left:18px}
+.subscription-server-name b{display:flex!important;align-items:center;gap:7px}
+.subscription-server-flag{display:inline-block;min-width:22px;font-size:17px;line-height:1.1;text-align:center}
+.subscription-server-name small{padding-left:29px}
+.subscription-table .node-delay .bad{color:#fff}
+.subscription-table .offline-filter{color:#fff!important}
+@media(max-width:700px){.subscription-table td.subscription-server-name{padding-left:10px}.subscription-server-flag{min-width:19px;font-size:14px}.subscription-server-name small{padding-left:26px}}
