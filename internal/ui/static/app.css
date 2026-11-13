@@ -206,3 +206,15 @@ button,input,select,textarea{font-size:inherit}
 .subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:29px}
 .subscription-table td.subscription-server-name{padding-left:2px}
 @media(max-width:700px){.subscription-col-check{width:66px}.subscription-col-protocol{width:43px}.subscription-col-delay{width:83px}.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:15px}.subscription-table td.subscription-server-name{padding-left:2px}}
+/* Second alignment pass: move left-side protocol/name and right-side latency further left. */
+.subscription-col-check{width:65px}
+.subscription-col-protocol{width:63px}
+.subscription-col-delay{width:130px}
+.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:46px}
+@media(max-width:700px){.subscription-col-check{width:54px}.subscription-col-protocol{width:43px}.subscription-col-delay{width:92px}.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:22px}}
+/* Further leftward adjustment requested for both server-table groups. */
+.subscription-col-check{width:67px}
+.subscription-col-protocol{width:60px}
+.subscription-col-delay{width:130px}
+.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:38px}
+@media(max-width:700px){.subscription-col-check{width:55px}.subscription-col-protocol{width:41px}.subscription-col-delay{width:94px}.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:21px}}
