@@ -35,6 +35,7 @@ type Profile struct {
 	Port                   uint16    `json:"port"`
 	Strategy               string    `json:"strategy,omitempty"`
 	OutboundInterface      string    `json:"outbound_interface,omitempty"`
+	MuxEnabled             bool      `json:"mux_enabled,omitempty"`
 	DPIBypass              DPIBypass `json:"dpi_bypass,omitempty"`
 	FilterKeep             string    `json:"filter_keep,omitempty"`
 	FilterExclude          string    `json:"filter_exclude,omitempty"`
@@ -55,6 +56,8 @@ type Metadata struct {
 	Port                   uint16    `json:"port"`
 	Strategy               string    `json:"strategy,omitempty"`
 	OutboundInterface      string    `json:"outbound_interface,omitempty"`
+	MuxEnabled             bool      `json:"mux_enabled,omitempty"`
+	MuxCompatible          bool      `json:"mux_compatible"`
 	DPIBypass              DPIBypass `json:"dpi_bypass,omitempty"`
 	FilterKeep             string    `json:"filter_keep,omitempty"`
 	FilterExclude          string    `json:"filter_exclude,omitempty"`
@@ -317,7 +320,7 @@ func (s *Store) List() ([]Metadata, error) {
 		if p.SubscriptionURL != "" {
 			input = "url"
 		}
-		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, DPIBypass: p.DPIBypass, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval, LastSubscriptionUpdate: p.LastSubscriptionUpdate, Input: input})
+		out = append(out, Metadata{ID: p.ID, SourceID: p.SourceID, Enabled: p.Enabled, Listen: p.Listen, Port: p.Port, Strategy: p.Strategy, OutboundInterface: p.OutboundInterface, MuxEnabled: p.MuxEnabled, DPIBypass: p.DPIBypass, FilterKeep: p.FilterKeep, FilterExclude: p.FilterExclude, AutoUpdateEnabled: p.AutoUpdateEnabled, AutoUpdateInterval: p.AutoUpdateInterval, LastSubscriptionUpdate: p.LastSubscriptionUpdate, Input: input})
 	}
 	return out, nil
 }

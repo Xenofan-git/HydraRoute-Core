@@ -1,0 +1,123 @@
+package blocklist
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestParseMixedHRWebDomainSources(t *testing.T) {
+	input := strings.Join([]string{
+		"\ufeff# comment",
+		"! title",
+		"[Adblock Plus 2.0]",
+		"0.0.0.0 Ads.Example.COM ads.example.com",
+		"127.0.0.1 tracker.example.org",
+		"||video.example.net^$third-party",
+		"@@||safe.example.net^",
+		"*.wild.example.net",
+		"bad_domain_entry",
+		"https://example.net/path",
+		"",
+	}, "\n")
+
+	got, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBlocked := []string{"ads.example.com", "tracker.example.org", "video.example.net", "wild.example.net"}
+	wantAllowed := []string{"safe.example.net"}
+	if strings.Join(got.Blocked, ",") != strings.Join(wantBlocked, ",") {
+		t.Fatalf("blocked = %v, want %v", got.Blocked, wantBlocked)
+	}
+	if strings.Join(got.Allowed, ",") != strings.Join(wantAllowed, ",") {
+		t.Fatalf("allowed = %v, want %v", got.Allowed, wantAllowed)
+	}
+	if got.Lines != 10 || got.Parsed != 5 || got.Ignored != 4 || got.Dropped != 1 {
+		t.Fatalf("unexpected parse counters: %+v", got)
+	}
+}
+
+func TestParseHostsFilesOnlyAcceptHRDNSSinkholeAddresses(t *testing.T) {
+	input := strings.Join([]string{
+		"0.0.0.0 blocked-v4.example.test",
+		"127.0.0.1 blocked-loopback.example.test",
+		":: blocked-v6.example.test",
+		"::1 blocked-v6loopback.example.test",
+		"192.0.2.1 not-a-block.example.test",
+		"255.255.255.255 broadcast.example.test",
+	}, "\n")
+	got, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"blocked-loopback.example.test",
+		"blocked-v4.example.test",
+		"blocked-v6.example.test",
+		"blocked-v6loopback.example.test",
+	}
+	if strings.Join(got.Blocked, ",") != strings.Join(want, ",") {
+		t.Fatalf("blocked = %v, want %v", got.Blocked, want)
+	}
+	if got.Parsed != 4 || got.Ignored != 2 {
+		t.Fatalf("unexpected hosts parse counters: %+v", got)
+	}
+}
+
+func TestParseCustomListAcceptsHRWebDomainFormatsAndRejectsInvalidLines(t *testing.T) {
+	got, err := ParseCustomList(strings.NewReader(strings.Join([]string{
+		"example.com",
+		"||ads.example.test^",
+		"@@||safe.example.test^",
+		"0.0.0.0 hosts.example.test",
+		"# comment",
+	}, "\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ads.example.test", "example.com", "hosts.example.test", "safe.example.test"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("custom domains=%v, want %v", got, want)
+	}
+	if _, err := ParseCustomList(strings.NewReader("not a valid domain..\n")); err == nil {
+		t.Fatal("invalid custom domain line was silently accepted")
+	}
+}
+
+func TestParseDeduplicatesAndNormalizes(t *testing.T) {
+	got, err := Parse(strings.NewReader("Example.COM.\nexample.com\n*.Sub.Example.com\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"example.com", "sub.example.com"}
+	if strings.Join(got.Blocked, ",") != strings.Join(want, ",") {
+		t.Fatalf("blocked = %v, want %v", got.Blocked, want)
+	}
+}
+
+func TestParseIgnoresNonDomainFilters(t *testing.T) {
+	got, err := Parse(strings.NewReader("|https://example.com/path|\n@@||good.example^\n||bad.example^\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Blocked) != 1 || got.Blocked[0] != "bad.example" {
+		t.Fatalf("blocked = %v", got.Blocked)
+	}
+	if len(got.Allowed) != 1 || got.Allowed[0] != "good.example" {
+		t.Fatalf("allowed = %v", got.Allowed)
+	}
+}
+
+func TestParseRejectsOversizedSource(t *testing.T) {
+	input := strings.Repeat("a", defaultMaxBytes+1)
+	if _, err := Parse(strings.NewReader(input)); err == nil {
+		t.Fatal("expected oversized source to fail")
+	}
+}
+
+func TestParseRejectsOversizedLine(t *testing.T) {
+	input := strings.Repeat("a", maxLineBytes+1)
+	if _, err := Parse(strings.NewReader(input)); err == nil {
+		t.Fatal("expected oversized line to fail")
+	}
+}

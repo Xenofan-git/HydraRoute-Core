@@ -16,6 +16,7 @@ import (
 
 type Status struct {
 	Configured bool   `json:"configured"`
+	Desired    bool   `json:"desired"`
 	Running    bool   `json:"running"`
 	PID        int    `json:"pid,omitempty"`
 	LastExit   string `json:"last_exit,omitempty"`
@@ -28,6 +29,7 @@ type Supervisor struct {
 	cmd        *exec.Cmd
 	done       chan error
 	configured bool
+	desired    bool
 	running    bool
 	lastExit   string
 }
@@ -171,8 +173,28 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	if !s.configured {
 		return fmt.Errorf("no validated config has been prepared")
 	}
+	s.desired = true
 	if s.running {
 		return fmt.Errorf("Xray is already running")
+	}
+	return s.startLocked(ctx)
+}
+
+func (s *Supervisor) Recover(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.desired || !s.configured || s.running {
+		return nil
+	}
+	return s.startLocked(ctx)
+}
+
+func (s *Supervisor) startLocked(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	cmd := exec.Command(s.binary, "run", "-config", s.configPath)
 	cmd.Stdout = os.Stdout
@@ -205,6 +227,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 
 func (s *Supervisor) Stop(ctx context.Context) error {
 	s.mu.Lock()
+	s.desired = false
 	if !s.running || s.cmd == nil {
 		s.mu.Unlock()
 		return nil
@@ -234,7 +257,7 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 func (s *Supervisor) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := Status{Configured: s.configured, Running: s.running, LastExit: s.lastExit}
+	out := Status{Configured: s.configured, Desired: s.desired, Running: s.running, LastExit: s.lastExit}
 	if s.cmd != nil && s.cmd.Process != nil {
 		out.PID = s.cmd.Process.Pid
 	}
@@ -248,3 +271,6 @@ func boundedOutput(b []byte) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+
+// Paths exposes the immutable executable and config paths for isolated preflight.
+func (s *Supervisor) Paths() (string, string) { return s.binary, s.configPath }

@@ -24,42 +24,46 @@ type ProfileRef struct {
 }
 
 type Upstream struct {
-	ID          string
-	ProfileID   string
-	Protocol    string // doh or dot
-	Host        string
-	Port        int
-	Path        string // DoH only
-	BootstrapIP string
-	Enabled     bool
+	ID          string `json:"id"`
+	ProfileID   string `json:"profile_id"`
+	Protocol    string `json:"protocol"` // doh or dot
+	Host        string `json:"host"`
+	Port        int    `json:"port,omitempty"`
+	Path        string `json:"path,omitempty"` // DoH only
+	BootstrapIP string `json:"bootstrap_ip"`
+	Enabled     bool   `json:"enabled"`
 }
 
 type DomainRule struct {
-	ID        string
-	MatchType string // exact or suffix
-	Pattern   string
-	ProfileID string
-	Enabled   bool
+	ID        string `json:"id"`
+	MatchType string `json:"match_type"` // exact or suffix
+	Pattern   string `json:"pattern"`
+	ProfileID string `json:"profile_id"`
+	Enabled   bool   `json:"enabled"`
 }
 
 type DomainSet struct {
-	ID        string
-	Kind      string // block, allow or route
-	ProfileID string // required for route sets
-	Domains   []string
-	Enabled   bool
+	ID        string   `json:"id"`
+	Kind      string   `json:"kind"`                 // block, allow or route
+	ProfileID string   `json:"profile_id,omitempty"` // required for route sets
+	Domains   []string `json:"domains"`
+	Enabled   bool     `json:"enabled"`
 }
 
 type Config struct {
-	Enabled    bool
-	ListenHost string
-	ListenPort int
-	CacheSize  int
-	CAPath     string
-	DataDir    string
-	Upstreams  []Upstream
-	Rules      []DomainRule
-	DomainSets []DomainSet
+	Enabled    bool         `json:"enabled"`
+	ListenHost string       `json:"listen_host"`
+	ListenPort int          `json:"listen_port"`
+	CacheSize  int          `json:"cache_size"`
+	CAPath     string       `json:"-"`
+	DataDir    string       `json:"-"`
+	Upstreams  []Upstream   `json:"upstreams"`
+	Rules      []DomainRule `json:"rules"`
+	DomainSets []DomainSet  `json:"domain_sets"`
+}
+
+func DefaultConfig() Config {
+	return Config{ListenHost: "127.0.0.1", ListenPort: 5354, CAPath: "/etc/ssl/certs"}
 }
 
 type Output struct {
@@ -125,8 +129,15 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 	if !filepath.IsAbs(cfg.CAPath) || filepath.Clean(cfg.CAPath) != cfg.CAPath || !caPathPattern.MatchString(cfg.CAPath) {
 		return cfg, nil, nil, nil, nil, fmt.Errorf("invalid SmartDNS CA directory")
 	}
-	if len(cfg.DomainSets) > 0 && (cfg.DataDir == "" || !filepath.IsAbs(cfg.DataDir) || filepath.Clean(cfg.DataDir) != cfg.DataDir || !caPathPattern.MatchString(cfg.DataDir)) {
-		return cfg, nil, nil, nil, nil, fmt.Errorf("domain-set data directory must be an absolute safe path")
+	hasRouteSet := false
+	for _, set := range cfg.DomainSets {
+		if set.Enabled && strings.EqualFold(strings.TrimSpace(set.Kind), "route") {
+			hasRouteSet = true
+			break
+		}
+	}
+	if hasRouteSet && (cfg.DataDir == "" || !filepath.IsAbs(cfg.DataDir) || filepath.Clean(cfg.DataDir) != cfg.DataDir || !caPathPattern.MatchString(cfg.DataDir)) {
+		return cfg, nil, nil, nil, nil, fmt.Errorf("route domain-set data directory must be an absolute safe path")
 	}
 
 	profileMap := make(map[string]ProfileRef, len(profiles))
@@ -267,7 +278,6 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 	})
 	sets := make([]normalizedDomainSet, 0, len(cfg.DomainSets))
 	setIDs := make(map[string]struct{}, len(cfg.DomainSets))
-	setMembership := make(map[string]string)
 	for _, set := range cfg.DomainSets {
 		if !set.Enabled {
 			continue
@@ -300,15 +310,7 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 				continue
 			}
 			seenDomains[domain] = struct{}{}
-			if kind == "block" || kind == "allow" {
-				for previousDomain, previousKind := range setMembership {
-					overlaps := domain == previousDomain || strings.HasSuffix(domain, "."+previousDomain) || strings.HasSuffix(previousDomain, "."+domain)
-					if overlaps && previousKind != kind {
-						return cfg, nil, nil, nil, nil, fmt.Errorf("block/allow domain-set suffix overlap between %q and %q; resolve explicitly", domain, previousDomain)
-					}
-				}
-				setMembership[domain] = kind
-			}
+
 			domains = append(domains, domain)
 		}
 		if len(domains) == 0 {
@@ -328,7 +330,30 @@ func normalizeConfig(cfg Config, profiles []ProfileRef) (Config, map[string]Prof
 		}
 		sets = append(sets, normalizedDomainSet{DomainSet: set, name: "hr_set_" + set.ID, file: "domain-set-" + set.ID + ".txt"})
 	}
-	sort.Slice(sets, func(i, j int) bool { return sets[i].ID < sets[j].ID })
+	// Block/allow sets are enforced by Core's policy-front resolver, which
+	// implements HRDNS longest-suffix semantics. They must not be compiled
+	// into SmartDNS address rules because SmartDNS accumulates suffix flags
+	// and can reverse the result for a child block beneath a parent allow.
+	// Only route sets are emitted to SmartDNS; all validated sets remain in
+	// cfg and are applied to Core DNS by the API layer.
+	priority := func(kind string) int {
+		switch kind {
+		case "block":
+			return 0
+		case "route":
+			return 1
+		case "allow":
+			return 2
+		default:
+			return 3
+		}
+	}
+	sort.Slice(sets, func(i, j int) bool {
+		if priority(sets[i].Kind) != priority(sets[j].Kind) {
+			return priority(sets[i].Kind) < priority(sets[j].Kind)
+		}
+		return sets[i].ID < sets[j].ID
+	})
 	return cfg, profileMap, upstreams, rules, sets, nil
 }
 
@@ -368,19 +393,21 @@ func Compile(cfg Config, profiles []ProfileRef) (Output, error) {
 			fmt.Fprintf(&b, "server-tls %s:%d %s\n", upstream.host, upstream.Port, base)
 		}
 	}
-	files := make(map[string][]byte, len(sets))
-	if len(sets) > 0 {
-		b.WriteString("\n# Domain sets are generated from validated domain names.\n")
-	}
+	routeSets := make([]normalizedDomainSet, 0, len(sets))
 	for _, set := range sets {
+		if set.Kind == "route" {
+			routeSets = append(routeSets, set)
+		}
+	}
+	files := make(map[string][]byte, len(routeSets))
+	if len(routeSets) > 0 {
+		b.WriteString("\n# Profile-routing domain sets are generated from validated domain names.\n")
+	}
+	for _, set := range routeSets {
 		fullPath := filepath.Join(cfg.DataDir, set.file)
 		fmt.Fprintf(&b, "domain-set -name %s -type list -file %s\n", set.name, fullPath)
 		files[set.file] = []byte(strings.Join(set.Domains, "\n") + "\n")
 		switch set.Kind {
-		case "block":
-			fmt.Fprintf(&b, "address /domain-set:%s/#\n", set.name)
-		case "allow":
-			fmt.Fprintf(&b, "address /domain-set:%s/-\n", set.name)
 		case "route":
 			fmt.Fprintf(&b, "nameserver /domain-set:%s/hr_dns_%s\n", set.name, set.ProfileID)
 		}
@@ -395,7 +422,7 @@ func Compile(cfg Config, profiles []ProfileRef) (Output, error) {
 		}
 		fmt.Fprintf(&b, "nameserver /%s/hr_dns_%s\n", pattern, rule.ProfileID)
 	}
-	return Output{Config: b.String(), Files: files, ProxyCount: len(profileIDs), UpstreamCount: len(upstreams), RuleCount: len(rules), DomainSetCount: len(sets)}, nil
+	return Output{Config: b.String(), Files: files, ProxyCount: len(profileIDs), UpstreamCount: len(upstreams), RuleCount: len(rules), DomainSetCount: len(routeSets)}, nil
 }
 
 func profileHasUpstreams(upstreams []normalizedUpstream) map[string]bool {

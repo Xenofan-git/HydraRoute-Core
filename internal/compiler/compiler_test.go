@@ -488,6 +488,9 @@ func TestCompileUsesConfiguredObservatoryIntervalAndOriginalProbeURL(t *testing.
 	if obs["probeInterval"] != "137000ms" {
 		t.Fatalf("probeInterval=%v", obs["probeInterval"])
 	}
+	if obs["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", obs["enableConcurrency"])
+	}
 	if obs["probeUrl"] != "https://www.google.com/generate_204" {
 		t.Fatalf("probeUrl=%v", obs["probeUrl"])
 	}
@@ -500,13 +503,16 @@ func TestCompileObservatoryIntervalFallsBackOutsideSupportedRange(t *testing.T) 
 			t.Fatal(err)
 		}
 		obs := decode(t, got)["observatory"].(map[string]any)
-		if obs["probeInterval"] != "30000ms" {
+		if obs["probeInterval"] != "120000ms" {
 			t.Fatalf("value %d: probeInterval=%v", value, obs["probeInterval"])
+		}
+		if obs["enableConcurrency"] != true {
+			t.Fatalf("value %d: enableConcurrency=%v", value, obs["enableConcurrency"])
 		}
 	}
 }
 
-func TestObservatoryIntervalIsDistributedAcrossSubjects(t *testing.T) {
+func TestObservatoryIntervalIsNotDividedAcrossSubjects(t *testing.T) {
 	nodes := make([]Node, 104)
 	for i := range nodes {
 		nodes[i] = node(fmt.Sprintf("node-%03d", i), "vless")
@@ -516,12 +522,15 @@ func TestObservatoryIntervalIsDistributedAcrossSubjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	obs := decode(t, got)["observatory"].(map[string]any)
-	if obs["probeInterval"] != "11538ms" {
-		t.Fatalf("probeInterval=%v, want 11538ms", obs["probeInterval"])
+	if obs["probeInterval"] != "1200000ms" {
+		t.Fatalf("probeInterval=%v, want 1200000ms", obs["probeInterval"])
+	}
+	if obs["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", obs["enableConcurrency"])
 	}
 }
 
-func TestObservatoryIntervalHasHundredMillisecondFloor(t *testing.T) {
+func TestObservatoryIntervalPreservesShortCycleWithLargePool(t *testing.T) {
 	nodes := make([]Node, 51)
 	for i := range nodes {
 		nodes[i] = node(fmt.Sprintf("node-%05d", i), "vless")
@@ -531,22 +540,27 @@ func TestObservatoryIntervalHasHundredMillisecondFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 	obs := decode(t, got)["observatory"].(map[string]any)
-	if obs["probeInterval"] != "100ms" {
-		t.Fatalf("probeInterval=%v, want 100ms", obs["probeInterval"])
+	if obs["probeInterval"] != "5000ms" {
+		t.Fatalf("probeInterval=%v, want 5000ms", obs["probeInterval"])
+	}
+	if obs["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", obs["enableConcurrency"])
 	}
 }
 
-func TestObservatoryProbeIntervalRespectsMinimumAndPoolSize(t *testing.T) {
-	tests := []struct{ seconds, subjects, want int }{
-		{30, 1, 30000},
-		{30, 100, 300},
-		{30, 500, 100},
-		{5, 1000, 100},
-		{1, 1, 30000},
+func TestObservatoryProbeIntervalUsesWholeCycle(t *testing.T) {
+	tests := []struct{ seconds, want int }{
+		{30, 30000},
+		{5, 5000},
+		{120, 120000},
+		{3600, 3600000},
+		{0, 120000},
+		{1, 120000},
+		{3601, 120000},
 	}
 	for _, tt := range tests {
-		if got := ObservatoryProbeIntervalMS(tt.seconds, tt.subjects); got != tt.want {
-			t.Errorf("ObservatoryProbeIntervalMS(%d,%d)=%d want %d", tt.seconds, tt.subjects, got, tt.want)
+		if got := ObservatoryProbeIntervalMS(tt.seconds); got != tt.want {
+			t.Errorf("ObservatoryProbeIntervalMS(%d)=%d want %d", tt.seconds, got, tt.want)
 		}
 	}
 }

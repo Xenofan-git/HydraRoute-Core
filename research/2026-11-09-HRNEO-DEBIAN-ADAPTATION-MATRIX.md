@@ -104,3 +104,22 @@ See `research/2026-11-09-HRWEB-ACTIVE-OUTBOUND-INDEX-MAPPING.md`. HRweb's active
 Original contract recovered from Ground-Zerro/HydraRoute commit 7fb556ec493adda131f3e8f97106226751b59528. Core source now implements a Core-owned Unix socket under the private state directory, MATCH/DUMP line protocol, lowest-rank-wins suffix matching, four-client cap, bounded input/output, pipelining, half-close, DUMP streaming, GeoSite Domain/Full expansion, and loopback-only status API. The Rules UI reports readiness and partial coverage.
 
 The implementation uses /var/lib/hydraroute/state/watchlist.sock (0600), never /var/run/hrneo.sock. GeoSite Plain/Regex and Xray keyword/regexp patterns are excluded from concrete K keys and counted in the partial-coverage status. See research/2026-11-09-HRNEO-WATCHLIST-API-CONTRACT.md and research/2026-11-09-HRNEO-WATCHLIST-IMPLEMENTATION.md.
+
+## 2026-11-13 — CI-confirmed parity audit checkpoint
+
+This is a scope checkpoint, not a claim that all HRweb methods are implemented.
+
+- The latest Health Monitor threshold reconfiguration regression (`14a9384`) passed both HydraRoute Core CI and SmartDNS sidecar CI.
+- The Core implementation now distinguishes first failed probe (`checking`/`warning`), repeated failures (`degraded`), consecutive recovery threshold, intermittent failures while degraded, and resets of observation counters on configuration changes.
+- The event journal now records both automatic recovery retries and the first success after failure; health component transition events classify `checking` as a warning.
+- These source-level and CI checks do **not** establish live NanoPi readiness or HRweb's full 114-method API parity.
+
+### Remaining functional gaps to prioritize
+
+1. Build an exact **114-method HRweb API inventory** and map each method to a Core endpoint, deliberate Debian-only substitute, or explicit non-applicable Keenetic operation. Include HTTP verb, input/output behavior, and an executable test or a documented gap. The current feature-group matrix is not method-level evidence.
+2. Verify **Observatory and balancer isolation** with two independent profiles, a dead outbound, failover, stale measurement rejection, and candidate-target versus actual connection reporting. Keep probing restricted to active balancer members.
+3. Audit **GeoIP/GeoSite lifecycle** (catalog, import/update, validation, atomic rollback, UI). Existing asset readiness and rule references are not equivalent to full HRweb management.
+4. Audit **raw Xray logs, system diagnostics, speed tests, optional Phobos/WireGuard helpers**, and Debian service packaging. Preserve Core's loopback-only proxy scope.
+5. Keep host routing, firewall, system DNS, Keenetic NDM/RCI, and other live services out of scope unless explicitly authorized.
+
+Do not repeat existing passing DNS/Health/Observatory tests solely to increase coverage counts; implement tests against newly identified behavior gaps. All findings here are based on the checked-in matrix, README, and recent CI, not a new runtime deployment.

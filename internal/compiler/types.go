@@ -11,6 +11,7 @@ type Profile struct {
 	Port              uint16    `json:"port"`
 	Strategy          string    `json:"strategy"`
 	OutboundInterface string    `json:"outbound_interface,omitempty"`
+	MuxEnabled        bool      `json:"mux_enabled,omitempty"`
 	DPIBypass         DPIBypass `json:"dpi_bypass,omitempty"`
 	Nodes             []Node    `json:"nodes"`
 	Picked            []string  `json:"picked,omitempty"`

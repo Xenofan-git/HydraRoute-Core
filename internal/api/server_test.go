@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hydraroute.local/core/internal/compiler"
+	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
+	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
 	"hydraroute.local/core/internal/service"
@@ -377,6 +379,46 @@ func TestServeContextShutdownStopsManagedRuntime(t *testing.T) {
 	}
 	if supervisor.Status().Running {
 		t.Fatal("managed Xray remains running after API shutdown")
+	}
+}
+
+func TestServeContextShutdownStopsCoreDNS(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	udp, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	_ = udp.Close()
+	cfg := h.dns.Config()
+	cfg.Enabled = true
+	cfg.Port = port
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.Serve(ctx, "127.0.0.1:0") }()
+	deadline := time.Now().Add(2 * time.Second)
+	for !h.dns.Status()["running"].(bool) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !h.dns.Status()["running"].(bool) {
+		cancel()
+		<-done
+		t.Fatal("Core DNS did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("API did not shut down")
+	}
+	if h.dns.Status()["running"].(bool) {
+		t.Fatal("Core DNS remained running after API shutdown")
 	}
 }
 
@@ -1301,9 +1343,12 @@ func TestObservatorySettingsImmediatelyUpdatePreparedXrayConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	observatory := decoded["observatory"].(map[string]any)
-	want := fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(137, 2))
+	want := fmt.Sprintf("%dms", compiler.ObservatoryProbeIntervalMS(137))
 	if observatory["probeInterval"] != want {
 		t.Fatalf("probeInterval=%v want %s", observatory["probeInterval"], want)
+	}
+	if observatory["enableConcurrency"] != true {
+		t.Fatalf("enableConcurrency=%v, want true", observatory["enableConcurrency"])
 	}
 }
 
@@ -1664,6 +1709,153 @@ func TestServeBindFailureStopsDNSStartedForThatService(t *testing.T) {
 	}
 }
 
+// A failed API bind must only clean up Xray when this Serve call started it.
+// A DNS bind failure occurs before the API listener exists. It must not leak
+// the newly started Xray child or stop an Xray process already in service.
+func TestRecoveryLoopRecordsSuccessOnlyAfterFailure(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	recovered := make(chan struct{})
+	done := make(chan struct{})
+	calls := 0
+	go func() {
+		defer close(done)
+		h.runRecoveryLoop(ctx, "dns", func(context.Context) error {
+			calls++
+			if calls == 1 {
+				return fmt.Errorf("temporary DNS failure")
+			}
+			close(recovered)
+			return nil
+		})
+	}()
+	select {
+	case <-recovered:
+	case <-time.After(7 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("automatic recovery did not retry")
+	}
+	cancel()
+	<-done
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/events?limit=20"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("events status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if strings.Count(body, `"type":"automatic_recovery_retry"`) != 1 ||
+		strings.Count(body, `"type":"automatic_recovery_succeeded"`) != 1 {
+		t.Fatalf("expected one failure and one success event: %s", body)
+	}
+}
+
+func TestRecoveryLoopStopsPromptlyOnCancellation(t *testing.T) {
+	h := New(apiSupervisor(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	called := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.runRecoveryLoop(ctx, "runtime", func(context.Context) error {
+			select {
+			case <-called:
+			default:
+				close(called)
+			}
+			return fmt.Errorf("simulated recovery failure")
+		})
+	}()
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("recovery callback was not invoked")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("recovery loop did not stop promptly during backoff")
+	}
+}
+
+func TestServeDNSBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
+	for _, alreadyRunning := range []bool{false, true} {
+		name := "autostarted"
+		if alreadyRunning {
+			name = "preexisting"
+		}
+		t.Run(name, func(t *testing.T) {
+			supervisor := apiSupervisor(t)
+			if err := supervisor.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+				t.Fatal(err)
+			}
+			if alreadyRunning {
+				if err := supervisor.Start(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = supervisor.Stop(context.Background()) }()
+			}
+			h := NewWithOptions(supervisor, t.TempDir(), Options{AutoStart: true})
+			blocker, err := net.ListenPacket("udp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer blocker.Close()
+			cfg := h.dns.Config()
+			cfg.Enabled = true
+			cfg.Port = blocker.LocalAddr().(*net.UDPAddr).Port
+			if err := h.dns.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.Serve(context.Background(), "127.0.0.1:0"); err == nil {
+				t.Fatal("expected Core DNS bind conflict")
+			}
+			if got := supervisor.Status().Running; got != alreadyRunning {
+				t.Fatalf("Xray running=%v after DNS bind failure, want %v", got, alreadyRunning)
+			}
+			if h.dns.Status()["running"].(bool) {
+				t.Fatal("Core DNS remained running after failed startup")
+			}
+		})
+	}
+}
+
+func TestServeBindFailurePreservesExistingXrayAndStopsAutostartedXray(t *testing.T) {
+	for _, alreadyRunning := range []bool{false, true} {
+		name := "autostarted"
+		if alreadyRunning {
+			name = "preexisting"
+		}
+		t.Run(name, func(t *testing.T) {
+			supervisor := apiSupervisor(t)
+			if err := supervisor.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+				t.Fatal(err)
+			}
+			if alreadyRunning {
+				if err := supervisor.Start(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = supervisor.Stop(context.Background()) }()
+			}
+			h := NewWithOptions(supervisor, t.TempDir(), Options{AutoStart: true})
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			if err := h.Serve(context.Background(), listener.Addr().String()); err == nil {
+				t.Fatal("expected API bind conflict")
+			}
+			if got := supervisor.Status().Running; got != alreadyRunning {
+				t.Fatalf("Xray running=%v after failed bind, want %v", got, alreadyRunning)
+			}
+		})
+	}
+}
+
 func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
 	for _, address := range []string{"100.64.0.1", "192.0.2.1", "198.18.0.1", "2001:db8::1", "127.0.0.1", "10.0.0.1"} {
 		if _, ok := publicProbeAddress(context.Background(), address); ok {
@@ -1672,5 +1864,370 @@ func TestPublicProbeAddressRejectsReservedAndCarrierGradeRanges(t *testing.T) {
 	}
 	if got, ok := publicProbeAddress(context.Background(), "1.1.1.1"); !ok || got != "1.1.1.1" {
 		t.Fatalf("public address rejected: %q %v", got, ok)
+	}
+}
+
+func TestSmartDNSAPIStoresConfigAndRebuildsPreparedGeneration(t *testing.T) {
+	stateDir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	profile := profiles.Profile{
+		ID: "profile1", SourceID: "source1", Enabled: true, Listen: "127.0.0.1", Port: 16001,
+		Links: []string{"vless://example.invalid"},
+	}
+	if err := h.profileStore.Save(profile); err != nil {
+		t.Fatal(err)
+	}
+	dnsConfig := h.dns.Config()
+	dnsConfig.BlockingEnabled = true
+	if err := h.dns.Save(dnsConfig); err != nil {
+		t.Fatal(err)
+	}
+	cfg := hrsmartdns.Config{
+		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 15354, CacheSize: 32,
+		DomainSets: []hrsmartdns.DomainSet{
+			{ID: "block-child", Kind: "block", Domains: []string{"ads.allow-parent.test"}, Enabled: true},
+			{ID: "allow-parent", Kind: "allow", Domains: []string{"allow-parent.test"}, Enabled: true},
+		},
+		Upstreams: []hrsmartdns.Upstream{{
+			ID: "upstream1", ProfileID: "profile1", Protocol: "doh",
+			Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
+		}},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns/smartdns", string(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("prepare SmartDNS config status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if h.smartDNSRuntime == nil || h.smartDNSRuntime.Status().Running {
+		t.Fatal("SmartDNS should be prepared but not auto-started")
+	}
+	if h.smartDNSRuntime.Status().ConfigPath == "" {
+		t.Fatalf("prepared SmartDNS config path missing: %+v", h.smartDNSRuntime.Status())
+	}
+	if !h.dns.IsBlockedHost("ads.allow-parent.test") {
+		t.Fatal("SmartDNS block domain set was not applied to the Core DNS policy front")
+	}
+	if h.dns.IsBlockedHost("allow-parent.test") {
+		t.Fatal("SmartDNS allow domain set was not applied to the Core DNS policy front")
+	}
+	if _, err := os.Stat(h.smartDNSConfigPath); err != nil {
+		t.Fatalf("persisted SmartDNS settings missing: %v", err)
+	}
+	info, err := os.Stat(h.smartDNSConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("SmartDNS settings mode=%o, want 600", info.Mode().Perm())
+	}
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localGet("/v1/dns/smartdns"))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"profile_id":"profile1"`) {
+		t.Fatalf("SmartDNS GET status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	reloaded := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !reloaded.smartDNSConfig.Enabled || reloaded.smartDNSErr != "" || reloaded.smartDNSRuntime.Status().Running {
+		t.Fatalf("SmartDNS settings were not safely reconstructed: config=%+v err=%q status=%+v", reloaded.smartDNSConfig, reloaded.smartDNSErr, reloaded.smartDNSRuntime.Status())
+	}
+	if reloaded.smartDNSRuntime.Status().ConfigPath == "" {
+		t.Fatal("reloaded SmartDNS generation was not prepared")
+	}
+	rr = httptest.NewRecorder()
+	reloaded.mux.ServeHTTP(rr, localPost("/v1/dns/smartdns/stop", `{}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("SmartDNS stop idempotence status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSmartDNSAPIRejectsProfileReferencesThatCannotBePinned(t *testing.T) {
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	cfg := hrsmartdns.Config{
+		Enabled: true, ListenHost: "127.0.0.1", ListenPort: 15354,
+		Upstreams: []hrsmartdns.Upstream{{
+			ID: "upstream1", ProfileID: "missing", Protocol: "doh",
+			Host: "dns.example.com", BootstrapIP: "1.1.1.1", Enabled: true,
+		}},
+	}
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPut("/v1/dns/smartdns", string(body)))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("missing profile reference status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if h.smartDNSConfig.Enabled {
+		t.Fatal("rejected SmartDNS config became active in memory")
+	}
+}
+
+func TestDNSBlocklistAPIManagesSourcesAndFeedsCoreResolver(t *testing.T) {
+	stateDir := t.TempDir()
+	h := NewWithStateDir(apiSupervisor(t), stateDir)
+	fetcher := func(context.Context, string) (dnsblocklist.Result, error) {
+		return dnsblocklist.Result{Blocked: []string{"ads.example.com"}, Allowed: []string{"safe.example.com"}}, nil
+	}
+	manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), fetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.blocklists = manager
+	h.applyDNSBlocklists()
+	cfg := h.dns.Config()
+	cfg.BlockingEnabled = true
+	if err := h.dns.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists", `{"name":"Ads","url":"https://lists.example/ads.txt","enabled":true}`))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create source status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		Source dnsblocklist.Source `json:"source"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Source.ID == "" {
+		t.Fatalf("source ID missing: %s", rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/refresh", `{}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("refresh source status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatal("refreshed blocklist did not affect Core DNS resolver")
+	}
+	if h.dns.IsBlockedHost("safe.example.com") {
+		t.Fatal("blocklist allow exception did not reach Core DNS resolver")
+	}
+
+	reloaded := NewWithStateDir(apiSupervisor(t), stateDir)
+	if !reloaded.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatal("persisted blocklist was not restored into Core DNS resolver")
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/remove", `{"domain":"ads.example.com"}`))
+	if rr.Code != http.StatusOK || h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatalf("remove entry failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, localPost("/v1/dns/blocklists/"+created.Source.ID+"/restore", `{"domain":"ads.example.com"}`))
+	if rr.Code != http.StatusOK || !h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatalf("restore entry failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	patch := localPost("/v1/dns/blocklists/"+created.Source.ID, `{"enabled":false}`)
+	patch.Method = http.MethodPatch
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, patch)
+	if rr.Code != http.StatusOK || h.dns.IsBlockedHost("tracker.ads.example.com") {
+		t.Fatalf("disable source failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	del := localGet("/v1/dns/blocklists/" + created.Source.ID)
+	del.Method = http.MethodDelete
+	rr = httptest.NewRecorder()
+	h.mux.ServeHTTP(rr, del)
+	if rr.Code != http.StatusOK || len(h.blocklists.Snapshot().Sources) != 0 {
+		t.Fatalf("delete source failed: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDNSBlocklistCatalogAPIRequiresLocalReadAndReturnsPresets(t *testing.T) {
+	server := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	response := httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localGet("/v1/dns/blocklists/catalog"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("catalog GET status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Presets []dnsblocklist.Preset `json:"presets"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Presets) != 7 {
+		t.Fatalf("catalog returned %d presets, want 7: %+v", len(payload.Presets), payload.Presets)
+	}
+	remote := httptest.NewRequest(http.MethodGet, "/v1/dns/blocklists/catalog", nil)
+	remote.RemoteAddr = "192.0.2.10:12345"
+	remote.Host = "127.0.0.1:17891"
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, remote)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("remote catalog request status=%d, want forbidden", response.Code)
+	}
+}
+
+func TestDNSBlocklistRefreshEndpointsRequireSameOriginJSON(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	manager, err := dnsblocklist.NewManager(filepath.Join(stateDir, "dns", "blocklists", "state.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := manager.SaveSource(dnsblocklist.Source{Name: "Ads", URL: "https://lists.example/ads.txt", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.blocklists = manager
+
+	for _, path := range []string{
+		"/v1/dns/blocklists/_refresh",
+		"/v1/dns/blocklists/" + source.ID + "/refresh",
+	} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{}"))
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Host = "127.0.0.1:17891"
+		req.Header.Set("Origin", "http://127.0.0.1:3000")
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		server.mux.ServeHTTP(response, req)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("cross-origin refresh %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestDNSBlocklistCustomAPIUpdatesCorePolicyAndPersists(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	dnsConfig := server.dns.Config()
+	dnsConfig.BlockingEnabled = true
+	if err := server.dns.Save(dnsConfig); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", `{"block":"ads.parent.test\nblocked.allow-parent.test","allow":"allow-parent.test\nsafe.parent.test"}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("custom list PUT status=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, host := range []string{"ads.parent.test", "blocked.allow-parent.test"} {
+		if !server.dns.IsBlockedHost(host) {
+			t.Fatalf("custom block list did not block %s", host)
+		}
+	}
+	for _, host := range []string{"allow-parent.test", "safe.parent.test"} {
+		if server.dns.IsBlockedHost(host) {
+			t.Fatalf("custom allow list did not allow %s", host)
+		}
+	}
+
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localGet("/v1/dns/blocklists/custom"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("custom list GET status=%d body=%s", response.Code, response.Body.String())
+	}
+	var lists map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &lists); err != nil {
+		t.Fatal(err)
+	}
+	if lists["block"] != "ads.parent.test\nblocked.allow-parent.test" || lists["allow"] != "allow-parent.test\nsafe.parent.test" {
+		t.Fatalf("custom lists did not round-trip: %+v", lists)
+	}
+
+	response = httptest.NewRecorder()
+	server.mux.ServeHTTP(response, localPut("/v1/dns/blocklists/custom", `{"block":"bad..domain","allow":""}`))
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid custom list status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !server.dns.IsBlockedHost("ads.parent.test") {
+		t.Fatal("invalid custom update replaced the last known-good policy")
+	}
+}
+
+func TestDNSBlocklistSettingsAPIAndDailySchedule(t *testing.T) {
+	stateDir := t.TempDir()
+	server := NewWithStateDir(apiSupervisor(t), stateDir)
+	get := httptest.NewRecorder()
+	server.mux.ServeHTTP(get, localGet("/v1/dns/blocklists/settings"))
+	if get.Code != http.StatusOK {
+		t.Fatalf("settings GET status=%d body=%s", get.Code, get.Body.String())
+	}
+	var initial struct {
+		Settings dnsblocklist.RefreshSettings `json:"settings"`
+	}
+	if err := json.Unmarshal(get.Body.Bytes(), &initial); err != nil {
+		t.Fatal(err)
+	}
+	if initial.Settings.AutoUpdate || initial.Settings.UpdateTime != "04:30" {
+		t.Fatalf("HRNeo default daily refresh settings mismatch: %+v", initial.Settings)
+	}
+
+	put := httptest.NewRecorder()
+	server.mux.ServeHTTP(put, localPut("/v1/dns/blocklists/settings", `{"autoUpdate":false,"updateTime":"05:15","iface":"eth1"}`))
+	if put.Code != http.StatusOK {
+		t.Fatalf("settings PUT status=%d body=%s", put.Code, put.Body.String())
+	}
+	if got := server.blocklists.Settings(); got.AutoUpdate || got.UpdateTime != "05:15" || got.Iface != "eth1" {
+		t.Fatalf("settings PUT not persisted: %+v", got)
+	}
+	select {
+	case <-server.blocklistWake:
+	default:
+		t.Fatal("saving schedule did not wake the daily scheduler")
+	}
+
+	loc := time.FixedZone("test", 3*60*60)
+	now := time.Date(2026, 11, 11, 4, 30, 0, 0, loc)
+	next := nextDailyBlocklistUpdate(now, "04:30")
+	if !next.Equal(time.Date(2026, 11, 12, 4, 30, 0, 0, loc)) {
+		t.Fatalf("daily schedule next run=%s", next)
+	}
+}
+
+func TestGeoDataStatusRejectsWorldWritableAssetsAndDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"geoip.dat", "geosite.dat"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("test-asset"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("XRAY_LOCATION_ASSET", dir)
+	h := NewWithStateDir(apiSupervisor(t), t.TempDir())
+	read := func() geoDataStatusResponse {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.mux.ServeHTTP(rr, localGet("/v1/geodata/status"))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d", rr.Code)
+		}
+		var got geoDataStatusResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(); !got.Ready {
+		t.Fatalf("private geodata assets should be ready: %+v", got)
+	}
+	if err := os.Chmod(filepath.Join(dir, "geoip.dat"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); got.Ready || got.Assets[0].Available {
+		t.Fatalf("world-writable database must be rejected: %+v", got)
+	}
+	if err := os.Chmod(filepath.Join(dir, "geoip.dat"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	if got := read(); got.Ready || got.Error == "" {
+		t.Fatalf("world-writable asset directory must be rejected: %+v", got)
 	}
 }

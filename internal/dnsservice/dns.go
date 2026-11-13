@@ -78,6 +78,9 @@ type Manager struct {
 	running                                         bool
 	total, blocked, success, errors, latency, count atomic.Uint64
 	hosts                                           map[string]net.IP
+	blocklistBlocked                                map[string]struct{}
+	blocklistAllowed                                map[string]struct{}
+	smartDNSForwardAddr                             string
 	client                                          *http.Client
 }
 
@@ -93,7 +96,7 @@ func New(path string) *Manager {
 			return fmt.Errorf("too many DoH redirects")
 		}
 		return nil
-	}}, hosts: map[string]net.IP{}}
+	}}, hosts: map[string]net.IP{}, blocklistBlocked: map[string]struct{}{}, blocklistAllowed: map[string]struct{}{}}
 	m.cfg = DefaultConfig()
 	_ = m.Load()
 	return m
@@ -358,12 +361,14 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 				continue
 			}
 		}
-		if m.blockedHost(host) {
+		if isBlocked, source := m.blockDecision(host, q.Qtype); isBlocked {
 			blocked = true
 			if trackStats {
 				m.blocked.Add(1)
 			}
-			if q.Qtype == mdns.TypeA {
+			if source == blockSourceManagedList {
+				reply.Ns = append(reply.Ns, blocklistSOA(q.Name))
+			} else if q.Qtype == mdns.TypeA {
 				rr, _ := mdns.NewRR(q.Name + " 60 IN A 0.0.0.0")
 				reply.Answer = append(reply.Answer, rr)
 			}
@@ -387,20 +392,199 @@ func (m *Manager) handle(w mdns.ResponseWriter, r *mdns.Msg) {
 	}
 	_ = w.WriteMsg(reply)
 }
-func (m *Manager) blockedHost(host string) bool {
-	c := m.Config()
-	if !c.BlockingEnabled {
-		return false
-	}
-	for _, r := range c.Rules {
-		d := strings.TrimPrefix(strings.ToLower(r.Domain), "*.")
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return strings.ToLower(r.Action) != "allow"
+func (m *Manager) SetBlocklistDomains(blocked, allowed []string) {
+	blockedSet := make(map[string]struct{}, len(blocked))
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, raw := range blocked {
+		if domain := normalizeBlocklistDomain(raw); domain != "" {
+			blockedSet[domain] = struct{}{}
 		}
 	}
-	return false
+	for _, raw := range allowed {
+		if domain := normalizeBlocklistDomain(raw); domain != "" {
+			allowedSet[domain] = struct{}{}
+		}
+	}
+	m.mu.Lock()
+	m.blocklistBlocked = blockedSet
+	m.blocklistAllowed = allowedSet
+	m.mu.Unlock()
 }
+
+func (m *Manager) IsBlockedHost(host string) bool {
+	return m.blockedHost(host)
+}
+
+func (m *Manager) blockedHost(host string) bool {
+	return m.blockedHostForType(host, mdns.TypeA)
+}
+
+func blocklistQueryType(qtype uint16) bool {
+	switch qtype {
+	case mdns.TypeA, mdns.TypeAAAA, mdns.TypeSVCB, mdns.TypeHTTPS:
+		return true
+	default:
+		return false
+	}
+}
+
+type BlockCheck struct {
+	Domain  string `json:"domain"`
+	Enabled bool   `json:"enabled"`
+	Matched bool   `json:"matched"`
+	Blocked bool   `json:"blocked"`
+	Source  string `json:"source,omitempty"`
+}
+
+type blockSource uint8
+
+const (
+	blockSourceNone blockSource = iota
+	blockSourceExplicitRule
+	blockSourceManagedList
+)
+
+func (m *Manager) blockedHostForType(host string, qtype uint16) bool {
+	blocked, _ := m.blockDecision(host, qtype)
+	return blocked
+}
+
+func (m *Manager) blockDecision(host string, qtype uint16) (bool, blockSource) {
+	host = normalizeBlocklistDomain(host)
+	if host == "" {
+		return false, blockSourceNone
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.blockDecisionLocked(host, qtype)
+}
+
+func (m *Manager) blockDecisionLocked(host string, qtype uint16) (bool, blockSource) {
+	if !m.cfg.BlockingEnabled {
+		return false, blockSourceNone
+	}
+	// Explicit Core rules retain their existing first-match priority and
+	// response behavior, independent of the HRDNS blocklist record-type filter.
+	for _, rule := range m.cfg.Rules {
+		domain := normalizeBlocklistDomain(rule.Domain)
+		if domain != "" && (host == domain || strings.HasSuffix(host, "."+domain)) {
+			return !strings.EqualFold(rule.Action, "allow"), blockSourceExplicitRule
+		}
+	}
+	if !blocklistQueryType(qtype) {
+		return false, blockSourceNone
+	}
+	// HRDNS evaluates the most-specific matching suffix first. At each
+	// candidate suffix an allow entry is checked before a block entry, so an
+	// exact allow wins an exact duplicate, but a more-specific block wins over
+	// a broader allow (and vice versa for a more-specific allow).
+	for candidate := host; candidate != ""; {
+		if _, ok := m.blocklistAllowed[candidate]; ok {
+			return false, blockSourceManagedList
+		}
+		if _, ok := m.blocklistBlocked[candidate]; ok {
+			return true, blockSourceManagedList
+		}
+		separator := strings.IndexByte(candidate, '.')
+		if separator < 0 {
+			break
+		}
+		candidate = candidate[separator+1:]
+	}
+	return false, blockSourceNone
+}
+
+func (m *Manager) CheckBlock(host string) (BlockCheck, error) {
+	host = normalizeBlocklistDomain(host)
+	if host == "" {
+		return BlockCheck{}, fmt.Errorf("invalid DNS domain")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := BlockCheck{Domain: host, Enabled: m.cfg.BlockingEnabled}
+	if !result.Enabled {
+		return result, nil
+	}
+	blocked, source := m.blockDecisionLocked(host, mdns.TypeA)
+	result.Blocked = blocked
+	result.Matched = source != blockSourceNone
+	switch source {
+	case blockSourceExplicitRule:
+		result.Source = "explicit_rule"
+	case blockSourceManagedList:
+		result.Source = "blocklist"
+	}
+	return result, nil
+}
+
+// blocklistSOA mirrors the pinned SmartDNS/HRDNS default negative SOA tuple.
+func blocklistSOA(name string) *mdns.SOA {
+	return &mdns.SOA{
+		Hdr:     mdns.RR_Header{Name: mdns.Fqdn(name), Rrtype: mdns.TypeSOA, Class: mdns.ClassINET, Ttl: 30},
+		Ns:      "a.gtld-servers.net.",
+		Mbox:    "nstld.verisign-grs.com.",
+		Serial:  1800,
+		Refresh: 1800,
+		Retry:   900,
+		Expire:  604800,
+		Minttl:  86400,
+	}
+}
+
+func normalizeBlocklistDomain(raw string) string {
+	domain := strings.ToLower(strings.TrimSpace(raw))
+	domain = strings.TrimPrefix(domain, "*.")
+	domain = strings.TrimPrefix(domain, ".")
+	domain = strings.TrimSuffix(domain, ".")
+	if domain == "" || len(domain) > 253 || net.ParseIP(domain) != nil || strings.ContainsAny(domain, "/\\ \t\r\n") {
+		return ""
+	}
+	for _, label := range strings.Split(domain, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return ""
+		}
+		for _, r := range label {
+			if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+				return ""
+			}
+		}
+	}
+	return domain
+}
+
+// SetSmartDNSForwarder makes SmartDNS the exclusive upstream for this
+// resolver. Blocklist and explicit-rule decisions are made locally before
+// forwarding; a SmartDNS failure must not fall back to unrelated public DNS.
+func (m *Manager) SmartDNSForwarder() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.smartDNSForwardAddr
+}
+
+func (m *Manager) SetSmartDNSForwarder(address string) error {
+	if address != "" {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || host != "127.0.0.1" {
+			return fmt.Errorf("SmartDNS forwarder must be a 127.0.0.1 host:port")
+		}
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return fmt.Errorf("SmartDNS forwarder port must be between 1 and 65535")
+		}
+	}
+	m.mu.Lock()
+	m.smartDNSForwardAddr = address
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *Manager) forward(req, resp *mdns.Msg) error {
+	m.mu.RLock()
+	smartDNSForwardAddr := m.smartDNSForwardAddr
+	m.mu.RUnlock()
+	if smartDNSForwardAddr != "" {
+		return m.exchange(req, resp, Server{Name: "HydraRoute SmartDNS", Protocol: "Do53", Address: smartDNSForwardAddr, Enabled: true})
+	}
 	c := m.Config()
 	var candidates []Server
 	if c.AutoProvider {
