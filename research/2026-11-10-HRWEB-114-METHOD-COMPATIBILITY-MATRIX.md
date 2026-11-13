@@ -142,12 +142,12 @@ Status is deliberately conservative: an endpoint with a similar name is not trea
 - Ожидает реализации / частично: 9
 - Ожидает точного сопоставления: 1
 - Частично: 24
-- Частично / ожидает реализации: 11
+- Частично — реализация обновлена (DNS blocklists, DTO parity pending): 11
 
-Total regular methods classified: **114 / 114**.\n\n**2026-11-13 re-audit:** entries 56–66 were refreshed against implemented Core DNS blocklist endpoints. Original 2026-11-10 disposition totals above are historical and must be recomputed before treating them as current; 114-method inventory already existed and was not recreated.
+Total regular methods classified: **114 / 114**.\n\n**2026-11-13 re-audit:** entries 56–66 were refreshed against implemented Core DNS blocklist endpoints; the disposition counts above have been recalculated from all 114 current rows. The 114-method inventory already existed and was not recreated.
 
 ## Overall result
 
-No full 1:1 HRweb API compatibility is claimed. The strongest parity is in profiles, subscription/pool selection, Xray runtime, per-profile SOCKS and Observatory. DNS, GeoData, health, events, metrics and system operations are partial or Core-native adaptations. Router/RCI methods are intentionally excluded. File management, Phobos, system update, FQDN groups, speed tests, full Geo list management and DNS blocklist HRweb DTO/operation parity remains pending.
+No full 1:1 HRweb API compatibility is claimed. The strongest parity is in profiles, subscription/pool selection, Xray runtime, per-profile SOCKS and Observatory. DNS, GeoData, health, events, metrics and system operations are partial or Core-native adaptations. DNS managed blocklists and custom allow/block entries are implemented, but exact HRweb DTO compatibility is not proven. Router/RCI methods are intentionally excluded. File management, Phobos, system update, FQDN groups, speed tests, full Geo list management and DNS blocklist HRweb DTO/operation parity remains pending.
 
 The target is safe behavioral parity for useful Debian workflows, not copying Keenetic RCI/NDM side effects or exposing global routes/firewall/DNS mutations.
