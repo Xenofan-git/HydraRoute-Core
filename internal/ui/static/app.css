@@ -199,3 +199,10 @@ button,input,select,textarea{font-size:inherit}
 .subscription-table td.subscription-server-name b{font-family:Arial,"Segoe UI",sans-serif;font-weight:400;letter-spacing:0;line-height:1.4}
 .subscription-table td.subscription-server-name small{font-weight:400}
 @media(max-width:700px){.subscription-col-check{width:83px}.subscription-col-protocol{width:47px}.subscription-col-ping{width:43px}.subscription-col-delay{width:65px}.subscription-table td.subscription-server-name{padding-left:3px}}
+/* Fine alignment from the updated HRNeo comparison screenshot. */
+.subscription-col-check{width:83px}
+.subscription-col-protocol{width:68px}
+.subscription-col-delay{width:112px}
+.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:29px}
+.subscription-table td.subscription-server-name{padding-left:2px}
+@media(max-width:700px){.subscription-col-check{width:66px}.subscription-col-protocol{width:43px}.subscription-col-delay{width:83px}.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:15px}.subscription-table td.subscription-server-name{padding-left:2px}}
