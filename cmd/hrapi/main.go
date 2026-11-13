@@ -34,6 +34,15 @@ func main() {
 	if *refreshInterval < 0 || (*refreshInterval > 0 && *refreshInterval < time.Minute) || *retryMin < 5*time.Second || *retryMax < *retryMin {
 		fatal(fmt.Errorf("refresh interval must be zero or at least 1m; retry-min must be at least 5s and retry-max must be >= retry-min"))
 	}
+	// Recover an interrupted asset switch before validating the saved Xray
+	// config or starting any listener. Never recover unrelated asset paths.
+	if *autoStart || *restoreConfig {
+		recovered, recoveryErr := geodata.RecoverStartup(filepath.Join(*stateDir, "geodata"), *xray, *config, os.Getenv("XRAY_LOCATION_ASSET"))
+		fatal(recoveryErr)
+		if recovered {
+			fmt.Fprintln(os.Stderr, "hrapi: recovered previous GeoData generation before Xray restore")
+		}
+	}
 	if *restoreConfig {
 		restoreCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 		err := supervisor.Restore(restoreCtx)
