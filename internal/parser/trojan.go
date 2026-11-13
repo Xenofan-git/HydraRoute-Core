@@ -151,7 +151,8 @@ func parseTrojan(raw string) (parsedVLESS, error) {
 			if e != nil {
 				return parsedVLESS{}, fmt.Errorf("allowInsecure must be a boolean")
 			}
-			tls["allowInsecure"] = b
+			// Removed in Xray 26.10+: preserve TLS certificate verification.
+			_ = b
 		}
 		stream["tlsSettings"] = tls
 	default:

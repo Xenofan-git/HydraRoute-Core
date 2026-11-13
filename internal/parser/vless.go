@@ -212,7 +212,8 @@ func parseVLESS(raw string) (parsedVLESS, error) {
 			if err != nil {
 				return parsedVLESS{}, fmt.Errorf("allowInsecure must be a boolean")
 			}
-			tls["allowInsecure"] = b
+			// Removed in Xray 26.10+: preserve TLS certificate verification.
+			_ = b
 		}
 		stream["tlsSettings"] = tls
 	case "reality":

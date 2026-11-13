@@ -22,6 +22,8 @@ func ParseLinks(source string, links []string) ([]ParsedServer, error) {
 			parsed, err = ParseVLESSLinks(source, []string{raw})
 		case strings.HasPrefix(strings.ToLower(trimmed), "vmess://"):
 			parsed, err = ParseVMessLinks(source, []string{raw})
+		case strings.HasPrefix(strings.ToLower(trimmed), "hysteria2://"), strings.HasPrefix(strings.ToLower(trimmed), "hy2://"):
+			parsed, err = ParseHysteria2Links(source, []string{raw})
 		case strings.HasPrefix(strings.ToLower(trimmed), "trojan://"):
 			parsed, err = ParseTrojanLinks(source, []string{raw})
 		case strings.HasPrefix(strings.ToLower(trimmed), "ss://"):

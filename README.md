@@ -74,13 +74,14 @@ Each profile has an independent loopback SOCKS5 endpoint. The optional shared in
 | VLESS | TCP, WebSocket, gRPC, XHTTP, HTTPUpgrade; TLS and REALITY where compatible |
 | VMess | TCP, WebSocket, gRPC, XHTTP; TLS |
 | Trojan | TCP, WebSocket, gRPC, XHTTP; TLS |
+| Hysteria2 | Xray 26.1.18+ native Hysteria2 outbound, QUIC/TLS |
 | Shadowsocks | SIP002 and legacy links |
 | SOCKS5 | Proxy links |
 | HTTP / HTTPS | Proxy links |
 
 Protocol and transport combinations are validated against the bundled Xray version. REALITY is not accepted with WebSocket or HTTPUpgrade in the current implementation.
 
-**Not currently supported:** Hysteria2 outbound (not supported by the Xray engine used by this project) and IDN hostname normalization.
+**Not currently supported:** IDN hostname normalization. Xray 26.10+ removed `allowInsecure`; imported links retain certificate verification, even when the source requests insecure TLS.
 
 ## Components
 
@@ -165,7 +166,7 @@ Mutating endpoints require a same-origin JSON request. The dashboard does not ex
 
 ## Current limitations
 
-- Hysteria2 is not supported by the current Xray-based engine.
+- Hysteria2 requires Xray 26.1.18 or newer; unsupported Hysteria2 URL options fail validation rather than being silently ignored.
 - IDN hostname normalization is not implemented.
 - Host routing, firewall, DNS, and router-policy integration are intentionally outside the core's scope.
 - Review dependency provenance and licensing before redistribution or public binary releases.
