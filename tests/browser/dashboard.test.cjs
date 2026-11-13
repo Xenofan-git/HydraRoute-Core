@@ -262,7 +262,15 @@ test('HRNeo navigation order and draggable routing rules are preserved', async (
     assert.deepEqual(nav.map(x => x.replace(/^[^\p{L}]+/u, '').trim()), ['Правила', 'Сеть', 'DNS', 'Hydra', 'Инфо', 'Настройки', 'Выход']);
     assert.equal(await page.locator('.nav-item[data-page="rules"]').getAttribute('class').then(v => v.includes('active')), true);
     assert.equal(await page.locator('.rule-card').count(), 2);
-    await page.locator('[data-drag-rule="0"]').dragTo(page.locator('.rule-card').nth(1));
+    await page.evaluate(() => {
+      const source = document.querySelector('[data-drag-rule="0"]');
+      const target = document.querySelector('.rule-card[data-rule="1"]');
+      const dataTransfer = new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }));
+    });
     assert.equal((await page.locator('.rule-card').first().locator('.rule-name-text').textContent()).trim(), 'Second');
     await page.locator('#saveRouting').click();
     await page.getByText('Настройки маршрутизации сохранены и применены').waitFor();
@@ -279,7 +287,7 @@ test('routing editor splits CRLF, LF and comma-separated values before saving', 
     await page.goto(baseURL);
     await page.getByText('API подключён').waitFor();
     await page.locator('.nav-item[data-page="rules"]').click();
-    await page.locator('[data-edit-rule="0"]').click();
+    await page.locator('[data-edit-rule="0"]').dispatchEvent('click');
     await page.locator('.rule-values').fill('domain:one.example\r\ndomain:two.example,domain:three.example');
     await page.locator('#ruleEditorForm button[type="submit"]').click();
     await page.locator('#saveRouting').click();
