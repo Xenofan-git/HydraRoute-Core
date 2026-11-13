@@ -218,3 +218,15 @@ button,input,select,textarea{font-size:inherit}
 .subscription-col-delay{width:130px}
 .subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:38px}
 @media(max-width:700px){.subscription-col-check{width:55px}.subscription-col-protocol{width:41px}.subscription-col-delay{width:94px}.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:21px}}
+/* HRNeo reference: even checkbox/protocol/name spacing and smaller country flags. */
+.subscription-col-check{width:63px}
+.subscription-col-protocol{width:60px}
+.subscription-table td:first-child{padding-left:12px;padding-right:0}
+.subscription-table td:nth-child(2){padding-left:4px;padding-right:0}
+.subscription-table td.subscription-server-name{padding-left:4px}
+.subscription-server-flag{min-width:17px}
+.subscription-server-flag img{width:17px;height:12px}
+.subscription-table td.node-ping,.subscription-table thead th:nth-last-child(2){padding-right:19px}
+.subscription-col-delay{width:149px}
+.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:58px}
+@media(max-width:700px){.subscription-col-check{width:50px}.subscription-col-protocol{width:42px}.subscription-table td:first-child{padding-left:6px}.subscription-table td:nth-child(2){padding-left:2px}.subscription-table td.subscription-server-name{padding-left:2px}.subscription-server-flag{min-width:15px}.subscription-server-flag img{width:15px;height:10px}.subscription-col-delay{width:102px}.subscription-table td.node-ping,.subscription-table thead th:nth-last-child(2){padding-right:9px}.subscription-table td.node-delay,.subscription-table thead th:last-child{padding-right:29px}}
