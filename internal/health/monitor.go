@@ -80,6 +80,12 @@ func (m *Monitor) Configure(settings Settings) error {
 		return err
 	}
 	m.mu.Lock()
+	if m.settings.FailThreshold != settings.FailThreshold || m.settings.RecoverThreshold != settings.RecoverThreshold {
+		// Threshold changes start a fresh observation window; counters
+		// accumulated under the old policy must not trigger transitions.
+		m.failures = make(map[string]int)
+		m.recovery = make(map[string]int)
+	}
 	m.settings = settings
 	m.mu.Unlock()
 	return nil
