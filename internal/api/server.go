@@ -957,7 +957,7 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 	for _, check := range result.Checks {
 		if old, ok := previousStates[check.Name]; ok && old != check.State {
 			level := "info"
-			if check.State == "degraded" || check.State == "warning" {
+			if check.State == "degraded" || check.State == "warning" || check.State == "checking" {
 				level = "warning"
 			}
 			s.recordEvent(level, "health", "component_state_changed", check.Name+" health state changed: "+old+" -> "+check.State)
