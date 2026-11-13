@@ -180,3 +180,8 @@ button,input,select,textarea{font-size:inherit}
 .subscription-tabs button,.subscription-tabs button.active{color:#fff}
 .subscription-status-light{display:inline-block;width:9px;height:9px;margin-right:5px;border-radius:50%;background:#21c978;box-shadow:0 0 7px rgba(33,201,120,.5);vertical-align:middle}
 .subscription-settings .subscription-check,.subscription-interval,.subscription-interval>span{color:#fff}
+
+/* Flag SVGs are bundled locally: no emoji font dependency. */
+.subscription-modal{width:min(790px,96vw)}
+.subscription-server-flag img{display:block;width:22px;height:15px;object-fit:cover;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.15)}
+@media(max-width:700px){.subscription-modal{width:100%}.subscription-server-flag img{width:19px;height:13px}}
