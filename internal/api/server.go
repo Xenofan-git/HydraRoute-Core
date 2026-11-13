@@ -30,6 +30,7 @@ import (
 	dnsblocklist "hydraroute.local/core/internal/dnsservice/blocklist"
 	hrsmartdns "hydraroute.local/core/internal/dnsservice/smartdns"
 	"hydraroute.local/core/internal/events"
+	"hydraroute.local/core/internal/geodata"
 	"hydraroute.local/core/internal/health"
 	"hydraroute.local/core/internal/parser"
 	"hydraroute.local/core/internal/profiles"
@@ -261,6 +262,12 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	defer s.closeWatchlist()
 	xrayStartedHere := false
 	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		if err := s.checkGeoDataStartup(); err != nil {
+			s.recordEvent("error", "geodata", "startup_blocked", "Pending or unsafe GeoData state blocks Xray autostart")
+			return fmt.Errorf("Xray autostart blocked: %w", err)
+		}
+	}
+	if s.refreshOpts.AutoStart && s.supervisor != nil {
 		status := s.supervisor.Status()
 		if status.Configured && !status.Running {
 			startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -407,6 +414,15 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	}
 }
 
+// checkGeoDataStartup is deliberately read-only: automatic rollback requires
+// an explicit validated Xray preflight and coordinated lifecycle transition.
+func (s *Server) checkGeoDataStartup() error {
+	if s.stateDir == "" {
+		return nil
+	}
+	return geodata.CheckStartupReady(filepath.Join(s.stateDir, "geodata"))
+}
+
 const managedRecoveryInitial = 5 * time.Second
 const managedRecoveryMaximum = 5 * time.Minute
 
@@ -417,6 +433,14 @@ func (s *Server) runProcessRecovery(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			s.runRecoveryLoop(ctx, "runtime", func(callCtx context.Context) error {
+				if err := s.checkGeoDataStartup(); err != nil {
+					return err
+				}
+				s.opMu.Lock()
+				defer s.opMu.Unlock()
+				if err := s.checkGeoDataStartup(); err != nil {
+					return err
+				}
 				return s.supervisor.Recover(callCtx)
 			})
 		}()
