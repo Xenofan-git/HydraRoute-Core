@@ -262,12 +262,14 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 	defer s.closeWatchlist()
 	xrayStartedHere := false
 	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		// Serialize the startup guard and Xray start with other API lifecycle
+		// operations; the recovery loop uses this same operation mutex.
+		s.opMu.Lock()
 		if err := s.checkGeoDataStartup(); err != nil {
+			s.opMu.Unlock()
 			s.recordEvent("error", "geodata", "startup_blocked", "Pending or unsafe GeoData state blocks Xray autostart")
 			return fmt.Errorf("Xray autostart blocked: %w", err)
 		}
-	}
-	if s.refreshOpts.AutoStart && s.supervisor != nil {
 		status := s.supervisor.Status()
 		if status.Configured && !status.Running {
 			startCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -278,6 +280,7 @@ func (s *Server) Serve(ctx context.Context, address string) error {
 			}
 			cancel()
 		}
+		s.opMu.Unlock()
 	}
 	dnsStarted := false
 	if s.dns != nil && s.dns.Config().Enabled {
