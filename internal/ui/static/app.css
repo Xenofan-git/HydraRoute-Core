@@ -285,3 +285,7 @@ button,input,select,textarea{font-size:inherit}
 /* Slightly smaller flag for Observatory balancer candidate only. */
 .observatory-note .subscription-server-flag{min-width:14px;margin:0 3px 0 5px}
 .observatory-note .subscription-server-flag img{width:14px;height:10px}
+/* Compact connection settings menu without changing its four actions. */
+.connection-settings-menu{padding:5px 0}
+.connection-menu-item{min-height:43px;padding:6px 15px;gap:11px}
+@media(max-width:650px){.connection-menu-item{min-height:43px;padding:6px 12px}}
