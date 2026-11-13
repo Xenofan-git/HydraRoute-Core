@@ -101,6 +101,35 @@ func filterWords(raw string) []string {
 	return out
 }
 
+// Flag emoji filter terms also match the country code or country name in a node label.
+// Ordinary text terms retain the original substring matching semantics.
+func filterTermMatches(name, term string) bool {
+	if strings.Contains(name, term) {
+		return true
+	}
+	aliases := map[string][]string{
+		"🇷🇺": {"ru", "russia", "россия", "москва", "moscow"}, "🇩🇪": {"de", "germany", "германия"}, "🇵🇱": {"pl", "poland", "польша"}, "🇳🇴": {"no", "norway", "норвегия"}, "🇳🇱": {"nl", "netherlands", "нидерланды", "голландия", "амстердам"}, "🇫🇮": {"fi", "finland", "финляндия"}, "🇸🇪": {"se", "sweden", "швеция"}, "🇱🇻": {"lv", "latvia", "латвия"}, "🇪🇪": {"ee", "estonia", "эстония"}, "🇫🇷": {"fr", "france", "франция"}, "🇪🇸": {"es", "spain", "испания"}, "🇮🇹": {"it", "italy", "италия"}, "🇹🇷": {"tr", "turkey", "турция"}, "🇺🇸": {"us", "usa", "сша"}, "🇯🇵": {"jp", "japan", "япония"}, "🇬🇧": {"gb", "uk", "britain", "великобритания"}, "🇸🇬": {"sg", "singapore", "сингапур"}, "🇰🇿": {"kz", "kazakhstan", "казахстан"}, "🇨🇿": {"cz", "czechia", "чехия"}, "🇨🇭": {"ch", "switzerland", "швейцария"}, "🇦🇹": {"at", "austria", "австрия"},
+	}
+	for flag, words := range aliases {
+		if term != flag {
+			continue
+		}
+		for _, word := range words {
+			if len([]rune(word)) <= 2 {
+				for _, token := range strings.FieldsFunc(name, func(r rune) bool { return !(r >= 'a' && r <= 'z') }) {
+					if token == word {
+						return true
+					}
+				}
+			} else if strings.Contains(name, word) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 func serverFiltered(name string, keep, exclude string, direct bool) bool {
 	if direct {
 		return false
@@ -110,7 +139,7 @@ func serverFiltered(name string, keep, exclude string, direct bool) bool {
 	if len(keeps) > 0 {
 		matched := false
 		for _, word := range keeps {
-			if strings.Contains(lower, word) {
+			if filterTermMatches(lower, word) {
 				matched = true
 				break
 			}
@@ -120,7 +149,7 @@ func serverFiltered(name string, keep, exclude string, direct bool) bool {
 		}
 	}
 	for _, word := range excludes {
-		if strings.Contains(lower, word) {
+		if filterTermMatches(lower, word) {
 			return true
 		}
 	}

@@ -230,3 +230,23 @@ func TestPreviewProfileCachedNeverFetchesRemoteSubscription(t *testing.T) {
 		t.Fatalf("expected cache-only preview to reject empty cache, got %v", err)
 	}
 }
+
+func TestFlagEmojiSubscriptionFilters(t *testing.T) {
+	cases := []struct {
+		name, keep, exclude string
+		filtered            bool
+	}{
+		{"PL LTE Poland", "🇵🇱", "", false},
+		{"NO LTE Norway", "🇳🇴", "", false},
+		{"DE LTE Germany", "🇵🇱", "", true},
+		{"RU LTE Moscow", "", "🇷🇺", true},
+		{"PL LTE Poland", "LTE", "🇵🇱", true},
+		{"PL LTE Poland", "🇩🇪", "", true},
+		{"PL LTE Poland", "🇵🇱", "", false},
+	}
+	for _, tc := range cases {
+		if got := serverFiltered(tc.name, tc.keep, tc.exclude, false); got != tc.filtered {
+			t.Errorf("%s keep=%q exclude=%q: got %v want %v", tc.name, tc.keep, tc.exclude, got, tc.filtered)
+		}
+	}
+}
