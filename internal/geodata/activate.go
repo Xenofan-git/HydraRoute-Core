@@ -32,6 +32,11 @@ func (s *GenerationStore) Activate(ctx context.Context, geoip, geosite []byte, p
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	unlock, err := s.lockOperation()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	pending, err := s.pendingTransaction()
 	if err != nil {
 		return "", err

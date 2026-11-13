@@ -94,6 +94,11 @@ func (s *GenerationStore) RecoverPending(check func(string) error) (bool, error)
 	if check == nil {
 		return false, errors.New("Xray preflight required")
 	}
+	unlock, err := s.lockOperation()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 	tx, err := s.pendingTransaction()
 	if err != nil || tx == nil {
 		return false, err
