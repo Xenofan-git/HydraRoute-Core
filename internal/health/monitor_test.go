@@ -62,3 +62,31 @@ func TestFailureAfterHealthyNeverReportsHealthy(t *testing.T) {
 		t.Fatalf("second failed probe should degrade: %+v", second)
 	}
 }
+
+func TestDegradedRemainsLatchedAcrossIntermittentRecovery(t *testing.T) {
+	m := New(DefaultSettings())
+	now := time.Now()
+	check := func(state string) string {
+		t.Helper()
+		snapshot := m.Apply([]Check{{Name: "dns", State: state}}, Metrics{}, now)
+		return snapshot.Checks[0].State
+	}
+	if got := check("failed"); got != "checking" {
+		t.Fatalf("first failure=%s", got)
+	}
+	if got := check("failed"); got != "degraded" {
+		t.Fatalf("second failure=%s", got)
+	}
+	if got := check("healthy"); got != "degraded" {
+		t.Fatalf("first recovery=%s", got)
+	}
+	if got := check("failed"); got != "degraded" {
+		t.Fatalf("intermittent failure must not downgrade to checking: %s", got)
+	}
+	if got := check("healthy"); got != "degraded" {
+		t.Fatalf("recovery count must reset after failure: %s", got)
+	}
+	if got := check("healthy"); got != "healthy" {
+		t.Fatalf("second consecutive recovery=%s", got)
+	}
+}
