@@ -1004,7 +1004,7 @@ func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dirInfo, err := os.Lstat(assetDir)
-	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
+	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || dirInfo.Mode().Perm()&0002 != 0 {
 		result.Error = "Xray asset directory is unavailable or unsafe"
 		writeJSON(w, http.StatusOK, result)
 		return
@@ -1014,7 +1014,7 @@ func (s *Server) geoDataStatus(w http.ResponseWriter, r *http.Request) {
 		asset := &result.Assets[i]
 		path := filepath.Join(assetDir, asset.Name)
 		info, statErr := os.Lstat(path)
-		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > maxGeoDataAssetBytes {
+		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0002 != 0 || info.Size() <= 0 || info.Size() > maxGeoDataAssetBytes {
 			result.Ready = false
 			continue
 		}
