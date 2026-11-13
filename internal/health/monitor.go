@@ -104,7 +104,9 @@ func (m *Monitor) Apply(checks []Check, metrics Metrics, at time.Time) Snapshot 
 		case "failed":
 			m.failures[check.Name]++
 			m.recovery[check.Name] = 0
-			if m.failures[check.Name] >= m.settings.FailThreshold {
+			if m.failures[check.Name] >= m.settings.FailThreshold || m.states[check.Name] == "degraded" {
+				// Once degraded, remain degraded until enough consecutive
+				// healthy probes satisfy the recovery threshold.
 				state = "degraded"
 			} else {
 				// A failing probe must never be reported as healthy, even
