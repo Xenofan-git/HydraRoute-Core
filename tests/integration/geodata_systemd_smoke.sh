@@ -24,7 +24,7 @@ run_unit() {
   --property=Restart=no --property=NoNewPrivileges=yes \
   --property=ProtectSystem=strict --property=ProtectHome=yes \
   --property=PrivateTmp=yes --property=PrivateDevices=yes \
-  --property=RestrictAddressFamilies='AF_UNIX AF_INET AF_INET6' \
+  --property=RestrictAddressFamilies='AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
   --setenv="XRAY_LOCATION_ASSET=$asset_path" \
   "$HRCORE_TEST_XRAY" run -config "$root/config.json"
  for i in $(seq 1 30); do
