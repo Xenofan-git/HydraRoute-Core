@@ -403,3 +403,6 @@ body{min-height:100vh}
 /* Optical centering of the modal close cross within its square button. */
 .subscription-close{font-size:0}
 .subscription-close::before{content:"×";font-size:24px;line-height:1;display:block;transform:translateY(-2px)}
+
+/* Live Xray balancer choice below the protocol badges; not an active-socket claim. */
+.connection-selected{margin-top:9px;font-size:12px;line-height:1.35;color:var(--muted);overflow-wrap:anywhere}
