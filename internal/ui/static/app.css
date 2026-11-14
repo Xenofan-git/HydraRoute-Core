@@ -422,3 +422,15 @@ body{min-height:100vh}
 .rules-empty-neo span{font-size:13px;line-height:1.65}
 
 .rule-trash-icon{display:inline-block;vertical-align:-3px;flex:none}
+
+/* Expandable HRNeo-style rules help: shown below toolbar, never a browser alert. */
+.rules-help-panel{border:1px solid var(--line);border-radius:12px;background:var(--surface2);padding:18px 22px;color:var(--text);font-size:12px;line-height:1.6}
+.rules-help-panel[hidden]{display:none}
+.rules-help-grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+.rules-help-panel h3{margin:0 0 6px;font-size:13px;color:var(--accent)}
+.rules-help-panel ul{margin:0 0 12px;padding-left:17px}
+.rules-help-panel li{margin:0 0 5px}
+.rules-help-panel code{color:var(--accent)}
+.rules-help-foot{margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line);color:var(--muted)}
+.rules-tool-btn.is-active{border-color:var(--accent);color:var(--accent)}
+@media(max-width:760px){.rules-help-grid{grid-template-columns:1fr;gap:4px}.rules-help-panel{padding:14px}}
