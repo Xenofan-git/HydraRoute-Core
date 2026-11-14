@@ -352,3 +352,8 @@ button,input,select,textarea{font-size:inherit}
 .main-content>.core-footer{margin-top:auto;padding-top:16px}
 .main-content:has(.network-footer-note)>.core-footer{margin-top:auto}
 @media(max-width:900px){.main-content{min-height:calc(100vh - 64px)}}
+/* Keep the GitHub and donation buttons centered in the footer, independent of the version label. */
+.core-footer{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);justify-content:initial}
+.core-footer-version{grid-column:1;grid-row:1}
+.core-footer-links{grid-column:2;grid-row:1;justify-self:center}
+@media(max-width:650px){.core-footer{grid-template-columns:minmax(0,1fr);justify-items:center}.core-footer-version{grid-column:1;grid-row:1;text-align:center}.core-footer-links{grid-column:1;grid-row:2}}
