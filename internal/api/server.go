@@ -1943,6 +1943,7 @@ type observatoryStatusResponse struct {
 	Refreshed             bool                              `json:"refreshed"`
 	BalancerCandidateKey  string                            `json:"balancer_candidate_key,omitempty"`
 	BalancerCandidateName string                            `json:"balancer_candidate_name,omitempty"`
+	BalancerDisplayName   string                            `json:"balancer_display_name,omitempty"`
 	Statuses              map[string]xrayapi.OutboundStatus `json:"statuses"`
 	Error                 string                            `json:"error,omitempty"`
 }
@@ -2033,10 +2034,18 @@ func (s *Server) collectObservatoryStatus(ctx context.Context, profileID string,
 		byTag[item.Tag] = item
 	}
 	result := observatoryStatusResponse{ProfileID: profileID, Available: true, Refreshed: true, Statuses: make(map[string]xrayapi.OutboundStatus)}
+	// HRNeo xrayServerName returns the sole pool entry directly. This is a
+	// configured selection, not evidence of a live outbound connection.
+	if len(eligibleNodes) == 1 {
+		result.BalancerDisplayName = eligibleNodes[0].Name
+	}
 	// RoutingService exposes the balancer's principle-target candidates. Keep
 	// Observatory measurements available even if this optional API is absent.
 	if tags, candidateErr := xrayapi.GetBalancerPrincipleTargetTags(ctx, s.observatoryAPIAddress(), "hr_bal_"+profileID); candidateErr == nil {
 		result.BalancerCandidateKey, result.BalancerCandidateName = resolveBalancerCandidate(profileID, eligibleNodes, tags)
+		if len(eligibleNodes) > 1 {
+			result.BalancerDisplayName = result.BalancerCandidateName
+		}
 	}
 	s.probeMu.Lock()
 	cache := s.probeCache[profileID]
