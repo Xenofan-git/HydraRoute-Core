@@ -384,3 +384,9 @@ body{min-height:100vh}
 .main-content{min-height:0}
 @media(max-width:900px){.main-content{min-height:0}}
 @media(max-width:760px){.layout{min-height:0}.main-content{min-height:0}}
+
+/* Restore Xray status above the footer, and show version in its place. */
+.core-footer>.core-footer-version{grid-column:1;grid-row:1;justify-self:start;display:flex;flex-direction:column;gap:2px}
+.core-footer>.core-footer-version strong{font-size:12px;font-weight:700}
+.core-footer>.core-footer-version small{font-size:11px;color:var(--muted)}
+@media(max-width:760px){.core-footer>.core-footer-version{grid-column:1;grid-row:1;justify-self:start;text-align:left}}
