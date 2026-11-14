@@ -229,6 +229,7 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 	s.mux.HandleFunc("/v1/events/stream", s.eventStream)
 	s.mux.HandleFunc("/v1/l7/settings", s.l7SettingsHandler)
 	s.mux.HandleFunc("/v1/runtime", s.runtime)
+	s.mux.HandleFunc("/v1/system/metrics", s.systemMetrics)
 	s.mux.HandleFunc("/v1/dns", s.dnsConfig)
 	s.mux.HandleFunc("/v1/dns/service", s.dnsService)
 	s.mux.HandleFunc("/v1/dns/check", s.dnsCheck)
