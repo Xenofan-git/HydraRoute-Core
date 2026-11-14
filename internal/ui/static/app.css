@@ -399,3 +399,7 @@ body{min-height:100vh}
 
 /* Successful Speed test latency uses the same green as the running indicator. */
 .connection-card-foot .connection-test-result.good{color:var(--good)}
+
+/* Optical centering of the modal close cross within its square button. */
+.subscription-close{font-size:0}
+.subscription-close::before{content:"×";font-size:24px;line-height:1;display:block;transform:translateY(-2px)}
