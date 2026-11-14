@@ -378,3 +378,9 @@ body{min-height:100vh}
 .core-footer>.mini-status b{font-weight:600}
 .core-footer>.mini-status small{display:block}
 @media(max-width:760px){.core-footer{height:64px;min-height:64px;max-height:64px;padding:0 16px;grid-template-columns:minmax(0,1fr) auto;gap:8px}.core-footer>.mini-status{grid-column:1;grid-row:1;justify-self:start}.core-footer-links{grid-column:2;grid-row:1;justify-self:end}.core-footer-link{padding:6px 9px}}
+/* Prevent the content pane from reserving a second viewport height below the header. */
+.app-shell{min-height:100vh;min-height:100dvh}
+.layout{flex:1 0 auto;min-height:0}
+.main-content{min-height:0}
+@media(max-width:900px){.main-content{min-height:0}}
+@media(max-width:760px){.layout{min-height:0}.main-content{min-height:0}}
