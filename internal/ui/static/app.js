@@ -3,7 +3,7 @@ const state={page:"rules",profiles:[],preview:null,routing:{enabled:false,listen
 let observatoryPollTimer=null;
 let eventStream=null;
 let observatoryPingAbort=null;
-const titles={rules:["ПРАВИЛА","Правила","Порядок обработки трафика · первое совпадение сверху вниз"],network:["СЕТЬ","Сеть","Управление Xray и отдельными прокси-подключениями"],dns:["DNS","DNS","DNS-настройки и текущее состояние"],hydra:["HYDRA","Hydra","Профили, серверные пулы и балансировщики"],settings:["НАСТРОЙКИ","Настройки","Управление Xray, применение конфигурации и журнал"],info:["ИНФОРМАЦИЯ","Инфо","Версия, API и состояние компонентов"],servers:["HYDRA · СЕРВЕРЫ","Выбор серверов","Ручной выбор узлов и исключения для профиля"]};
+const titles={rules:["ПРАВИЛА","Правила","Порядок обработки трафика · первое совпадение сверху вниз"],network:["ПОДКЛЮЧЕНИЯ","Подключения","Управление Xray и отдельными прокси-подключениями"],dns:["DNS","DNS","DNS-настройки и текущее состояние"],hydra:["HYDRA","Hydra","Профили, серверные пулы и балансировщики"],settings:["НАСТРОЙКИ","Настройки","Управление Xray, применение конфигурации и журнал"],info:["ИНФОРМАЦИЯ","Инфо","Версия, API и состояние компонентов"],servers:["HYDRA · СЕРВЕРЫ","Выбор серверов","Ручной выбор узлов и исключения для профиля"]};
 const $=id=>document.getElementById(id);
 function esc(v){return String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function toast(msg,error){const el=$("toast");el.textContent=msg;el.className="toast show"+(error?" error":"");setTimeout(()=>el.className="toast",3200);}
