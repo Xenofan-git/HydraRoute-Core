@@ -335,3 +335,14 @@ button,input,select,textarea{font-size:inherit}
 .system-meter-track i.filled{height:12px;background:#439df0;border-radius:1px}
 @media(max-width:900px){.system-meters{margin-right:3px}.system-meter{grid-template-columns:27px 78px minmax(40px,auto);font-size:10px;gap:4px}.system-meter-track{gap:1px}.system-meter-track i{height:4px}.system-meter-track i.filled{height:9px}}
 @media(max-width:600px){.system-meters{display:none}}
+
+/* Shared HRNeo-inspired bottom strip on every Core tab. */
+.core-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;min-height:72px;margin-top:22px;padding:14px 2px 8px;letter-spacing:normal;font-size:12px}
+.core-footer-version{display:flex;flex-direction:column;gap:2px;color:var(--text)}
+.core-footer-version strong{font-size:12px;font-weight:700}.core-footer-version small{font-size:11px;color:var(--muted)}
+.core-footer-links{display:flex;align-items:center;gap:9px}
+.core-footer-link{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px;padding:7px 14px;border:1px solid var(--line);border-radius:18px;background:var(--surface2);color:var(--text);font-size:12px;font-weight:600;line-height:1.2;text-decoration:none;letter-spacing:normal;transition:background .15s,border-color .15s}
+.core-footer-link:hover:not(:disabled){background:var(--surface3);border-color:var(--accent)}
+.core-footer-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.core-footer-link:disabled{opacity:.52;cursor:not-allowed}
+@media(max-width:650px){.core-footer{gap:12px;padding-top:12px}.core-footer-links{gap:6px}.core-footer-link{padding:7px 10px}}
