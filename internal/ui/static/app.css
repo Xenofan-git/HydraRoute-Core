@@ -434,3 +434,9 @@ body{min-height:100vh}
 .rules-help-foot{margin:6px 0 0;padding-top:12px;border-top:1px solid var(--line);color:var(--muted)}
 .rules-tool-btn.is-active{border-color:var(--accent);color:var(--accent)}
 @media(max-width:760px){.rules-help-grid{grid-template-columns:1fr;gap:4px}.rules-help-panel{padding:14px}}
+
+/* HRNeo-like readable toolbar labels and its circular information icon. */
+.rules-toolbar .rules-tool-btn{font-family:Arial,"Segoe UI",sans-serif!important;font-size:14px;font-weight:600;font-style:normal;letter-spacing:0;line-height:1.25;text-transform:none}
+.rules-toolbar .rules-main-action{font-family:Arial,"Segoe UI",sans-serif!important;font-size:14px;font-weight:600;font-style:normal;letter-spacing:0;line-height:1.25}
+#rulesHelp{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.rules-help-icon{flex:none;display:block}
