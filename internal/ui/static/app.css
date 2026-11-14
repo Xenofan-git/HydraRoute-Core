@@ -396,3 +396,6 @@ body{min-height:100vh}
 /* Vertically center Speed test in the band between the divider and card bottom. */
 .connection-card-foot{min-height:70px;box-sizing:border-box;align-items:center}
 .connection-card-foot [data-profile-test]{align-self:center}
+
+/* Successful Speed test latency uses the same green as the running indicator. */
+.connection-card-foot .connection-test-result.good{color:var(--good)}
