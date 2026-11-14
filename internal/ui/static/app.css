@@ -392,3 +392,7 @@ body{min-height:100vh}
 @media(max-width:760px){.core-footer>.core-footer-version{grid-column:1;grid-row:1;justify-self:start;text-align:left}}
 
 @media(min-width:761px){.core-footer>.core-footer-version{margin-left:24px}}
+
+/* Vertically center Speed test in the band between the divider and card bottom. */
+.connection-card-foot{min-height:70px;box-sizing:border-box;align-items:center}
+.connection-card-foot [data-profile-test]{align-self:center}
