@@ -414,3 +414,9 @@ body{min-height:100vh}
 /* Center the current-server label vertically between protocol badges and divider. */
 .connection-selected{display:flex;align-items:center;min-height:34px;margin-top:9px}
 .connection-card-foot{margin-top:8px}
+
+/* HRNeo dashboard empty state, without Keenetic DirectRoute. */
+.rules-empty-neo{min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;color:var(--muted);padding:35px 20px}
+.rules-empty-neo svg{color:var(--accent);opacity:.75}
+.rules-empty-neo strong{font-size:18px;font-weight:600;color:var(--text)}
+.rules-empty-neo span{font-size:13px;line-height:1.65}
