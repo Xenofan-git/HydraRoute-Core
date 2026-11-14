@@ -420,3 +420,5 @@ body{min-height:100vh}
 .rules-empty-neo svg{color:var(--accent);opacity:.75}
 .rules-empty-neo strong{font-size:18px;font-weight:600;color:var(--text)}
 .rules-empty-neo span{font-size:13px;line-height:1.65}
+
+.rule-trash-icon{display:inline-block;vertical-align:-3px;flex:none}
