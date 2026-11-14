@@ -346,3 +346,9 @@ button,input,select,textarea{font-size:inherit}
 .core-footer-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .core-footer-link:disabled{opacity:.52;cursor:not-allowed}
 @media(max-width:650px){.core-footer{gap:12px;padding-top:12px}.core-footer-links{gap:6px}.core-footer-link{padding:7px 10px}}
+
+/* Anchor the shared footer to the viewport bottom on short pages, as in HRNeo. */
+.main-content{display:flex;flex-direction:column;min-height:calc(100vh - 76px)}
+.main-content>.core-footer{margin-top:auto;padding-top:16px}
+.main-content:has(.network-footer-note)>.core-footer{margin-top:auto}
+@media(max-width:900px){.main-content{min-height:calc(100vh - 64px)}}
