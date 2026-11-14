@@ -411,3 +411,6 @@ body{min-height:100vh}
 /* Give the current-server label more breathing room by lowering its divider,
    taking the space from the Speed test band rather than growing the card. */
 .connection-card-foot{margin-top:21px;min-height:58px}
+/* Center the current-server label vertically between protocol badges and divider. */
+.connection-selected{display:flex;align-items:center;min-height:34px;margin-top:9px}
+.connection-card-foot{margin-top:8px}
