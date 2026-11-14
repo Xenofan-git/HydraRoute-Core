@@ -391,4 +391,4 @@ body{min-height:100vh}
 .core-footer>.core-footer-version small{font-size:11px;color:var(--muted)}
 @media(max-width:760px){.core-footer>.core-footer-version{grid-column:1;grid-row:1;justify-self:start;text-align:left}}
 
-@media(min-width:761px){.core-footer>.core-footer-version{margin-left:6px}}
+@media(min-width:761px){.core-footer>.core-footer-version{margin-left:24px}}
