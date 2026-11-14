@@ -369,3 +369,12 @@ body{min-height:100vh}
 .core-footer-link{background:#302346;border-color:#7154a0;color:#f2eaff}
 .core-footer-link:hover:not(:disabled){background:#493165;border-color:#b397ed}
 @media(max-width:650px){.core-footer{grid-template-columns:1fr;justify-items:center;gap:8px;padding:12px 10px}.core-footer-runtime{grid-column:1;grid-row:1;justify-self:center}.core-footer-links{grid-column:1;grid-row:2}}
+
+/* Header-height footer; existing Xray status is moved here, not duplicated. */
+.app-shell{display:flex;flex-direction:column;min-height:100vh}
+.layout{flex:1;min-height:0}
+.core-footer{height:76px;min-height:76px;max-height:76px;flex-shrink:0;background:var(--surface);border-top:1px solid var(--line);padding:0 30px}
+.core-footer>.mini-status{grid-column:1;grid-row:1;justify-self:start;margin:0;display:flex;align-items:center;gap:9px;min-width:0}
+.core-footer>.mini-status b{font-weight:600}
+.core-footer>.mini-status small{display:block}
+@media(max-width:760px){.core-footer{height:64px;min-height:64px;max-height:64px;padding:0 16px;grid-template-columns:minmax(0,1fr) auto;gap:8px}.core-footer>.mini-status{grid-column:1;grid-row:1;justify-self:start}.core-footer-links{grid-column:2;grid-row:1;justify-self:end}.core-footer-link{padding:6px 9px}}
