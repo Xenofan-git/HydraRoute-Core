@@ -331,8 +331,8 @@ button,input,select,textarea{font-size:inherit}
 .system-meter{display:grid;grid-template-columns:36px 150px minmax(56px,auto);align-items:center;gap:7px;color:var(--text)}
 .system-meter>span{text-align:right;font-weight:600}.system-meter>strong{font-weight:500}
 .system-meter-track{height:13px;display:flex;gap:2px;align-items:end;overflow:hidden}
-.system-meter-track i{flex:1;height:5px;border-bottom:1px solid #409ce9}
-.system-meter-track i.filled{height:12px;background:#439df0;border-radius:1px}
+.system-meter-track i{flex:1;height:5px;border-bottom:1px solid #9d7bd8}
+.system-meter-track i.filled{height:12px;background:#a78bfa;border-radius:1px}
 @media(max-width:900px){.system-meters{margin-right:3px}.system-meter{grid-template-columns:27px 78px minmax(40px,auto);font-size:10px;gap:4px}.system-meter-track{gap:1px}.system-meter-track i{height:4px}.system-meter-track i.filled{height:9px}}
 @media(max-width:600px){.system-meters{display:none}}
 
