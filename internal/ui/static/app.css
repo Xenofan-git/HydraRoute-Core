@@ -524,3 +524,5 @@ body{min-height:100vh}
 .dns-add-modal .dns-modal-protocol button[data-protocol="DOH"].selected{color:#bc9aff;border-color:rgba(188,154,255,.42);background:rgba(139,92,246,.10);box-shadow:none}
 .dns-add-modal .dns-modal-protocol button[data-protocol="DOT"].selected{color:#78d7a2;border-color:rgba(120,215,162,.42);background:rgba(55,150,100,.10);box-shadow:none}
 .dns-add-modal .dns-modal-protocol button[data-protocol="DO53"].selected{color:#f5f5fa;border-color:rgba(245,245,250,.35);background:rgba(245,245,250,.07);box-shadow:none}
+/* Equalize space above the + Server button and below it in DNS General. */
+.dns-core-section #dnsAddServer{margin-top:14px}
