@@ -458,3 +458,11 @@ body{min-height:100vh}
 @media(max-width:760px){.dns-core-section>summary{min-height:72px;padding:14px;font-size:15px}}
 
 .dns-host-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* HRNeo protocol pills: clear distinct DNS transport badges. */
+.dns-upstream-address{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:6px}
+.dns-protocol-badge{display:inline-flex;align-items:center;justify-content:center;flex:none;border-radius:999px;padding:3px 11px;font-family:'HRNeo Onest',system-ui,sans-serif;font-size:12px;font-weight:700;line-height:1.5;letter-spacing:.01em}
+.dns-protocol-doh{color:#79d8ff;background:rgba(0,151,221,.24);border:1px solid rgba(44,180,246,.28)}
+.dns-protocol-dot{color:#c8b0ff;background:rgba(145,93,231,.24);border:1px solid rgba(174,124,251,.28)}
+.dns-protocol-do53{color:#8ce6b5;background:rgba(30,167,111,.20);border:1px solid rgba(60,194,134,.28)}
+.dns-protocol-other{color:var(--muted);background:var(--surface3);border:1px solid var(--line)}
