@@ -482,3 +482,14 @@ body{min-height:100vh}
 .dns-modal-preset[hidden],.dns-modal-manual[hidden]{display:none}
 .dns-add-modal small{color:var(--muted)}
 .dns-modal-footer{display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:16px;margin-top:10px}
+
+/* Scrollable provider catalog in DNS add dialog, matching original HRNeo layout. */
+.dns-preset-toggle{width:100%;display:flex;justify-content:space-between;align-items:center;padding:13px 15px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);font:600 14px 'HRNeo Onest',system-ui;cursor:pointer;text-align:left}
+.dns-preset-toggle[aria-expanded=true]{border-color:#19baff;box-shadow:0 0 0 2px rgba(25,186,255,.18)}
+.dns-preset-menu{max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:5px}
+.dns-preset-menu[hidden]{display:none}
+.dns-preset-menu-heading{display:flex;justify-content:space-between;color:var(--muted);padding:8px 12px;border-bottom:1px solid var(--line);font-weight:600}
+.dns-preset-menu-heading span{color:#6fd6ff}
+.dns-preset-option{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:6px;background:transparent;color:var(--text);font:500 14px 'HRNeo Onest',system-ui;cursor:pointer;text-align:left}
+.dns-preset-option:hover{background:rgba(120,120,190,.2)}
+.dns-preset-types{display:flex;gap:7px;flex:none}
