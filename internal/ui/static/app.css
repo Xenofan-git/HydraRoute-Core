@@ -544,3 +544,15 @@ body{min-height:100vh}
 .dns-enabled-track::after{width:12px;height:12px;margin:2px}
 .dns-enabled-switch input:checked+.dns-enabled-track{background:rgba(43,180,109,.82);border-color:#55cf89}
 .dns-enabled-switch input:checked+.dns-enabled-track::after{transform:translateX(14px)}
+
+/* HRNeo-style DNS service overview, backed by the existing Core data. */
+.dns-service-section{padding:16px 20px}
+.dns-service-section>summary{cursor:pointer;font-weight:650;font-size:16px;list-style:revert;margin-bottom:14px}
+.dns-service-upstreams{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.dns-service-upstream{min-width:220px;max-width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface2);padding:11px 13px;overflow-wrap:anywhere}
+.dns-service-upstream>b{display:block;font-size:13px;margin-bottom:6px}
+.dns-service-upstream>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px}
+.dns-service-rules{display:grid;gap:12px}
+.dns-service-rule{padding:12px 14px;border:1px solid var(--line);border-radius:11px}
+.dns-service-rule-heading{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.dns-service-rule>small{display:block;line-height:1.5}
