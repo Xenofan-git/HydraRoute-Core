@@ -468,3 +468,17 @@ body{min-height:100vh}
 .dns-protocol-other{color:var(--muted);background:var(--surface3);border:1px solid var(--line)}
 /* DNS transport names: colored text only, no pill frame or fill. */
 .dns-protocol-badge{background:transparent!important;border:0!important;border-radius:0;padding:0;box-shadow:none}
+
+/* HRNeo-inspired DNS server picker. */
+.dns-modal-overlay{position:fixed;inset:0;z-index:10000;background:rgba(4,7,20,.78);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+.dns-add-modal{display:grid;gap:12px;width:min(560px,100%);max-height:90vh;overflow:auto;background:var(--surface2);border:1px solid var(--line);border-radius:18px;padding:26px;color:var(--text);box-shadow:0 18px 60px rgba(0,0,0,.4)}
+.dns-add-modal h2{font:700 21px 'HRNeo Onest',system-ui;margin:0 0 8px}
+.dns-add-modal label{font-weight:650;font-size:14px}
+.dns-add-modal input,.dns-add-modal select{width:100%;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:9px;color:var(--text);font:inherit}
+.dns-modal-choices{display:flex;gap:9px;flex-wrap:wrap}
+.dns-modal-choices button{background:var(--surface);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:10px 17px;font:600 14px 'HRNeo Onest',system-ui;cursor:pointer}
+.dns-modal-choices button.selected{border-color:#21b5ff;background:rgba(0,153,230,.18);color:#8bdfff}
+.dns-modal-preset,.dns-modal-manual{display:grid;gap:10px}
+.dns-modal-preset[hidden],.dns-modal-manual[hidden]{display:none}
+.dns-add-modal small{color:var(--muted)}
+.dns-modal-footer{display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line);padding-top:16px;margin-top:10px}
