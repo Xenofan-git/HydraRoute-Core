@@ -45,12 +45,13 @@ type Rule struct {
 	Action string `json:"action"`
 }
 type DomainGroup struct {
- Name string `json:"name"`
- Domains []string `json:"domains"`
- Source string `json:"source,omitempty"`
+	Name    string   `json:"name"`
+	Domains []string `json:"domains"`
+	Source  string   `json:"source,omitempty"`
+	Servers []string `json:"servers,omitempty"`
 }
 type Config struct {
- DomainGroups []DomainGroup `json:"domain_groups,omitempty"`
+	DomainGroups      []DomainGroup       `json:"domain_groups,omitempty"`
 	RuleDNS           map[string][]string `json:"rule_dns,omitempty"`
 	StatisticsEnabled bool                `json:"statistics_enabled"`
 	Enabled           bool                `json:"enabled"`
@@ -163,6 +164,28 @@ func (m *Manager) Save(c Config) error {
 			u, err := url.Parse(s.Address)
 			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
 				return fmt.Errorf("DNS server %q must use a valid HTTPS DoH URL", s.Name)
+			}
+		}
+	}
+	for _, group := range c.DomainGroups {
+		if strings.TrimSpace(group.Name) == "" {
+			return fmt.Errorf("DNS domain group must have a name")
+		}
+		for _, domain := range group.Domains {
+			if strings.TrimSpace(domain) == "" {
+				return fmt.Errorf("DNS domain group %q has an empty entry", group.Name)
+			}
+		}
+		for _, name := range group.Servers {
+			found := false
+			for _, server := range c.Servers {
+				if server.Name == name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("unknown DNS server %q in group %q", name, group.Name)
 			}
 		}
 	}
@@ -664,6 +687,50 @@ func (m *Manager) ruleUpstreams(req *mdns.Msg, c Config) ([]Server, bool) {
 	}
 	return nil, false
 }
+
+// domainGroupUpstreams chooses the first matching configured group with explicit
+// upstreams. Unassigned groups do not alter default DNS routing.
+func domainGroupUpstreams(req *mdns.Msg, c Config) ([]Server, bool) {
+	if len(req.Question) == 0 {
+		return nil, false
+	}
+	host := strings.TrimSuffix(strings.ToLower(req.Question[0].Name), ".")
+	for _, group := range c.DomainGroups {
+		if len(group.Servers) == 0 {
+			continue
+		}
+		matched := false
+		for _, raw := range group.Domains {
+			domain := strings.ToLower(strings.TrimSpace(raw))
+			exact := strings.HasPrefix(domain, "full:")
+			domain = strings.TrimPrefix(strings.TrimPrefix(domain, "full:"), "domain:")
+			domain = strings.TrimPrefix(domain, "*.")
+			domain = strings.TrimSuffix(domain, ".")
+			if domain == "" || strings.ContainsAny(domain, "/: ") {
+				continue
+			}
+			if host == domain || (!exact && strings.HasSuffix(host, "."+domain)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		candidates := make([]Server, 0, len(group.Servers))
+		for _, name := range group.Servers {
+			for _, server := range c.Servers {
+				if server.Name == name && server.Enabled {
+					candidates = append(candidates, server)
+					break
+				}
+			}
+		}
+		return candidates, true
+	}
+	return nil, false
+}
+
 func (m *Manager) forward(req, resp *mdns.Msg) error {
 	m.mu.RLock()
 	smartDNSForwardAddr := m.smartDNSForwardAddr
@@ -686,6 +753,21 @@ func (m *Manager) forward(req, resp *mdns.Msg) error {
 			}
 		}
 		return fmt.Errorf("rule DNS upstreams failed: %w", last)
+	}
+	groupCandidates, matchedGroup := domainGroupUpstreams(req, c)
+	if matchedGroup {
+		if len(groupCandidates) == 0 {
+			return fmt.Errorf("no enabled DNS upstream for matched domain group")
+		}
+		var last error
+		for _, server := range groupCandidates {
+			if err := m.exchange(req, resp, server); err == nil {
+				return nil
+			} else {
+				last = err
+			}
+		}
+		return fmt.Errorf("domain group DNS upstreams failed: %w", last)
 	}
 	var candidates []Server
 	if c.AutoProvider {
