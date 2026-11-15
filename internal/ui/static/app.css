@@ -493,3 +493,9 @@ body{min-height:100vh}
 .dns-preset-option{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:10px 12px;border:0;border-radius:6px;background:transparent;color:var(--text);font:500 14px 'HRNeo Onest',system-ui;cursor:pointer;text-align:left}
 .dns-preset-option:hover{background:rgba(120,120,190,.2)}
 .dns-preset-types{display:flex;gap:7px;flex:none}
+/* Core Midnight + Violet: replace HRNeo blue selection accents in DNS dialog. */
+.dns-add-modal .dns-modal-choices button.selected{border-color:#a47bff;background:rgba(139,92,246,.24);color:#e3d5ff;box-shadow:0 0 0 1px rgba(164,123,255,.25)}
+.dns-add-modal .dns-preset-toggle[aria-expanded=true]{border-color:#a47bff;box-shadow:0 0 0 2px rgba(139,92,246,.22)}
+.dns-add-modal .dns-preset-menu-heading span{color:#c7a9ff}
+.dns-add-modal .dns-preset-option:hover,.dns-add-modal .dns-preset-option:focus-visible{background:rgba(139,92,246,.20)}
+.dns-add-modal input:focus,.dns-add-modal select:focus{outline:2px solid rgba(164,123,255,.65);outline-offset:1px;border-color:#a47bff}
