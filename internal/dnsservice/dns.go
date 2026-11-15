@@ -44,7 +44,13 @@ type Rule struct {
 	Domain string `json:"domain"`
 	Action string `json:"action"`
 }
+type DomainGroup struct {
+ Name string `json:"name"`
+ Domains []string `json:"domains"`
+ Source string `json:"source,omitempty"`
+}
 type Config struct {
+ DomainGroups []DomainGroup `json:"domain_groups,omitempty"`
 	RuleDNS           map[string][]string `json:"rule_dns,omitempty"`
 	StatisticsEnabled bool                `json:"statistics_enabled"`
 	Enabled           bool                `json:"enabled"`

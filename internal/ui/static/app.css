@@ -559,3 +559,9 @@ body{min-height:100vh}
 
 .dns-rule-upstream{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--surface2);font-size:12px;cursor:pointer}
 .dns-rule-upstream input{accent-color:#38b97b;width:15px;height:15px}
+/* DNS domain-group editor: independent overlay, never expands the DNS page. */
+.dns-domain-overlay{position:fixed;inset:0;background:rgba(3,5,17,.78);z-index:9999;display:flex;align-items:center;justify-content:center;padding:22px}
+.dns-domain-dialog{background:var(--panel,#1c2035);border:1px solid var(--line);border-radius:18px;padding:25px;width:min(760px,96vw);max-height:90vh;overflow:auto;box-shadow:0 18px 70px #0008}
+.dns-domain-dialog h2{margin:0 0 18px;font-size:21px}.dns-domain-dialog label{display:block;font-weight:600}.dns-domain-dialog input,.dns-domain-dialog textarea{display:block;width:100%;margin:9px 0 17px;padding:12px;background:var(--input-bg,#10182a);color:var(--text,#fff);border:1px solid var(--line);border-radius:9px;box-sizing:border-box}
+.dns-domain-toolbar{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:15px}.dns-domain-toolbar button,.dns-domain-footer button{padding:9px 13px;border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--text,#fff);cursor:pointer}.dns-domain-toolbar button.selected{border-color:#9b72e2;background:#7c4bc52a}
+.dns-domain-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:15px}.dns-domain-group{display:flex;gap:12px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:9px;margin-bottom:9px}.dns-domain-group small{color:var(--muted);margin-right:auto}
