@@ -444,3 +444,15 @@ body{min-height:100vh}
 @font-face{font-family:'HRNeo Onest';src:url('/fonts/Onest-cyrillic.woff2') format('woff2');font-weight:400 700;font-style:normal;font-display:swap;unicode-range:U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116}
 @font-face{font-family:'HRNeo Onest';src:url('/fonts/Onest-latin.woff2') format('woff2');font-weight:400 700;font-style:normal;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 .rules-toolbar .rules-tool-btn,.rules-toolbar .rules-main-action{font-family:'HRNeo Onest',system-ui,sans-serif!important;font-size:14px;font-weight:600;line-height:1.2;letter-spacing:0}
+
+/* Original HRNeo DNS/General: three full-width collapsible rows. */
+.dns-core-accordion{gap:14px}
+.dns-core-section{border:1px solid var(--line);border-radius:17px;background:var(--surface2);overflow:hidden}
+.dns-core-section>summary{display:flex;align-items:center;gap:10px;min-height:86px;padding:18px 24px;cursor:pointer;list-style:none;font-family:'HRNeo Onest',system-ui,sans-serif;font-size:18px;font-weight:600;color:var(--text)}
+.dns-core-section>summary::-webkit-details-marker{display:none}
+.dns-core-section>summary::before{content:'';width:10px;height:10px;flex:none;border-right:3px solid var(--accent);border-top:3px solid var(--accent);transform:rotate(45deg);transition:transform .15s;margin-right:6px}
+.dns-core-section[open]>summary::before{transform:rotate(135deg)}
+.dns-core-section>summary:hover{background:var(--surface3)}
+.dns-core-info{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--accent);color:var(--surface);font:700 12px system-ui;cursor:help}
+.dns-core-section>.dns-panel{margin:0 12px 12px;border-radius:11px}
+@media(max-width:760px){.dns-core-section>summary{min-height:72px;padding:14px;font-size:15px}}
