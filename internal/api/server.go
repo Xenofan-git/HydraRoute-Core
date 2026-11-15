@@ -152,6 +152,9 @@ func NewWithOptions(supervisor *hrruntime.Supervisor, stateDir string, opts Opti
 		s.profileStore = profiles.NewStore(filepath.Join(stateDir, "profiles"))
 		s.routingStore = routeconfig.NewStore(stateDir)
 		s.dns = dnsservice.New(filepath.Join(stateDir, "dns", "config.json"))
+		if routing, found, err := s.routingStore.Load(); err == nil && found {
+			s.dns.SetRoutingRules(routing.Rules)
+		}
 		s.smartDNSConfig = hrsmartdns.DefaultConfig()
 		s.smartDNSConfigPath = filepath.Join(stateDir, "dns", "smartdns", "config.json")
 		if runtime, err := hrsmartdns.NewRuntime(hrsmartdns.RuntimeConfig{
@@ -1142,6 +1145,9 @@ func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				s.syncWatchlist()
+				if s.dns != nil {
+					s.dns.SetRoutingRules(cfg.Rules)
+				}
 				writeJSON(w, http.StatusOK, map[string]any{"routing": cfg, "status": "saved"})
 				return
 			}
@@ -1166,6 +1172,9 @@ func (s *Server) routingConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
+		}
+		if s.dns != nil {
+			s.dns.SetRoutingRules(cfg.Rules)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"routing": cfg, "apply": result})
 	default:

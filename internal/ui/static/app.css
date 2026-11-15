@@ -556,3 +556,6 @@ body{min-height:100vh}
 .dns-service-rule{padding:12px 14px;border:1px solid var(--line);border-radius:11px}
 .dns-service-rule-heading{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .dns-service-rule>small{display:block;line-height:1.5}
+
+.dns-rule-upstream{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--surface2);font-size:12px;cursor:pointer}
+.dns-rule-upstream input{accent-color:#38b97b;width:15px;height:15px}

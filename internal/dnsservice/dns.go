@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	mdns "github.com/miekg/dns"
+	"hydraroute.local/core/internal/compiler"
 	"io"
 	"net"
 	"net/http"
@@ -82,6 +83,7 @@ type Manager struct {
 	blocklistBlocked                                map[string]struct{}
 	blocklistAllowed                                map[string]struct{}
 	smartDNSForwardAddr                             string
+	routingRules                                    []compiler.RoutingRule
 	client                                          *http.Client
 }
 
@@ -155,6 +157,20 @@ func (m *Manager) Save(c Config) error {
 			u, err := url.Parse(s.Address)
 			if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
 				return fmt.Errorf("DNS server %q must use a valid HTTPS DoH URL", s.Name)
+			}
+		}
+	}
+	for _, names := range c.RuleDNS {
+		for _, name := range names {
+			found := false
+			for _, server := range c.Servers {
+				if server.Name == name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("unknown rule DNS server %q", name)
 			}
 		}
 	}
@@ -579,6 +595,69 @@ func (m *Manager) SetSmartDNSForwarder(address string) error {
 	return nil
 }
 
+// SetRoutingRules synchronizes the DNS matcher with the saved routing order.
+func (m *Manager) SetRoutingRules(rules []compiler.RoutingRule) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.routingRules = append([]compiler.RoutingRule(nil), rules...)
+}
+func dnsRuleMatches(host string, rule compiler.RoutingRule) bool {
+	if !rule.Enabled || rule.MatchType != "domain" {
+		return false
+	}
+	for _, raw := range rule.Values {
+		raw = strings.ToLower(strings.TrimSpace(raw))
+		if strings.HasPrefix(raw, "domain:") {
+			raw = strings.TrimPrefix(raw, "domain:")
+			if host == raw || strings.HasSuffix(host, "."+raw) {
+				return true
+			}
+		}
+		if strings.HasPrefix(raw, "full:") {
+			if host == strings.TrimPrefix(raw, "full:") {
+				return true
+			}
+		}
+		if strings.HasPrefix(raw, "keyword:") {
+			if strings.Contains(host, strings.TrimPrefix(raw, "keyword:")) {
+				return true
+			}
+		}
+		if !strings.Contains(raw, ":") && (host == raw || strings.HasSuffix(host, "."+raw)) {
+			return true
+		}
+	}
+	return false
+}
+func (m *Manager) ruleUpstreams(req *mdns.Msg, c Config) ([]Server, bool) {
+	if len(req.Question) == 0 {
+		return nil, false
+	}
+	host := strings.TrimSuffix(strings.ToLower(req.Question[0].Name), ".")
+	m.mu.RLock()
+	rules := append([]compiler.RoutingRule(nil), m.routingRules...)
+	m.mu.RUnlock()
+	for _, rule := range rules {
+		if !dnsRuleMatches(host, rule) {
+			continue
+		}
+		names, exists := c.RuleDNS[rule.ID]
+		if !exists || len(names) == 0 {
+			return nil, false
+		}
+		candidates := make([]Server, 0, len(names))
+		for _, name := range names {
+			for _, server := range c.Servers {
+				if server.Enabled && server.Name == name {
+					candidates = append(candidates, server)
+					break
+				}
+			}
+		}
+		return candidates, true
+	}
+	return nil, false
+}
 func (m *Manager) forward(req, resp *mdns.Msg) error {
 	m.mu.RLock()
 	smartDNSForwardAddr := m.smartDNSForwardAddr
@@ -587,6 +666,21 @@ func (m *Manager) forward(req, resp *mdns.Msg) error {
 		return m.exchange(req, resp, Server{Name: "HydraRoute SmartDNS", Protocol: "Do53", Address: smartDNSForwardAddr, Enabled: true})
 	}
 	c := m.Config()
+	ruleCandidates, matchedRule := m.ruleUpstreams(req, c)
+	if matchedRule {
+		if len(ruleCandidates) == 0 {
+			return fmt.Errorf("no enabled DNS upstream for matched routing rule")
+		}
+		var last error
+		for _, server := range ruleCandidates {
+			if err := m.exchange(req, resp, server); err == nil {
+				return nil
+			} else {
+				last = err
+			}
+		}
+		return fmt.Errorf("rule DNS upstreams failed: %w", last)
+	}
 	var candidates []Server
 	if c.AutoProvider {
 		for _, ip := range DetectProviderDNS() {
