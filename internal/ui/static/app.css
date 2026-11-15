@@ -536,3 +536,6 @@ body{min-height:100vh}
 .dns-enabled-switch input:checked+.dns-enabled-track{background:rgba(139,92,246,.75);border-color:#a98aff}
 .dns-enabled-switch input:checked+.dns-enabled-track::after{transform:translateX(18px)}
 .dns-enabled-switch input:focus-visible+.dns-enabled-track{outline:2px solid #c3a6ff;outline-offset:3px}
+
+/* DNS preset catalog floats above subsequent form fields without resizing the dialog. */
+.dns-modal-overlay>.dns-preset-menu{position:fixed;z-index:10002;box-shadow:0 16px 42px rgba(0,0,0,.45);overscroll-behavior:contain}

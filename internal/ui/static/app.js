@@ -250,7 +250,11 @@ async function dnsEditServer(index){
  function refresh(){layer.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('selected',b.dataset.mode===mode));layer.querySelectorAll('[data-protocol]').forEach(b=>b.classList.toggle('selected',b.dataset.protocol===protocol));layer.querySelector('.dns-modal-preset').hidden=mode!=='list';layer.querySelectorAll('.dns-modal-manual').forEach(el=>el.hidden=mode!=='manual');}
  if(old){$m('dnsModalName').value=old.name||'';$m('dnsModalAddress').value=old.address||'';}
  layer.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;refresh();});layer.querySelectorAll('[data-protocol]').forEach(b=>b.onclick=()=>{const p=presets[Number($m('dnsModalPreset').value)];if(mode==='list'&&$m('dnsModalPreset').value!==''&&p&&!p.types[b.dataset.protocol]){toast('Этот тип недоступен для выбранного сервера',true);return;}protocol=b.dataset.protocol;refresh();});
- const menu=$m('dnsPresetMenu'),toggle=$m('dnsPresetToggle');$m('dnsPresetSearch').oninput=e=>{const q=e.target.value.trim().toLowerCase();layer.querySelectorAll('[data-dns-preset]').forEach(b=>{b.hidden=!presets[Number(b.dataset.dnsPreset)].name.toLowerCase().includes(q);});};toggle.onclick=()=>{menu.hidden=!menu.hidden;toggle.setAttribute('aria-expanded',String(!menu.hidden));};
+ const layerAbort=new AbortController();const menu=$m('dnsPresetMenu'),toggle=$m('dnsPresetToggle');$m('dnsPresetSearch').oninput=e=>{const q=e.target.value.trim().toLowerCase();layer.querySelectorAll('[data-dns-preset]').forEach(b=>{b.hidden=!presets[Number(b.dataset.dnsPreset)].name.toLowerCase().includes(q);});};// Portal the catalog into the overlay so opening it never increases form height.
+ layer.appendChild(menu);
+ function positionPresetMenu(){const r=toggle.getBoundingClientRect();menu.style.left=r.left+'px';menu.style.width=r.width+'px';menu.style.top=Math.min(r.bottom+5,window.innerHeight-110)+'px';menu.style.maxHeight=Math.max(100,Math.min(320,window.innerHeight-r.bottom-18))+'px';}
+ toggle.onclick=()=>{menu.hidden=!menu.hidden;toggle.setAttribute('aria-expanded',String(!menu.hidden));if(!menu.hidden)positionPresetMenu();};
+ window.addEventListener('resize',()=>{if(!menu.hidden)positionPresetMenu();},{signal:layerAbort.signal});
  layer.querySelectorAll('[data-dns-preset]').forEach(b=>b.onclick=()=>{const i=Number(b.dataset.dnsPreset),p=presets[i];$m('dnsModalPreset').value=String(i);toggle.firstChild.textContent=p.name+' ';menu.hidden=true;toggle.setAttribute('aria-expanded','false');if(!p.types[protocol])protocol=Object.keys(p.types)[0];refresh();});
  let selectedInterface=old?.interface||'',availableInterfaces=[],ifaceCategory='VPN';
  const ifaceToggle=$m('dnsInterfaceToggle'),ifacePicker=$m('dnsInterfacePicker'),ifaceSearch=$m('dnsInterfaceSearch');
@@ -264,7 +268,7 @@ async function dnsEditServer(index){
  }
  ifaceToggle.onclick=()=>{ifacePicker.hidden=!ifacePicker.hidden;ifaceToggle.setAttribute('aria-expanded',String(!ifacePicker.hidden));};ifaceSearch.oninput=renderIfacePicker;
  renderIfacePicker();api('/v1/interfaces').then(data=>{availableInterfaces=data.interfaces||[];renderIfacePicker();}).catch(err=>{$m('dnsInterfaceList').textContent='Не удалось загрузить интерфейсы: '+err.message;});
- layer.querySelector('[data-close]').onclick=()=>layer.remove();layer.addEventListener('click',e=>{if(e.target===layer)layer.remove();});
+ layer.querySelector('[data-close]').onclick=()=>{layerAbort.abort();layer.remove();};layer.addEventListener('click',e=>{if(e.target===layer){layerAbort.abort();layer.remove();}});
  layer.querySelector('form').onsubmit=async e=>{e.preventDefault();const preset=mode==='list'?presets[Number($m('dnsModalPreset').value)]:null;if(mode==='list'&&$m('dnsModalPreset').value===''){toast('Выберите DNS-сервер',true);return;}const name=mode==='list'?preset.name:$m('dnsModalName').value.trim();const address=mode==='list'?preset.types[protocol]:$m('dnsModalAddress').value.trim();if(!name||!address){toast('Укажите название и адрес',true);return;}const item={...(old||{}),name,protocol,address,interface:selectedInterface,enabled:old?old.enabled!==false:true};if(old)state.dns.servers[index]=item;else state.dns.servers.push(item);layer.remove();await saveDNS();};
  refresh();
 }
