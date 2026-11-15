@@ -85,7 +85,7 @@ type Manager struct {
 }
 
 func DefaultConfig() Config {
-	return Config{Listen: "127.0.0.1", Port: 5353, AutoProvider: true, Servers: []Server{{Name: "Yandex DNS · Basic", Protocol: "DoH", Address: "https://common.dot.dns.yandex.net/dns-query", Enabled: true}, {Name: "AdGuard DNS · Default", Protocol: "DoH", Address: "https://dns.adguard-dns.com/dns-query", Enabled: true}, {Name: "Cloudflare · 1.1.1.1", Protocol: "DoH", Address: "https://cloudflare-dns.com/dns-query", Enabled: true}, {Name: "Quad9 · Standard", Protocol: "DoH", Address: "https://dns.quad9.net/dns-query", Enabled: true}}}
+	return Config{Listen: "127.0.0.1", Port: 5353, AutoProvider: true, Hosts: []Host{{Domain: "awgm-dnscheck.test", Address: "192.168.1.1"}}, Servers: []Server{{Name: "Yandex DNS · Basic", Protocol: "DoH", Address: "https://common.dot.dns.yandex.net/dns-query", Enabled: true}, {Name: "AdGuard DNS · Default", Protocol: "DoH", Address: "https://dns.adguard-dns.com/dns-query", Enabled: true}, {Name: "Cloudflare · 1.1.1.1", Protocol: "DoH", Address: "https://cloudflare-dns.com/dns-query", Enabled: true}, {Name: "Quad9 · Standard", Protocol: "DoH", Address: "https://dns.quad9.net/dns-query", Enabled: true}}}
 }
 func New(path string) *Manager {
 	m := &Manager{path: path, client: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {

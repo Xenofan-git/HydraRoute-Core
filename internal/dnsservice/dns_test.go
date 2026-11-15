@@ -20,6 +20,16 @@ func TestDefaultConfigUsesSafeLoopbackAndKnownResolvers(t *testing.T) {
 		t.Fatalf("automatic provider discovery or resolver presets missing: %+v", c)
 	}
 }
+func TestDefaultConfigHasEditableOriginalHost(t *testing.T) {
+ c := DefaultConfig()
+ if len(c.Hosts) != 1 || c.Hosts[0].Domain != "awgm-dnscheck.test" || c.Hosts[0].Address != "192.168.1.1" { t.Fatalf("unexpected default Hosts: %+v", c.Hosts) }
+ m := New(filepath.Join(t.TempDir(), "dns.json"))
+ updated := m.Config(); updated.Hosts = nil
+ if err := m.Save(updated); err != nil { t.Fatal(err) }
+ if err := m.Load(); err != nil { t.Fatal(err) }
+ if len(m.Config().Hosts) != 0 { t.Fatal("deleted default Host must not be restored") }
+}
+
 func TestSaveRejectsNonLoopbackListener(t *testing.T) {
 	m := New(filepath.Join(t.TempDir(), "dns", "config.json"))
 	c := m.Config()

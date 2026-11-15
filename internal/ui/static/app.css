@@ -456,3 +456,5 @@ body{min-height:100vh}
 .dns-core-info{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:var(--accent);color:var(--surface);font:700 12px system-ui;cursor:help}
 .dns-core-section>.dns-panel{margin:0 12px 12px;border-radius:11px}
 @media(max-width:760px){.dns-core-section>summary{min-height:72px;padding:14px;font-size:15px}}
+
+.dns-host-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
