@@ -466,3 +466,5 @@ body{min-height:100vh}
 .dns-protocol-dot{color:#c8b0ff;background:rgba(145,93,231,.24);border:1px solid rgba(174,124,251,.28)}
 .dns-protocol-do53{color:#8ce6b5;background:rgba(30,167,111,.20);border:1px solid rgba(60,194,134,.28)}
 .dns-protocol-other{color:var(--muted);background:var(--surface3);border:1px solid var(--line)}
+/* DNS transport names: colored text only, no pill frame or fill. */
+.dns-protocol-badge{background:transparent!important;border:0!important;border-radius:0;padding:0;box-shadow:none}
