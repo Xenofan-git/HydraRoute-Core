@@ -516,3 +516,7 @@ body{min-height:100vh}
 
 .dns-preset-menu>input[type=search]{margin:5px 0 9px;width:100%}
 .dns-preset-option[hidden]{display:none}
+/* DNS protocol labels: DoH violet, DoT green, Do53 white. */
+.dns-protocol-doh{color:#bc9aff}
+.dns-protocol-dot{color:#78d7a2}
+.dns-protocol-do53{color:#f5f5fa}
