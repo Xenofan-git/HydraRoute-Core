@@ -499,3 +499,11 @@ body{min-height:100vh}
 .dns-add-modal .dns-preset-menu-heading span{color:#c7a9ff}
 .dns-add-modal .dns-preset-option:hover,.dns-add-modal .dns-preset-option:focus-visible{background:rgba(139,92,246,.20)}
 .dns-add-modal input:focus,.dns-add-modal select:focus{outline:2px solid rgba(164,123,255,.65);outline-offset:1px;border-color:#a47bff}
+
+.dns-modal-interface{display:grid;gap:9px}
+.dns-interface-picker{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--surface)}
+.dns-interface-picker[hidden]{display:none}
+.dns-interface-picker input{margin-bottom:9px}
+.dns-interface-list{max-height:260px;overflow-y:auto;margin-top:8px}
+.dns-interface-list .connection-interface-choice{width:100%;text-align:left}
+.dns-modal-interface .connection-interface-tabs button.active{color:#d9c6ff;border-color:#a47bff;background:rgba(139,92,246,.20)}

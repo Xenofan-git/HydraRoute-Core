@@ -24,6 +24,7 @@ type Server struct {
 	Name      string `json:"name"`
 	Protocol  string `json:"protocol"`
 	Address   string `json:"address"`
+	Interface string `json:"interface,omitempty"`
 	Enabled   bool   `json:"enabled"`
 	LatencyMS int64  `json:"latency_ms,omitempty"`
 	Features  string `json:"features,omitempty"`
