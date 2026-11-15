@@ -507,3 +507,9 @@ body{min-height:100vh}
 .dns-interface-list{max-height:260px;overflow-y:auto;margin-top:8px}
 .dns-interface-list .connection-interface-choice{width:100%;text-align:left}
 .dns-modal-interface .connection-interface-tabs button.active{color:#d9c6ff;border-color:#a47bff;background:rgba(139,92,246,.20)}
+/* Softer, single-pixel violet selection for DNS dialog controls. */
+.dns-add-modal .dns-modal-choices button.selected{border:1px solid rgba(165,139,219,.48);background:rgba(139,92,246,.11);color:#d5c6ee;box-shadow:none}
+.dns-add-modal .dns-preset-toggle[aria-expanded=true],.dns-add-modal .dns-modal-interface .dns-preset-toggle[aria-expanded=true]{border:1px solid rgba(165,139,219,.48);box-shadow:none}
+.dns-add-modal .dns-modal-interface .connection-interface-tabs button.active{border:1px solid rgba(165,139,219,.48);background:rgba(139,92,246,.11);color:#d5c6ee;box-shadow:none}
+.dns-add-modal .dns-preset-option:hover,.dns-add-modal .dns-preset-option:focus-visible{background:rgba(139,92,246,.10)}
+.dns-add-modal input:focus,.dns-add-modal select:focus{outline:1px solid rgba(165,139,219,.42);outline-offset:0;border-color:rgba(165,139,219,.48);box-shadow:none}
