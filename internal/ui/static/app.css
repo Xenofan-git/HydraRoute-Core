@@ -513,3 +513,6 @@ body{min-height:100vh}
 .dns-add-modal .dns-modal-interface .connection-interface-tabs button.active{border:1px solid rgba(165,139,219,.48);background:rgba(139,92,246,.11);color:#d5c6ee;box-shadow:none}
 .dns-add-modal .dns-preset-option:hover,.dns-add-modal .dns-preset-option:focus-visible{background:rgba(139,92,246,.10)}
 .dns-add-modal input:focus,.dns-add-modal select:focus{outline:1px solid rgba(165,139,219,.42);outline-offset:0;border-color:rgba(165,139,219,.48);box-shadow:none}
+
+.dns-preset-menu>input[type=search]{margin:5px 0 9px;width:100%}
+.dns-preset-option[hidden]{display:none}

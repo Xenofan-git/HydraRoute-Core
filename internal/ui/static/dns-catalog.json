@@ -1,0 +1,666 @@
+{
+  "source": "https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md",
+  "description": "Supplemental public DoH resolver catalog, DNSCrypt resolver stamps, snapshot 2026-11-15. Not an exact HRNeo catalog.",
+  "providers": [
+    {
+      "name": "a-and-a",
+      "types": {
+        "DOH": "https://dns.aa.net.uk/dns-query"
+      }
+    },
+    {
+      "name": "adfilter-adl",
+      "types": {
+        "DOH": "https://adl.adfilter.net/dns-query"
+      }
+    },
+    {
+      "name": "adfilter-per",
+      "types": {
+        "DOH": "https://per.adfilter.net/dns-query"
+      }
+    },
+    {
+      "name": "adfilter-syd",
+      "types": {
+        "DOH": "https://syd.adfilter.net/dns-query"
+      }
+    },
+    {
+      "name": "adguard-dns-doh",
+      "types": {
+        "DOH": "https://94.140.14.14/dns-query"
+      }
+    },
+    {
+      "name": "adguard-dns-family-doh",
+      "types": {
+        "DOH": "https://94.140.14.15/dns-query"
+      }
+    },
+    {
+      "name": "adguard-dns-unfiltered-doh",
+      "types": {
+        "DOH": "https://94.140.14.140/dns-query"
+      }
+    },
+    {
+      "name": "alidns-doh",
+      "types": {
+        "DOH": "https://223.5.5.5/dns-query"
+      }
+    },
+    {
+      "name": "artikel10-doh-ipv4",
+      "types": {
+        "DOH": "https://dns.artikel10.org/dns-query"
+      }
+    },
+    {
+      "name": "beatquantum",
+      "types": {
+        "DOH": "https://beatquantum.com/dns-query"
+      }
+    },
+    {
+      "name": "blahdns-de-doh",
+      "types": {
+        "DOH": "https://doh-de.blahdns.com/dns-query"
+      }
+    },
+    {
+      "name": "bortzmeyer",
+      "types": {
+        "DOH": "https://doh.bortzmeyer.fr/"
+      }
+    },
+    {
+      "name": "cira-family",
+      "types": {
+        "DOH": "https://family.canadianshield.cira.ca/dns-query"
+      }
+    },
+    {
+      "name": "cira-private",
+      "types": {
+        "DOH": "https://private.canadianshield.cira.ca/dns-query"
+      }
+    },
+    {
+      "name": "cira-protected",
+      "types": {
+        "DOH": "https://protected.canadianshield.cira.ca/dns-query"
+      }
+    },
+    {
+      "name": "circl-doh",
+      "types": {
+        "DOH": "https://dns.circl.lu/dns-query"
+      }
+    },
+    {
+      "name": "cisco-doh",
+      "types": {
+        "DOH": "https://doh.opendns.com/dns-query"
+      }
+    },
+    {
+      "name": "cleanbrowsing-adult-doh",
+      "types": {
+        "DOH": "https://cleanbrowsing.org/doh/adult-filter"
+      }
+    },
+    {
+      "name": "cleanbrowsing-family-doh",
+      "types": {
+        "DOH": "https://cleanbrowsing.org/doh/family-filter"
+      }
+    },
+    {
+      "name": "cleanbrowsing-security-doh",
+      "types": {
+        "DOH": "https://cleanbrowsing.org/doh/security-filter"
+      }
+    },
+    {
+      "name": "cloudflare",
+      "types": {
+        "DOH": "https://dns.cloudflare.com/dns-query"
+      }
+    },
+    {
+      "name": "cloudflare-family",
+      "types": {
+        "DOH": "https://1.0.0.3/dns-query"
+      }
+    },
+    {
+      "name": "cloudflare-security",
+      "types": {
+        "DOH": "https://1.0.0.2/dns-query"
+      }
+    },
+    {
+      "name": "comss.one",
+      "types": {
+        "DOH": "https://dns.comss.one/dns-query"
+      }
+    },
+    {
+      "name": "controld-block-malware",
+      "types": {
+        "DOH": "https://freedns.controld.com/p1"
+      }
+    },
+    {
+      "name": "controld-block-malware-ad",
+      "types": {
+        "DOH": "https://freedns.controld.com/p2"
+      }
+    },
+    {
+      "name": "controld-block-malware-ad-social",
+      "types": {
+        "DOH": "https://freedns.controld.com/p3"
+      }
+    },
+    {
+      "name": "controld-family-friendly",
+      "types": {
+        "DOH": "https://freedns.controld.com/family"
+      }
+    },
+    {
+      "name": "controld-uncensored",
+      "types": {
+        "DOH": "https://freedns.controld.com/uncensored"
+      }
+    },
+    {
+      "name": "controld-unfiltered",
+      "types": {
+        "DOH": "https://freedns.controld.com/p0"
+      }
+    },
+    {
+      "name": "dns.digitale-gesellschaft.ch",
+      "types": {
+        "DOH": "https://dns.digitale-gesellschaft.ch/dns-query"
+      }
+    },
+    {
+      "name": "dns.digitalsize.net",
+      "types": {
+        "DOH": "https://dns.digitalsize.net/dns-query"
+      }
+    },
+    {
+      "name": "dns.sb",
+      "types": {
+        "DOH": "https://185.222.222.222/dns-query"
+      }
+    },
+    {
+      "name": "dns4all-ipv4",
+      "types": {
+        "DOH": "https://doh.dns4all.eu/dns-query"
+      }
+    },
+    {
+      "name": "dns4eu",
+      "types": {
+        "DOH": "https://unfiltered.joindns4.eu/dns-query"
+      }
+    },
+    {
+      "name": "dns4eu-protective",
+      "types": {
+        "DOH": "https://protective.joindns4.eu/dns-query"
+      }
+    },
+    {
+      "name": "dnsbunker",
+      "types": {
+        "DOH": "https://dnsbunker.org/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-adelaide-ipv4",
+      "types": {
+        "DOH": "https://adl01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-allendale-ipv4",
+      "types": {
+        "DOH": "https://aqx01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-allentown-ipv4",
+      "types": {
+        "DOH": "https://abe01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-amsterdam-ipv4",
+      "types": {
+        "DOH": "https://ams01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-amsterdam02-ipv4",
+      "types": {
+        "DOH": "https://ams02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-amsterdam03-ipv4",
+      "types": {
+        "DOH": "https://ams03.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-ashburn-ipv4",
+      "types": {
+        "DOH": "https://abn01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-atlanta-ipv4",
+      "types": {
+        "DOH": "https://atl01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-auckland-ipv4",
+      "types": {
+        "DOH": "https://akl01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-bengaluru-ipv4",
+      "types": {
+        "DOH": "https://blr01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-berkeleysprings-ipv4",
+      "types": {
+        "DOH": "https://bei01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-bratislava-ipv4",
+      "types": {
+        "DOH": "https://bts01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-bremen-ipv4",
+      "types": {
+        "DOH": "https://bre01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-brisbane-ipv4",
+      "types": {
+        "DOH": "https://bne01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-bucharest-ipv4",
+      "types": {
+        "DOH": "https://buh01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-calgary-ipv4",
+      "types": {
+        "DOH": "https://yyc01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-capetown-ipv4",
+      "types": {
+        "DOH": "https://cpt01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-capetown02-ipv4",
+      "types": {
+        "DOH": "https://cpt02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-chicago-ipv4",
+      "types": {
+        "DOH": "https://ord01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-chisinau-ipv4",
+      "types": {
+        "DOH": "https://kiv01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-copenhagen-ipv4",
+      "types": {
+        "DOH": "https://cph01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-coventry-ipv4",
+      "types": {
+        "DOH": "https://cvt01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-dallas-ipv4",
+      "types": {
+        "DOH": "https://dfw02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-denver-ipv4",
+      "types": {
+        "DOH": "https://den01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-detroit-ipv4",
+      "types": {
+        "DOH": "https://dtw01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-dhaka-ipv4",
+      "types": {
+        "DOH": "https://dac01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-dublin-ipv4",
+      "types": {
+        "DOH": "https://dub01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-dusseldorf-ipv4",
+      "types": {
+        "DOH": "https://dus01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-dusseldorf02-ipv4",
+      "types": {
+        "DOH": "https://dus02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-dusseldorf03-ipv4",
+      "types": {
+        "DOH": "https://dus03.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-ebenecity02-ipv4",
+      "types": {
+        "DOH": "https://mru02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-eygelshoven-ipv4",
+      "types": {
+        "DOH": "https://eyg01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-flint-ipv4",
+      "types": {
+        "DOH": "https://fnt01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-frankfurt-ipv4",
+      "types": {
+        "DOH": "https://fra01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-frankfurt02-ipv4",
+      "types": {
+        "DOH": "https://fra02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-fremont02-ipv4",
+      "types": {
+        "DOH": "https://fet02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-gdansk-ipv4",
+      "types": {
+        "DOH": "https://gdn01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-geneva-ipv4",
+      "types": {
+        "DOH": "https://gva01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-grandrapids-ipv4",
+      "types": {
+        "DOH": "https://grr01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-hafnarfjordur-ipv4",
+      "types": {
+        "DOH": "https://haf01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-halifax-ipv4",
+      "types": {
+        "DOH": "https://yhz01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-hanoi-ipv4",
+      "types": {
+        "DOH": "https://han01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-helsinki-ipv4",
+      "types": {
+        "DOH": "https://hel01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-hochiminhcity-ipv4",
+      "types": {
+        "DOH": "https://sgn01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-hongkong-ipv4",
+      "types": {
+        "DOH": "https://hkg01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-hongkong02-ipv4",
+      "types": {
+        "DOH": "https://hkg02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-hongkong03-ipv4",
+      "types": {
+        "DOH": "https://hkg03.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-houston-ipv4",
+      "types": {
+        "DOH": "https://iah01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-hudiksvall-ipv4",
+      "types": {
+        "DOH": "https://huv01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-ikeja-ipv4",
+      "types": {
+        "DOH": "https://los02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-indianapolis-ipv4",
+      "types": {
+        "DOH": "https://ind01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-islamabad-ipv4",
+      "types": {
+        "DOH": "https://isb01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-istanbul-ipv4",
+      "types": {
+        "DOH": "https://ist01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-jacksonville-ipv4",
+      "types": {
+        "DOH": "https://jax01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-jakarta-ipv4",
+      "types": {
+        "DOH": "https://jkt01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-johannesburg-ipv4",
+      "types": {
+        "DOH": "https://jnb01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-johannesburg02-ipv4",
+      "types": {
+        "DOH": "https://jnb02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-johor-ipv4",
+      "types": {
+        "DOH": "https://jhb01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-kansascity-ipv4",
+      "types": {
+        "DOH": "https://mci01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-kyiv02-ipv4",
+      "types": {
+        "DOH": "https://iev02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-lasvegas-ipv4",
+      "types": {
+        "DOH": "https://las01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-libertylake-ipv4",
+      "types": {
+        "DOH": "https://llk01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-lisbon-ipv4",
+      "types": {
+        "DOH": "https://lis01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-lisbon02-ipv4",
+      "types": {
+        "DOH": "https://lis02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-london-ipv4",
+      "types": {
+        "DOH": "https://lon01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-losangeles-ipv4",
+      "types": {
+        "DOH": "https://lax01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-losangeles02-ipv4",
+      "types": {
+        "DOH": "https://lax02.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-madrid-ipv4",
+      "types": {
+        "DOH": "https://mad01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-manchester-ipv4",
+      "types": {
+        "DOH": "https://man01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-marseille-ipv4",
+      "types": {
+        "DOH": "https://mrs01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-melbourne-ipv4",
+      "types": {
+        "DOH": "https://mel01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-miami-ipv4",
+      "types": {
+        "DOH": "https://mia01.dnscry.pt/dns-query"
+      }
+    },
+    {
+      "name": "dnscry.pt-doh-milan-ipv4",
+      "types": {
+        "DOH": "https://mil01.dnscry.pt/dns-query"
+      }
+    }
+  ]
+}
