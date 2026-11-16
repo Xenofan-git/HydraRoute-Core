@@ -20,3 +20,9 @@ Do **not** change Core's DNS precedence based on an unverified assumption about 
 - Read-only SSH inspection of NanoPi found no installed `hrdns` executable, SmartDNS process, or expected original HRDNS configuration at the checked locations. This does not establish absence from Keenetic/Entware, which was not changed or inspected in this step.
 - Added `TestDomainGroupFallbackAndFailClosed`: a failed first Do53 server correctly falls back to the second server within the same domain group; if no group server succeeds, the general resolver is not consulted, including when the only assigned server is disabled.
 - Existing tests confirm Core's SmartDNS-first behavior; no evidence was obtained that original HRDNS uses the same cross-component precedence. Production routing remains untouched.
+
+## Original configuration retrieval attempt (2026-11-16)
+- Static analysis identifies the original HRDNS config at `/opt/etc/HydraRoute/dns/hrdns.conf` (see original HRDNS research, line 36).
+- Tailscale lists `keenetic-hopper` at `100.106.59.54`. Read-only SSH attempts from both Moscow `dev-vps` and Amsterdam `ams-1-vm-skeg` were rejected with `Permission denied (password)`; no configuration was retrieved and no remote state was modified.
+- NanoPi does not have the original HRDNS installed at checked paths. Do not infer original precedence from SmartDNS capabilities alone.
+- Next evidence needed: authorized read-only retrieval of original `hrdns.conf`, with secrets/credentials redacted, and a controlled test of conflicting domain/group assignments. Do not deploy experimental DNS changes to Keenetic.
