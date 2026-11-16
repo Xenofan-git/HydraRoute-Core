@@ -80,3 +80,57 @@ func TestDomainGroupForwardingWithSmartDNSPriority(t *testing.T) {
 		t.Fatalf("SmartDNS priority not preserved: smart=%d group=%d", smartHits.Load(), groupHits.Load())
 	}
 }
+
+func TestDomainGroupFallbackAndFailClosed(t *testing.T) {
+	var backupHits, defaultHits atomic.Int32
+	backupAddr := startFakeDNSUpstream(t, "203.0.113.41", &backupHits)
+	defaultAddr := startFakeDNSUpstream(t, "203.0.113.42", &defaultHits)
+	m := New(filepath.Join(t.TempDir(), "dns.json"))
+	c := m.Config()
+	c.AutoProvider = false
+	c.Servers = []Server{{Name: "broken", Protocol: "Do53", Address: "127.0.0.1:1", Enabled: true}, {Name: "backup", Protocol: "Do53", Address: backupAddr, Enabled: true}, {Name: "default", Protocol: "Do53", Address: defaultAddr, Enabled: true}}
+	c.DefaultProvider = "default"
+	c.DomainGroups = []DomainGroup{{Name: "video", Domains: []string{"youtube.com"}, Servers: []string{"broken", "backup"}}}
+	if err := m.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	query := func() (*mdns.Msg, *mdns.Msg) {
+		q := new(mdns.Msg)
+		q.SetQuestion("youtube.com.", mdns.TypeA)
+		r := new(mdns.Msg)
+		r.SetReply(q)
+		return q, r
+	}
+	q, r := query()
+	if err := m.forward(q, r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Answer) != 1 || r.Answer[0].(*mdns.A).A.String() != "203.0.113.41" {
+		t.Fatalf("backup not used: %+v", r.Answer)
+	}
+	if backupHits.Load() != 1 || defaultHits.Load() != 0 {
+		t.Fatalf("unexpected fallback: backup=%d default=%d", backupHits.Load(), defaultHits.Load())
+	}
+	c.DomainGroups[0].Servers = []string{"broken"}
+	if err := m.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	q, r = query()
+	if err := m.forward(q, r); err == nil {
+		t.Fatal("expected group failure")
+	}
+	if defaultHits.Load() != 0 {
+		t.Fatal("group failure leaked to general DNS")
+	}
+	c.Servers[0].Enabled = false
+	if err := m.Save(c); err != nil {
+		t.Fatal(err)
+	}
+	q, r = query()
+	if err := m.forward(q, r); err == nil {
+		t.Fatal("disabled group DNS must fail closed")
+	}
+	if defaultHits.Load() != 0 {
+		t.Fatal("disabled group DNS leaked to general DNS")
+	}
+}

@@ -15,3 +15,8 @@ Original HRDNS is a standalone resolver based on SmartDNS 48.4, not the Core fro
 
 ## Decision and remaining work
 Do **not** change Core's DNS precedence based on an unverified assumption about HRNeo. To claim exact original compatibility, collect an original HRDNS generated configuration and run controlled queries with conflicting domain/rule/general assignments on an isolated test environment. Then design mapping from DNS Service UI groups to SmartDNS native named upstream groups (including Do53/DoT/DoH, server enablement, conflicts, and fail-closed behavior). Do not expose global routing or modify Keenetic/NanoPi production DNS during this investigation.
+
+## Follow-up verification (2026-11-16)
+- Read-only SSH inspection of NanoPi found no installed `hrdns` executable, SmartDNS process, or expected original HRDNS configuration at the checked locations. This does not establish absence from Keenetic/Entware, which was not changed or inspected in this step.
+- Added `TestDomainGroupFallbackAndFailClosed`: a failed first Do53 server correctly falls back to the second server within the same domain group; if no group server succeeds, the general resolver is not consulted, including when the only assigned server is disabled.
+- Existing tests confirm Core's SmartDNS-first behavior; no evidence was obtained that original HRDNS uses the same cross-component precedence. Production routing remains untouched.
