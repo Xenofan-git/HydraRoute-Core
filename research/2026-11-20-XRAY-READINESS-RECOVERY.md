@@ -37,3 +37,14 @@ Results, obtained with `curl --noproxy "" --socks5-hostname 127.0.0.1:19090 http
 - The independently managed HydraRoute Core Xray stayed running with PID `7598` throughout all three phases.
 
 This is a controlled target-link interruption, **not** a physical LTE modem disconnection, kernel interface down, or complete WAN blackout. It establishes data-plane recovery for a local Xray SOCKS5 direct outbound, not recovery of all real VLESS/Hysteria2 subscription nodes. The test Xray and target HTTP server were terminated after the experiment; no production device was modified.
+
+## Isolated virtual WAN interface down/up (2026-11-21)
+Ran on the existing Debian ARM64 QEMU VM, with **two newly created isolated Linux network namespaces** `hrcore-wan-a` and `hrcore-wan-b` connected only by a veth pair (`10.231.77.1/30` to `10.231.77.2/30`). A separate real ARM64 Xray served SOCKS5 on `127.0.0.1:19091` inside namespace A, and Python HTTP served on `10.231.77.2:18997` inside namespace B. No default routes, host interfaces or physical LTE links were changed.
+
+- Baseline `curl` via SOCKS5: HTTP 200.
+- `ip -n hrcore-wan-a link set hrcwan0 down`: SOCKS5 request failed with curl 56 / HTTP 000.
+- `ip -n hrcore-wan-a link set hrcwan0 up`: SOCKS5 request again returned HTTP 200 without restarting the test Xray.
+- The independently managed Core Xray retained PID 7598, and Health Monitor reported `healthy` for both Xray and SOCKS5 after the test.
+- Both namespaces and test processes were cleaned up; `ip netns list` returned empty.
+
+**Limitations:** This confirms virtual-interface interruption and recovery for an isolated direct SOCKS5 path. It does not exercise the actual Core Observatory balancer or real subscription-node recovery. The `/v1/observatory/status` endpoint requires a valid profile ID and returned `profile not found` when queried without one. A separate targeted Observatory/real-node test remains pending; do not claim balancer restoration based on this result alone.
