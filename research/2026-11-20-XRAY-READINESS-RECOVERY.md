@@ -26,3 +26,14 @@ VM: existing isolated QEMU Debian aarch64 under `/srv/development/isolated-check
 - Within the five-minute cooldown, issued a second `SIGSTOP` to PID 7598 for 42 seconds, then `SIGCONT`. PID remained 7598 and the number of `xray_unresponsive_restarted` events remained exactly one. This validates no immediate restart loop during cooldown.
 - SOCKS5 Health Monitor now performs a local RFC1928 no-auth greeting for enabled loopback profile inbounds. It never calls a public test host; thus an LTE outage cannot itself mark the local SOCKS5 handshake as failed. It detects whether the local inbound accepts a greeting, **not** whether proxied outbound traffic reaches the Internet. A separate end-to-end probe must be informational and must not trigger restarts on WAN loss.
 - No production NanoPi, Keenetic, MTS or Beeline configuration was changed.
+
+## Real ARM64 Xray SOCKS5 data-plane outage simulation (2026-11-21)
+Ran a **separate isolated Xray** inside the existing ARM64 VM with loopback SOCKS5 inbound `127.0.0.1:19090` and `freedom` outbound. Its target was a loopback HTTP server at `127.0.0.1:18996`, representing a reachable/unreachable upstream. The isolated test configuration was validated with `xray run -test` before use.
+
+Results, obtained with `curl --noproxy "" --socks5-hostname 127.0.0.1:19090 http://127.0.0.1:18996/`:
+- Target online: HTTP 200 via SOCKS5.
+- Target terminated: curl error 56, connection reset; HTTP 000.
+- Target restarted: HTTP 200 via SOCKS5 without restarting the Xray proxy.
+- The independently managed HydraRoute Core Xray stayed running with PID `7598` throughout all three phases.
+
+This is a controlled target-link interruption, **not** a physical LTE modem disconnection, kernel interface down, or complete WAN blackout. It establishes data-plane recovery for a local Xray SOCKS5 direct outbound, not recovery of all real VLESS/Hysteria2 subscription nodes. The test Xray and target HTTP server were terminated after the experiment; no production device was modified.
