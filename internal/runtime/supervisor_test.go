@@ -205,3 +205,41 @@ while :; do sleep 0.1; done`
 		t.Fatal("recovery overrode manual Stop")
 	}
 }
+
+func TestRestartIfRunningPreservesDesiredAndHonorsOperatorStop(t *testing.T) {
+	binary := fakeXray(t, `if [ "$2" = "-test" ]; then exit 0; fi
+trap 'exit 0' TERM
+while :; do sleep 0.1; done`)
+	s, err := NewSupervisor(binary, filepath.Join(t.TempDir(), "private", "xray.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Prepare(context.Background(), []byte(`{"inbounds":[],"outbounds":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	initial := s.Status()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if restarted, err := s.RestartIfRunning(ctx, initial.PID+1); err != nil || restarted {
+		t.Fatalf("stale PID restarted=%v err=%v", restarted, err)
+	}
+	if s.Status().PID != initial.PID {
+		t.Fatal("stale PID changed process")
+	}
+	if restarted, err := s.RestartIfRunning(ctx, initial.PID); err != nil || !restarted {
+		t.Fatalf("restart=%v err=%v", restarted, err)
+	}
+	next := s.Status()
+	if !next.Desired || !next.Running || next.PID == initial.PID {
+		t.Fatalf("unexpected state after restart: %+v", next)
+	}
+	if err := s.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if restarted, err := s.RestartIfRunning(ctx, next.PID); err != nil || restarted {
+		t.Fatalf("operator stop bypassed: restarted=%v err=%v", restarted, err)
+	}
+}

@@ -455,6 +455,13 @@ func (s *Server) runProcessRecovery(ctx context.Context) {
 			})
 		}()
 	}
+	if s.refreshOpts.AutoStart && s.supervisor != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.runXrayReadinessRecovery(ctx)
+		}()
+	}
 	if s.refreshOpts.AutoStart && s.smartDNSRuntime != nil {
 		wg.Add(1)
 		go func() {
@@ -472,6 +479,57 @@ func (s *Server) runProcessRecovery(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+}
+
+// runXrayReadinessRecovery handles a live process whose control API has
+// stopped responding. Three consecutive failures and a five-minute cooldown
+// avoid restarting Xray for transient Observatory/control API hiccups.
+func (s *Server) runXrayReadinessRecovery(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	failures := 0
+	var lastRestart time.Time
+	var observedPID int
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		status := s.supervisor.Status()
+		if !status.Configured || !status.Desired || !status.Running || status.PID == 0 {
+			failures, observedPID = 0, 0
+			continue
+		}
+		if status.PID != observedPID {
+			failures, observedPID = 0, status.PID
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_, err := xrayapi.GetOutboundStatus(probeCtx, s.observatoryAPIAddress())
+		cancel()
+		if err == nil {
+			failures = 0
+			continue
+		}
+		failures++
+		if failures < 3 || time.Since(lastRestart) < 5*time.Minute {
+			continue
+		}
+		s.opMu.Lock()
+		restartCtx, restartCancel := context.WithTimeout(ctx, 8*time.Second)
+		restarted, restartErr := s.supervisor.RestartIfRunning(restartCtx, status.PID)
+		restartCancel()
+		s.opMu.Unlock()
+		failures = 0
+		if restarted {
+			lastRestart = time.Now()
+			if restartErr != nil {
+				s.recordEvent("error", "runtime", "xray_unresponsive_restart_failed", "Managed Xray control API unresponsive; restart failed")
+			} else {
+				s.recordEvent("warning", "runtime", "xray_unresponsive_restarted", "Managed Xray restarted after repeated control API failures")
+			}
+		}
+	}
 }
 
 func (s *Server) runRecoveryLoop(ctx context.Context, component string, recoverFn func(context.Context) error) {

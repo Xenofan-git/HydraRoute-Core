@@ -254,6 +254,41 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	}
 }
 
+// RestartIfRunning replaces only the expected, still-desired managed process.
+// It never restarts an operator-stopped Xray or a newer process with a different PID.
+func (s *Supervisor) RestartIfRunning(ctx context.Context, expectedPID int) (bool, error) {
+	s.mu.Lock()
+	if !s.desired || !s.configured || !s.running || s.cmd == nil || s.cmd.Process == nil || s.cmd.Process.Pid != expectedPID {
+		s.mu.Unlock()
+		return false, nil
+	}
+	cmd, done := s.cmd, s.done
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		s.mu.Unlock()
+		return false, err
+	}
+	s.mu.Unlock()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		_ = cmd.Process.Kill()
+		return false, ctx.Err()
+	case <-time.After(3 * time.Second):
+		_ = cmd.Process.Kill()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.desired || !s.configured || s.running {
+		return false, nil
+	}
+	return true, s.startLocked(ctx)
+}
+
 func (s *Supervisor) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
