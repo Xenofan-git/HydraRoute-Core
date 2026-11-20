@@ -15,3 +15,6 @@ Process-only supervision recovers exited Xray, but a live Xray process can stop 
 - A responsive gRPC control API does not prove end-to-end SOCKS5 forwarding. Add an independent, opt-in, local SOCKS5 handshake probe before claiming full data-plane recovery.
 - A nonresponsive control API may be due to an API listener or port configuration issue rather than Xray itself. The three-failure threshold and cooldown reduce restart storms but do not diagnose this distinction.
 - Production NanoPi has an older Core build and was not modified. Run isolated ARM64 fault injection before any production rollout.
+
+## Simulated LTE outage (2026-11-20)
+Added `TestSimulatedLTEOutageRecovery`: local HTTP upstream returns 204 when link-up and 503 when link-down; Core's existing recovery retry loop is run against this deterministic connectivity gate. Test confirms initial reachability, failure detection during simulated outage, and successful retry after restoration (~5s). This does **not** change the system's actual LTE interface, DNS, routes or Tailscale, and does **not** validate real Xray/SOCKS5 data-plane restoration. An isolated ARM64 VM network-namespace/packet-loss test with managed Xray remains necessary.
