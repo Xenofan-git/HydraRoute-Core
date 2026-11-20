@@ -899,6 +899,27 @@ func (s *Server) runHealthMonitor(ctx context.Context) {
 	}
 }
 
+func probeLocalSOCKS5(ctx context.Context, address string) error {
+	d := net.Dialer{Timeout: time.Second}
+	conn, err := d.DialContext(ctx, "tcp", address)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(time.Second))
+	if _, err = conn.Write([]byte{5, 1, 0}); err != nil {
+		return err
+	}
+	var reply [2]byte
+	if _, err = io.ReadFull(conn, reply[:]); err != nil {
+		return err
+	}
+	if reply != [2]byte{5, 0} {
+		return fmt.Errorf("SOCKS5 greeting rejected")
+	}
+	return nil
+}
+
 func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 	s.healthCheckMu.Lock()
 	defer s.healthCheckMu.Unlock()
@@ -926,6 +947,39 @@ func (s *Server) runHealthCheck(ctx context.Context) health.Snapshot {
 				add("xray", "failed", "Xray control API did not respond")
 			} else {
 				add("xray", "healthy", "Xray process and control API are responding")
+			}
+		}
+	}
+	// A loopback SOCKS5 greeting tests the inbound data plane without relying
+	// on LTE or any external destination. External connectivity is a separate
+	// metric and must not trigger an Xray restart during an LTE outage.
+	if s.supervisor != nil && s.supervisor.Status().Running && s.profileStore != nil {
+		if items, err := s.profileStore.ListProfiles(); err != nil {
+			add("socks5", "warning", "SOCKS5 profile list unavailable")
+		} else {
+			checked, failed := 0, 0
+			for _, p := range items {
+				if !p.Enabled || p.Port == 0 {
+					continue
+				}
+				host := p.Listen
+				if host == "" || host == "0.0.0.0" || host == "::" {
+					host = "127.0.0.1"
+				}
+				if host != "127.0.0.1" && host != "::1" {
+					continue
+				}
+				checked++
+				if err := probeLocalSOCKS5(ctx, net.JoinHostPort(host, strconv.Itoa(int(p.Port)))); err != nil {
+					failed++
+				}
+			}
+			if checked == 0 {
+				add("socks5", "not_configured", "No loopback SOCKS5 inbound to probe")
+			} else if failed != 0 {
+				add("socks5", "failed", fmt.Sprintf("%d of %d local SOCKS5 inbounds failed", failed, checked))
+			} else {
+				add("socks5", "healthy", fmt.Sprintf("%d local SOCKS5 inbounds accept handshakes", checked))
 			}
 		}
 	}
